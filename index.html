@@ -32,6 +32,7 @@
     margin: 0 auto;
     padding: 22px 16px 60px;
     line-height: 1.5;
+    position: relative;
   }
   .head { text-align: center; margin-bottom: 22px; }
   .head .icon { font-size: 30px; }
@@ -333,6 +334,7 @@
 </style>
 
 <div class="wrap">
+  <div id="verBadge" style="position:absolute; top:12px; right:14px; font-size:10.5px; font-weight:800; color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:20px; padding:3px 9px; z-index:5;">v—</div>
   <div class="head">
     <div class="icon">🍼</div>
     <h1>Journal de suivi</h1>
@@ -622,6 +624,12 @@
   })();
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
+
+  const APP_VERSION = '3.0';
+  (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
+  document.addEventListener('DOMContentLoaded', () => {
+    const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
+  });
 
   const skinColors = { verte: 'var(--green)', surveiller: 'var(--amber)', traiter: 'var(--coral)' };
   const skinShort = { verte: '✓', surveiller: '!', traiter: '⚠' };
