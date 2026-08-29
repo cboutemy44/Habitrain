@@ -345,6 +345,20 @@
   .outfit-row .body .wear { font-size:14px; font-weight:800; color:var(--ink); margin-top:1px; }
   .outfit-row.now-block { background:#EAF4EC; border-radius:10px; padding:10px 11px; border:1.5px solid #bcdcc0; }
   .outfit-note { font-size:11.5px; font-weight:700; color:var(--muted); margin-top:10px; line-height:1.45; }
+
+  /* entorses */
+  .breach-card { border:1.5px solid #eecdbf; background:#FCF4F0; }
+  .breach-card h2 { color:#a8543b; }
+  .breach-row { display:flex; align-items:flex-start; gap:11px; padding:10px 0; border-top:1px solid #f0ddd4; cursor:pointer; }
+  .breach-row:first-of-type { border-top:none; }
+  .breach-box { width:22px; height:22px; border-radius:6px; border:2px solid #d9b6a8; flex:none; margin-top:1px; display:flex; align-items:center; justify-content:center; font-size:14px; color:#fff; transition:all .12s; }
+  .breach-row.on .breach-box { background:var(--coral); border-color:var(--coral); }
+  .breach-row .info .n { font-size:13.5px; font-weight:800; color:var(--ink); }
+  .breach-row .info .g { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.03em; margin-top:1px; }
+  .breach-row .info .g.grave { color:#a8543b; } .breach-row .info .g.moyenne { color:#9a742a; } .breach-row .info .g.legere { color:#5c9463; }
+  .breach-summary { margin-top:12px; font-size:12.5px; font-weight:800; padding:10px 12px; border-radius:11px; }
+  .breach-summary.none { background:#EDF5EE; color:#4c7a51; }
+  .breach-summary.some { background:#FBEBE5; color:#a8543b; }
 </style>
 
 <div class="wrap">
@@ -443,6 +457,13 @@
         <div class="sup-note" id="supOnce" style="display:none;font-style:italic">🔒 Un seul tirage par jour — l'équipement du jour est fixé.</div>
       </div>
     </div>
+  </div>
+
+  <div class="card breach-card" id="breachCard">
+    <h2>Entorses du jour</h2>
+    <div class="sub">Déclare honnêtement les écarts au cadre. Valables pour la journée, ils pèsent sur ta note d'habituation.</div>
+    <div id="breachList"></div>
+    <div class="breach-summary none" id="breachSummary">Aucune entorse déclarée aujourd'hui. 👍</div>
   </div>
 
   <div class="card">
@@ -646,7 +667,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '3.8';
+  const APP_VERSION = '3.9';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -947,6 +968,66 @@
     }
   }
 
+  /* ---- Entorses du jour ---- */
+  const BREACHES = [
+    { id:'b_retrait_hors', n:'Retrait de couche hors heures autorisées', grav:'grave',   w:12 },
+    { id:'b_cadre',        n:'Sortie du cadre ABDL (habit adulte prolongé)', grav:'grave', w:12 },
+    { id:'b_retrait_2h',   n:'Couche retirée plus de 2h',               grav:'moyenne', w:7 },
+    { id:'b_pilier',       n:'Change pilier sauté (matin ou soir)',     grav:'moyenne', w:7 },
+    { id:'b_hors_couche',  n:'Miction/selle hors couche (hors fenêtres)', grav:'moyenne', w:7 },
+    { id:'b_hydra',        n:'Hydratation négligée (biberons non bus)', grav:'legere',  w:3 }
+  ];
+  const GRAV_LABEL = { grave:'Grave', moyenne:'Moyenne', legere:'Légère' };
+
+  async function getBreaches(date) {
+    try { const r = await window.storage.get('breach:'+date); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
+    return {};
+  }
+  async function saveBreaches(date, obj) {
+    try { await window.storage.set('breach:'+date, JSON.stringify(obj)); } catch(e) {}
+  }
+  // total de pénalité (0-100) pour une date donnée
+  async function breachPenalty(date) {
+    const on = await getBreaches(date);
+    let p = 0;
+    BREACHES.forEach(b => { if (on[b.id]) p += b.w; });
+    return Math.min(40, p); // plafonné pour ne pas écraser tout le score
+  }
+
+  async function renderBreaches() {
+    const list = document.getElementById('breachList');
+    const current = await getBreaches(todayStr());
+    list.innerHTML = '';
+    BREACHES.forEach(b => {
+      const on = !!current[b.id];
+      const row = document.createElement('div');
+      row.className = 'breach-row' + (on ? ' on' : '');
+      row.innerHTML = '<div class="breach-box">'+(on?'✓':'')+'</div>'+
+        '<div class="info"><div class="n">'+b.n+'</div><div class="g '+b.grav+'">'+GRAV_LABEL[b.grav]+'</div></div>';
+      row.addEventListener('click', async () => {
+        const cur = await getBreaches(todayStr());
+        cur[b.id] = !cur[b.id];
+        if (!cur[b.id]) delete cur[b.id];
+        await saveBreaches(todayStr(), cur);
+        await renderBreaches();
+        try { await renderDashboard(await getAll()); } catch(e) {}
+      });
+      list.appendChild(row);
+    });
+    // résumé
+    const count = BREACHES.filter(b => current[b.id]).length;
+    const summary = document.getElementById('breachSummary');
+    if (count === 0) {
+      summary.className = 'breach-summary none';
+      summary.textContent = 'Aucune entorse déclarée aujourd\'hui. 👍';
+    } else {
+      let pen = 0; BREACHES.forEach(b => { if (current[b.id]) pen += b.w; });
+      pen = Math.min(40, pen);
+      summary.className = 'breach-summary some';
+      summary.textContent = count + ' entorse' + (count>1?'s':'') + ' déclarée' + (count>1?'s':'') + ' · −' + pen + ' pts sur la note du jour';
+    }
+  }
+
   // Tableau de bord : niveau d'HABITUATION aux couches sur tout le programme
   async function renderDashboard(entries) {
     const byDate = {}; entries.forEach(e => byDate[e.date] = e);
@@ -1013,8 +1094,14 @@
       trendTxt = (recent.flags || 0) + '';
     }
 
-    // --- Score d'habituation : régularité 35 + réflexes 35 + ancienneté 30 ---
-    const score = Math.round(regScore*35 + reflexScore*35 + ageScore*30);
+    // --- Pénalité entorses : moyenne des 7 derniers jours ---
+    let breachPen = 0;
+    for (const d of last7) { breachPen += await breachPenalty(d); }
+    breachPen = breachPen / last7.length; // moyenne (0-40)
+
+    // --- Score d'habituation : régularité 35 + réflexes 35 + ancienneté 30, moins entorses ---
+    const rawScore = regScore*35 + reflexScore*35 + ageScore*30;
+    const score = Math.max(0, Math.round(rawScore - breachPen));
 
     // --- Palier : bridé par l'ancienneté (l'habituation prend du temps) ---
     // étape par le score (qualité) et étape par les jours écoulés ; on prend la plus basse.
@@ -1056,6 +1143,7 @@
     else if (recent.flags > 0)
       appr.push(recent.flags + ' situation'+(recent.flags>1?'s':'')+' à corriger cette semaine : regarde à quels moments ça décroche.');
     if (treatRecent > 0) appr.push('⚠️ Peau <b>à traiter</b> récemment : côté santé, resserre changes et crème — indépendamment de l\'habituation.');
+    if (breachPen >= 1) appr.push('📋 Entorses déclarées récemment : elles pèsent sur ta note (−'+Math.round(breachPen)+' pts en moyenne). L\'honnêteté du suivi compte autant que la performance.');
 
     setDash(cls, score+'%', label, since,
       score+'%', 'Habituation',
@@ -2036,6 +2124,7 @@
     await renderCheckStat();
     await renderMoment();
     await renderSupMode();
+    await renderBreaches();
     // preload today's entry if it exists
     try {
       const r = await window.storage.get('day:'+todayStr());
