@@ -308,6 +308,28 @@
   .wear-bar.ok { background:var(--green); } .wear-bar.mid { background:var(--amber); } .wear-bar.long { background:var(--coral); }
   .wear-dur { font-size:12px; font-weight:800; width:52px; flex:none; text-align:right; }
   .wear-empty { color:var(--muted); font-size:13px; text-align:center; padding:10px 0; font-weight:600; }
+
+  /* réglages */
+  .settings-toggle-btn {
+    background:none; border:1.5px solid var(--line); border-radius:11px; padding:7px 12px;
+    font-family:inherit; font-size:12.5px; font-weight:800; color:var(--blue-deep); cursor:pointer;
+    display:inline-flex; align-items:center; gap:6px;
+  }
+  .set-cat { margin-top:6px; }
+  .set-cat h4 { font-family:'Fraunces',serif; font-weight:600; font-size:14px; color:var(--ink); margin:14px 0 8px; }
+  .set-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 0; border-top:1px solid var(--line); }
+  .set-row:first-of-type { border-top:none; }
+  .set-row .info .n { font-size:13.5px; font-weight:800; color:var(--ink); }
+  .set-row .info .d { font-size:11.5px; font-weight:600; color:var(--muted); margin-top:1px; }
+  .perm-banner {
+    display:flex; gap:9px; align-items:center; background:var(--blue-soft); border:1.5px solid #cdd3f0;
+    border-radius:12px; padding:11px 13px; margin-bottom:12px; font-size:12.5px; font-weight:700; color:var(--blue-deep);
+  }
+  .perm-banner button {
+    margin-left:auto; flex:none; font-family:inherit; font-size:12.5px; font-weight:800; padding:8px 12px;
+    border:none; border-radius:10px; background:var(--blue); color:#fff; cursor:pointer;
+  }
+  .set-note { font-size:11.5px; font-weight:700; color:var(--muted); margin-top:12px; line-height:1.45; }
 </style>
 
 <div class="wrap">
@@ -315,9 +337,27 @@
     <div class="icon">🍼</div>
     <h1>Journal de suivi</h1>
     <p>Immersion 24/7 · 2 min matin & soir</p>
+    <div style="margin-top:10px"><button class="settings-toggle-btn" id="openSettings">⚙️ Réglages</button></div>
   </div>
 
   <div id="storeWarn" style="display:none; background:#FBEBE5; border:1.5px solid var(--coral); color:#a8543b; border-radius:13px; padding:11px 13px; font-size:12.5px; font-weight:700; margin-bottom:15px; line-height:1.45;"></div>
+
+  <div class="card" id="settingsCard" style="display:none">
+    <div class="collapse-head open" style="cursor:default">
+      <h2 style="margin:0">Réglages · Notifications</h2>
+      <span class="chev" style="transform:none">⚙️</span>
+    </div>
+    <div class="sub" style="margin-top:6px">Notifications locales, en complément de tes alarmes. Les piliers (réveil, changes, coucher) restent sur tes alarmes système.</div>
+
+    <div class="perm-banner" id="permBanner" style="display:none">
+      <span>🔔</span><span id="permText">Autorise les notifications pour activer ces rappels.</span>
+      <button id="permBtn">Autoriser</button>
+    </div>
+
+    <div id="setGroups"></div>
+
+    <div class="set-note" id="setNote">Rappel : une appli web ne garantit pas les notifications quand elle est complètement fermée. Pour les rappels critiques, garde tes alarmes système.</div>
+  </div>
 
   <div class="card" id="dashCard">
     <h2>Habituation aux couches</h2>
@@ -1590,6 +1630,133 @@
     }
   }
 
+  /* ==== Notifications locales + Réglages ==== */
+  // Catégories de notifications non principales (les piliers restent sur alarmes système).
+  const NOTIF_CATEGORIES = [
+    { cat:'Piliers', badge:'aussi sur alarme', items:[
+      { id:'reveil',    n:'Réveil', d:'7h00 · point du matin', m:7*60, body:'🍼 Réveil — ouvre l\'appli, tenue de nuit, verre d\'eau.' },
+      { id:'change_matin', n:'Change du matin', d:'9h00 · pilier', m:9*60, body:'🔑 Change du matin — vérif peau, crème, tenue de jour.' },
+      { id:'change_nuit',  n:'Change de nuit + bilan', d:'22h30 · pilier', m:22*60+30, body:'🔑 Change de nuit + bilan — vérif peau complète, crème généreuse, couche Safari.' },
+      { id:'coucher',   n:'Coucher', d:'23h00', m:23*60, body:'🌙 Coucher — bonne nuit.' }
+    ]},
+    { cat:'Rituels', items:[
+      { id:'reg_midi',  n:'Régression de midi', d:'12h00 · fenêtre douce', m:12*60, body:'🧸 Fenêtre régression douce — harnais, moment calme.' },
+      { id:'sieste',    n:'Sieste', d:'14h30 · emmaillotage', m:14*60+30, body:'😴 Sieste — cocon, grenouillère + couverture.' },
+      { id:'reg_soir',  n:'Régression du soir', d:'20h00 · grande fenêtre', m:20*60, body:'🧸 Grande fenêtre régression — allège l\'hydratation.' }
+    ]},
+    { cat:'Rythme', items:[
+      { id:'check1', n:'Check + 1er biberon', d:'11h30', m:11*60+30, body:'✅ Check + 1er biberon.' },
+      { id:'check3', n:'Check + 3e biberon', d:'16h00', m:16*60, body:'✅ Check au réveil de sieste + 3e biberon.' }
+    ]},
+    { cat:'Repas', items:[
+      { id:'petitdej', n:'Petit-déjeuner', d:'8h00', m:8*60, body:'🥣 Petit-déjeuner en tenue de nuit.' },
+      { id:'dejeuner', n:'Déjeuner + 2e biberon', d:'13h30', m:13*60+30, body:'🍽️ Déjeuner + 2e biberon.' },
+      { id:'diner', n:'Dîner', d:'19h30', m:19*60+30, body:'🍽️ Dîner — check si mouillé.' }
+    ]},
+    { cat:'Vérifs surprises', items:[
+      { id:'surprise', n:'Vérif surprise à l\'ouverture', d:'aléatoire', m:null, body:null }
+    ]}
+  ];
+
+  let notifPrefs = {};
+  async function loadNotifPrefs() {
+    try { const r = await window.storage.get('pref:notif'); if (r && r.value) notifPrefs = JSON.parse(r.value); } catch(e) {}
+    // défaut : tout activé sauf rien
+    NOTIF_CATEGORIES.forEach(c => c.items.forEach(it => { if (notifPrefs[it.id] === undefined) notifPrefs[it.id] = true; }));
+  }
+  async function saveNotifPrefs() {
+    try { await window.storage.set('pref:notif', JSON.stringify(notifPrefs)); } catch(e) {}
+  }
+
+  function notifPermState() {
+    if (!('Notification' in window)) return 'unsupported';
+    return Notification.permission; // 'granted' | 'denied' | 'default'
+  }
+  function updatePermBanner() {
+    const banner = document.getElementById('permBanner');
+    const st = notifPermState();
+    if (st === 'granted') { banner.style.display = 'none'; return; }
+    banner.style.display = 'flex';
+    const txt = document.getElementById('permText');
+    const btn = document.getElementById('permBtn');
+    if (st === 'unsupported') { txt.textContent = 'Ton navigateur ne gère pas les notifications ici.'; btn.style.display='none'; }
+    else if (st === 'denied') { txt.textContent = 'Notifications bloquées. Autorise-les dans les réglages du site/navigateur.'; btn.style.display='none'; }
+    else { txt.textContent = 'Autorise les notifications pour activer ces rappels.'; btn.style.display=''; }
+  }
+
+  function renderSettings() {
+    const wrap = document.getElementById('setGroups');
+    wrap.innerHTML = '';
+    NOTIF_CATEGORIES.forEach(c => {
+      const sec = document.createElement('div');
+      sec.className = 'set-cat';
+      const badge = c.badge ? ' <span style="font-size:10px;font-weight:800;color:var(--blue-deep);background:var(--blue-soft);border:1px solid #cdd3f0;border-radius:20px;padding:2px 8px;vertical-align:middle;margin-left:6px">'+c.badge+'</span>' : '';
+      sec.innerHTML = '<h4>'+c.cat+badge+'</h4>';
+      c.items.forEach(it => {
+        const row = document.createElement('div');
+        row.className = 'set-row';
+        const on = !!notifPrefs[it.id];
+        row.innerHTML = '<div class="info"><div class="n">'+it.n+'</div><div class="d">'+it.d+'</div></div>';
+        const sw = document.createElement('div');
+        sw.className = 'switch' + (on ? ' on' : '');
+        sw.innerHTML = '<div class="knob"></div>';
+        sw.addEventListener('click', async () => {
+          notifPrefs[it.id] = !notifPrefs[it.id];
+          sw.classList.toggle('on', notifPrefs[it.id]);
+          await saveNotifPrefs();
+          scheduleNotifications();
+        });
+        row.appendChild(sw);
+        sec.appendChild(row);
+      });
+      wrap.appendChild(sec);
+    });
+    updatePermBanner();
+  }
+
+  // Planification locale : programme les notifs restantes de la journée tant que l'appli vit.
+  let notifTimers = [];
+  function clearNotifTimers() { notifTimers.forEach(t => clearTimeout(t)); notifTimers = []; }
+  function scheduleNotifications() {
+    clearNotifTimers();
+    if (notifPermState() !== 'granted') return;
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    NOTIF_CATEGORIES.forEach(c => c.items.forEach(it => {
+      if (it.m == null || !notifPrefs[it.id]) return;
+      if (it.m <= nowMin) return; // déjà passé aujourd'hui
+      const msUntil = (it.m - nowMin) * 60000 - now.getSeconds()*1000;
+      if (msUntil > 0 && msUntil < 24*3600000) {
+        const t = setTimeout(() => { showLocalNotif(it.n, it.body || it.n); }, msUntil);
+        notifTimers.push(t);
+      }
+    }));
+  }
+  function showLocalNotif(title, body) {
+    if (notifPermState() !== 'granted') return;
+    try {
+      if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+        navigator.serviceWorker.ready.then(reg => reg.showNotification('🍼 '+title, { body, icon:'icon-192.png', badge:'icon-192.png', tag:title }));
+      } else {
+        new Notification('🍼 '+title, { body, icon:'icon-192.png' });
+      }
+    } catch(e) {}
+  }
+
+  document.getElementById('openSettings').addEventListener('click', () => {
+    const card = document.getElementById('settingsCard');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) { renderSettings(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
+  document.getElementById('permBtn').addEventListener('click', async () => {
+    try {
+      const res = await Notification.requestPermission();
+      updatePermBanner();
+      if (res === 'granted') scheduleNotifications();
+    } catch(e) {}
+  });
+
   // init
   (async function() {
     if (!storage.persistent) {
@@ -1599,6 +1766,8 @@
     }
     document.getElementById('dateInput').value = todayStr();
     await loadAutoPref();
+    await loadNotifPrefs();
+    scheduleNotifications();
     await renderCheckStat();
     await renderMoment();
     await renderSupMode();
@@ -1641,8 +1810,8 @@
       // affiche le rappel "c'est l'heure" puis lance le flux guidé.
       // Le créneau n'est PAS marqué ici : "Plus tard" doit le laisser réapparaître.
       setTimeout(() => popChangeDue(dueSlot), 500);
-    } else if (autoOn && Math.random() < OPEN_PROBABILITY) {
-      // sinon, éventuellement une vérif surprise
+    } else if (autoOn && (notifPrefs.surprise !== false) && Math.random() < OPEN_PROBABILITY) {
+      // sinon, éventuellement une vérif surprise (si activée dans les réglages)
       setTimeout(() => popCheck(), 700);
     }
   })();
