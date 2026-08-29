@@ -400,7 +400,7 @@
 
   <div class="card sup-card" id="supCard" style="display:none">
     <h2>Mode supervisé</h2>
-    <div class="sub">Jour avec superviseur : tire au sort l'équipement du jour (2 à 5 pièces).</div>
+    <div class="sub">Jour avec superviseur : tire au sort l'équipement du jour (2 à 5 pièces). Un seul tirage par jour.</div>
 
     <div id="supPrompt" style="display:none">
       <div class="qline" style="font-size:13.5px;font-weight:700;margin:8px 0 12px">Ce jour est-il un jour supervisé ?</div>
@@ -420,6 +420,7 @@
         <div class="lead" id="supLead">Équipement tiré</div>
         <div id="supList"></div>
         <div class="sup-note" id="supNote"></div>
+        <div class="sup-note" id="supOnce" style="display:none;font-style:italic">🔒 Un seul tirage par jour — l'équipement du jour est fixé.</div>
       </div>
     </div>
   </div>
@@ -625,7 +626,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '3.2';
+  const APP_VERSION = '3.3';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1703,14 +1704,25 @@
       note.innerHTML = 'Tous les éléments tirés sont à libération : tu peux les porter en autonomie sur tes fenêtres de régression.';
     }
     document.getElementById('supResult').classList.add('show');
+    const oncePer = document.getElementById('supOnce');
+    if (oncePer) oncePer.style.display = '';
+  }
+
+  function lockDrawUI() {
+    const btn = document.getElementById('supDraw');
+    if (btn) btn.style.display = 'none';
   }
 
   document.getElementById('supDraw').addEventListener('click', async () => {
+    // sécurité : si un tirage existe déjà pour aujourd'hui, on ne retire pas
+    const already = await getDraw(todayStr());
+    if (already && already.length) { lockDrawUI(); renderDrawResult(already); return; }
     const n = 2 + Math.floor(Math.random() * 4); // 2 à 5
     const ids = shuffle(EQUIP_POOL).slice(0, n).map(e => e.id);
     await saveDraw(todayStr(), ids);
     document.getElementById('supLead').textContent = 'Équipement du jour (' + ids.length + ')';
     renderDrawResult(ids);
+    lockDrawUI();
   });
 
   document.getElementById('markSup').addEventListener('click', async () => {
@@ -1742,9 +1754,14 @@
       prompt.style.display = 'none';
       inner.style.display = '';
       const existing = await getDraw(todayStr());
+      const btn = document.getElementById('supDraw');
       if (existing && existing.length) {
         document.getElementById('supLead').textContent = 'Équipement du jour (' + existing.length + ')';
         renderDrawResult(existing);
+        if (btn) btn.style.display = 'none'; // déjà tiré aujourd'hui
+      } else {
+        if (btn) btn.style.display = ''; // pas encore tiré : bouton dispo
+        document.getElementById('supResult').classList.remove('show');
       }
     } else if (type === 'solo') {
       supCard.style.display = 'none';
