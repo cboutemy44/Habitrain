@@ -246,6 +246,9 @@
   .modal .ok { background: var(--green); color: #fff; }
   .modal .adj { background: #FBF1DE; color: #9a742a; border: 1.5px solid var(--amber); }
   .modal .miss { background: #FBEBE5; color: #a8543b; border: 1.5px solid var(--coral); }
+  .modal .g { background: #EDF5EE; color: #4c7a51; border: 1.5px solid var(--green); }
+  .modal .a { background: #FBF1DE; color: #9a742a; border: 1.5px solid var(--amber); }
+  .modal .c { background: #FBEBE5; color: #a8543b; border: 1.5px solid var(--coral); }
   .fixsteps { text-align: left; margin: 0 0 20px; padding-left: 20px; }
   .fixsteps li { font-size: 13.5px; font-weight: 600; color: var(--ink); margin-bottom: 8px; line-height: 1.45; }
   .fixsteps li::marker { color: var(--coral); font-weight: 800; }
@@ -547,10 +550,7 @@
     <div class="big">⏰</div>
     <h3 id="dueTitle">C'est l'heure de changer</h3>
     <p id="dueText">Le planning indique un change maintenant.</p>
-    <div class="acts">
-      <button class="ok" id="dueStart">🍼 Faire le change guidé</button>
-      <button class="adj" id="dueLater">Plus tard</button>
-    </div>
+    <div class="acts" id="dueActs"></div>
   </div>
 
   <div class="modal" id="modalChange" style="display:none">
@@ -625,7 +625,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '3.0';
+  const APP_VERSION = '3.1';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1196,18 +1196,62 @@
   function popChangeDue(slot) {
     activeSlotKey = slot.key;
     document.getElementById('dueTitle').textContent = '⏰ ' + slot.label;
-    document.getElementById('dueText').textContent = slot.ctx === 'pilier'
-      ? 'C\'est l\'heure du change imposé. On le fait ensemble, étape par étape.'
-      : 'C\'est l\'heure du check. Regarde l\'état de la couche et change si besoin.';
     document.getElementById('modalCheck').style.display = 'none';
     document.getElementById('modalFix').style.display = 'none';
     document.getElementById('modalChange').style.display = 'none';
     document.getElementById('modalPose').style.display = 'none';
     document.getElementById('modalDue').style.display = '';
     document.getElementById('overlay').classList.add('show');
-    // mémorise le contexte pour le bouton "faire le change"
-    document.getElementById('dueStart').onclick = () => startChange(slot.ctx);
-    document.getElementById('dueLater').onclick = () => { activeSlotKey = null; closeCheck(); };
+
+    const acts = document.getElementById('dueActs');
+    acts.innerHTML = '';
+
+    if (slot.ctx === 'pilier') {
+      // change imposé : direct au flux guidé
+      document.getElementById('dueText').textContent = 'C\'est l\'heure du change imposé. On le fait ensemble, étape par étape.';
+      addBtn(acts, 'ok', '🍼 Faire le change guidé', () => startChange('pilier'));
+      addBtn(acts, 'adj', 'Plus tard', () => { activeSlotKey = null; closeCheck(); });
+    } else {
+      // check : on reporte d'abord l'état de la couche
+      document.getElementById('dueText').textContent = 'C\'est l\'heure du check. Dans quel état est ta couche ?';
+      addBtn(acts, 'g', '☀️ Sèche — je laisse', async () => {
+        await saveCheck('etat_sec', 'check_'+slot.key);
+        markSlotDone(slot.key);
+        closeCheck(); try { await renderCheckStat(); } catch(e){}
+      });
+      addBtn(acts, 'a', '💧 Mouillée — je laisse encore', async () => {
+        await saveCheck('etat_mouille', 'check_'+slot.key);
+        markSlotDone(slot.key);
+        closeCheck(); try { await renderCheckStat(); } catch(e){}
+      });
+      addBtn(acts, 'a', '🔄 Mouillée — je change', async () => {
+        await saveCheck('etat_mouille', 'check_'+slot.key);
+        startChange('check'); // le flux guidé marquera le slot à la fin
+      });
+      addBtn(acts, 'c', '🌊 Saturée — je change', async () => {
+        await saveCheck('etat_sature', 'check_'+slot.key);
+        startChange('check');
+      });
+      addBtn(acts, 'adj', 'Plus tard', () => { activeSlotKey = null; closeCheck(); });
+    }
+  }
+
+  function addBtn(container, cls, label, handler) {
+    const b = document.createElement('button');
+    if (cls) b.className = cls;
+    b.textContent = label;
+    b.addEventListener('click', handler);
+    container.appendChild(b);
+  }
+
+  async function markSlotDone(key) {
+    try {
+      const r = await window.storage.get('slotdone:'+todayStr());
+      const done = (r && r.value) ? JSON.parse(r.value) : {};
+      done[key] = true;
+      await window.storage.set('slotdone:'+todayStr(), JSON.stringify(done));
+    } catch(e) {}
+    activeSlotKey = null;
   }
 
   async function saveChangeState(result) {
