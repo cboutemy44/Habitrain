@@ -461,9 +461,11 @@
 
   <div class="card breach-card" id="breachCard">
     <h2>Entorses du jour</h2>
-    <div class="sub">Déclare honnêtement les écarts au cadre. Valables pour la journée, ils pèsent sur ta note d'habituation.</div>
+    <div class="sub">Coche les écarts au cadre, puis enregistre. Valables pour la journée, ils pèsent sur ta note d'habituation.</div>
     <div id="breachList"></div>
-    <div class="breach-summary none" id="breachSummary">Aucune entorse déclarée aujourd'hui. 👍</div>
+    <button class="sup-btn" id="breachSave" style="background:#c0603f;margin-top:14px">Enregistrer les entorses</button>
+    <div class="saved-flash" id="breachFlash"></div>
+    <div class="breach-summary none" id="breachSummary">Aucune entorse enregistrée aujourd'hui. 👍</div>
   </div>
 
   <div class="card">
@@ -667,7 +669,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '3.9';
+  const APP_VERSION = '4.0';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -994,37 +996,44 @@
     return Math.min(40, p); // plafonné pour ne pas écraser tout le score
   }
 
+  let breachSel = null; // sélection locale en cours (non enregistrée)
+
   async function renderBreaches() {
     const list = document.getElementById('breachList');
-    const current = await getBreaches(todayStr());
+    // initialise la sélection locale depuis ce qui est enregistré (une seule fois par ouverture de carte)
+    if (breachSel === null) {
+      breachSel = await getBreaches(todayStr());
+    }
     list.innerHTML = '';
     BREACHES.forEach(b => {
-      const on = !!current[b.id];
+      const on = !!breachSel[b.id];
       const row = document.createElement('div');
       row.className = 'breach-row' + (on ? ' on' : '');
       row.innerHTML = '<div class="breach-box">'+(on?'✓':'')+'</div>'+
         '<div class="info"><div class="n">'+b.n+'</div><div class="g '+b.grav+'">'+GRAV_LABEL[b.grav]+'</div></div>';
-      row.addEventListener('click', async () => {
-        const cur = await getBreaches(todayStr());
-        cur[b.id] = !cur[b.id];
-        if (!cur[b.id]) delete cur[b.id];
-        await saveBreaches(todayStr(), cur);
-        await renderBreaches();
-        try { await renderDashboard(await getAll()); } catch(e) {}
+      row.addEventListener('click', () => {
+        // bascule locale uniquement (pas d'enregistrement, pas d'impact note)
+        breachSel[b.id] = !breachSel[b.id];
+        if (!breachSel[b.id]) delete breachSel[b.id];
+        renderBreaches();
       });
       list.appendChild(row);
     });
-    // résumé
-    const count = BREACHES.filter(b => current[b.id]).length;
+    updateBreachSummary(false);
+  }
+
+  function updateBreachSummary(saved) {
+    const sel = breachSel || {};
+    const count = BREACHES.filter(b => sel[b.id]).length;
     const summary = document.getElementById('breachSummary');
     if (count === 0) {
       summary.className = 'breach-summary none';
-      summary.textContent = 'Aucune entorse déclarée aujourd\'hui. 👍';
+      summary.textContent = saved ? 'Aucune entorse enregistrée aujourd\'hui. 👍' : 'Aucune entorse sélectionnée.';
     } else {
-      let pen = 0; BREACHES.forEach(b => { if (current[b.id]) pen += b.w; });
+      let pen = 0; BREACHES.forEach(b => { if (sel[b.id]) pen += b.w; });
       pen = Math.min(40, pen);
       summary.className = 'breach-summary some';
-      summary.textContent = count + ' entorse' + (count>1?'s':'') + ' déclarée' + (count>1?'s':'') + ' · −' + pen + ' pts sur la note du jour';
+      summary.textContent = count + ' entorse' + (count>1?'s':'') + (saved?' enregistrée':' sélectionnée') + (count>1?'s':'') + ' · −' + pen + ' pts sur la note du jour';
     }
   }
 
@@ -1933,6 +1942,15 @@
     await saveOutfit(todayStr(), o);
     renderOutfitResult(o);
     document.getElementById('outfitDraw').style.display = 'none';
+  });
+
+  document.getElementById('breachSave').addEventListener('click', async () => {
+    await saveBreaches(todayStr(), breachSel || {});
+    updateBreachSummary(true);
+    const flash = document.getElementById('breachFlash');
+    flash.textContent = '✓ Entorses enregistrées';
+    setTimeout(() => flash.textContent = '', 1800);
+    try { await renderDashboard(await getAll()); } catch(e) {}
   });
 
   document.getElementById('markSup').addEventListener('click', async () => {
