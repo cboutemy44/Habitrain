@@ -1,0 +1,39 @@
+HABITRAIN — Installer l'appli sur ton téléphone (PWA)
+=====================================================
+
+Tu as un dossier avec ces fichiers :
+  - index.html            (l'appli)
+  - manifest.webmanifest  (identité de l'appli)
+  - service-worker.js     (mode hors-ligne)
+  - icon-192.png / icon-512.png / icon-512-maskable.png  (icônes)
+
+Une PWA doit être servie en HTTPS (pas ouverte en fichier local).
+Voici la façon la plus simple, 100% gratuite, avec Netlify Drop :
+
+ÉTAPE 1 — Héberger
+  1. Va sur https://app.netlify.com/drop depuis ton ordinateur.
+  2. Glisse-dépose le DOSSIER entier (pas les fichiers un par un) dans la zone.
+  3. Netlify te donne une adresse du type https://xxxxx.netlify.app
+     -> C'est l'adresse de ton appli. Garde-la.
+  (Pas de compte obligatoire pour un test ; créer un compte gratuit permet
+   de garder l'adresse stable dans le temps — recommandé pour un usage d'un mois.)
+
+ÉTAPE 2 — Installer sur le téléphone (Android / Chrome)
+  1. Ouvre l'adresse https://xxxxx.netlify.app dans Chrome sur ton téléphone.
+  2. Menu ⋮ (en haut à droite) -> "Installer l'application" (ou "Ajouter à
+     l'écran d'accueil").
+  3. Une icône Habitrain apparaît sur ton écran d'accueil.
+  4. Ouvre-la : elle s'affiche en plein écran, comme une vraie appli, et
+     fonctionne même sans connexion.
+
+  Sur iPhone (Safari) : bouton Partager -> "Sur l'écran d'accueil".
+
+TES DONNÉES
+  - Elles sont stockées dans l'appli (localStorage) et persistent.
+  - Important : garde toujours la MÊME adresse d'installation. Si tu changes
+    d'hébergement/adresse, l'appli repart avec un historique vide.
+
+METTRE À JOUR L'APPLI PLUS TARD
+  - Si je te donne une nouvelle version de index.html, tu la re-déposes sur
+    Netlify (même site) : l'appli se met à jour à la prochaine ouverture.
+    Tes données restent (elles ne sont pas dans le fichier).

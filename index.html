@@ -1,0 +1,1656 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#6E77BC">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Habitrain">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #FBF6F0;
+    --card: #FFFFFF;
+    --ink: #3B3742;
+    --muted: #8A8391;
+    --line: #ECE3DA;
+    --blue: #6E77BC;
+    --blue-deep: #4C5497;
+    --blue-soft: #EEF0FA;
+    --green: #79AC7E;
+    --amber: #E2AE56;
+    --coral: #D68168;
+    --empty: #EFE8E0;
+  }
+  .wrap {
+    font-family: 'Nunito', system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 22px 16px 60px;
+    line-height: 1.5;
+  }
+  .head { text-align: center; margin-bottom: 22px; }
+  .head .icon { font-size: 30px; }
+  .head h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 25px;
+    letter-spacing: -0.01em;
+    margin: 2px 0;
+  }
+  .head p { color: var(--muted); font-size: 13.5px; font-weight: 600; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 18px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 10px rgba(75,60,45,0.03);
+  }
+  .card h2 {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 3px;
+  }
+  .card .sub { color: var(--muted); font-size: 12.5px; font-weight: 600; margin-bottom: 14px; }
+
+  /* skin strip */
+  .strip { display: flex; flex-wrap: wrap; gap: 5px; }
+  .cell {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: var(--empty);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9.5px; font-weight: 800; color: rgba(255,255,255,0.9);
+    cursor: default; position: relative;
+  }
+  .cell.today { outline: 2px solid var(--blue); outline-offset: 1px; }
+  .legend { display: flex; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
+  .legend span { font-size: 11.5px; font-weight: 700; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  .dot { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+  /* form */
+  .field { margin-bottom: 15px; }
+  .field > label {
+    display: block; font-size: 12.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--muted); margin-bottom: 7px;
+  }
+  .seg { display: flex; gap: 7px; flex-wrap: wrap; }
+  .seg button {
+    flex: 1; min-width: 64px;
+    font-family: inherit; font-size: 13px; font-weight: 700;
+    padding: 9px 6px; border-radius: 11px;
+    border: 1.5px solid var(--line); background: #fff; color: var(--ink);
+    cursor: pointer; transition: all .12s;
+  }
+  .seg button:hover { border-color: var(--blue); }
+  .seg button.on { background: var(--blue-soft); border-color: var(--blue); color: var(--blue-deep); }
+  .seg button.on.g { background: #EDF5EE; border-color: var(--green); color: #4c7a51; }
+  .seg button.on.a { background: #FBF1DE; border-color: var(--amber); color: #9a742a; }
+  .seg button.on.c { background: #FBEBE5; border-color: var(--coral); color: #a8543b; }
+
+  .row2 { display: flex; gap: 12px; }
+  .row2 .field { flex: 1; }
+
+  textarea {
+    width: 100%; font-family: inherit; font-size: 13.5px; color: var(--ink);
+    border: 1.5px solid var(--line); border-radius: 11px; padding: 10px;
+    resize: vertical; min-height: 54px;
+  }
+  textarea:focus { outline: none; border-color: var(--blue); }
+
+  .save {
+    width: 100%; font-family: inherit; font-size: 14.5px; font-weight: 800;
+    padding: 13px; border: none; border-radius: 13px;
+    background: var(--blue); color: #fff; cursor: pointer; transition: background .12s;
+    margin-top: 4px;
+  }
+  .save:hover { background: var(--blue-deep); }
+  .saved-flash { color: var(--green); font-weight: 800; font-size: 13px; text-align: center; height: 16px; margin-top: 9px; }
+
+  .datepick { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; justify-content: center; }
+  .datepick input {
+    font-family: inherit; font-size: 14px; font-weight: 700; color: var(--ink);
+    border: 1.5px solid var(--line); border-radius: 10px; padding: 7px 10px;
+  }
+  .datepick input:focus { outline: none; border-color: var(--blue); }
+
+  /* history */
+  .entry { border-top: 1px solid var(--line); padding: 12px 0; }
+  .entry:first-of-type { border-top: none; }
+  .entry .top { display: flex; align-items: center; gap: 9px; margin-bottom: 5px; }
+  .entry .date { font-weight: 800; font-size: 13.5px; }
+  .badge { font-size: 10.5px; font-weight: 800; padding: 2px 8px; border-radius: 20px; }
+  .badge.solo { background: var(--blue-soft); color: var(--blue-deep); }
+  .badge.sup { background: #F3ECFA; color: #7a5aa0; }
+  .pill { font-size: 10.5px; font-weight: 800; padding: 2px 8px; border-radius: 20px; color: #fff; }
+  .entry .meta { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .entry .note { font-size: 12.5px; color: var(--ink); margin-top: 4px; font-style: italic; }
+  .empty-msg { color: var(--muted); font-size: 13px; text-align: center; padding: 8px 0; font-weight: 600; }
+  .mini { font-size: 11.5px; color: var(--muted); font-weight: 700; }
+
+  /* surprise check */
+  .checkrow { display: flex; gap: 10px; align-items: stretch; }
+  .toggle {
+    flex: 1; display: flex; align-items: center; justify-content: space-between;
+    border: 1.5px solid var(--line); border-radius: 12px; padding: 11px 13px;
+  }
+  .toggle .lbl { font-size: 13px; font-weight: 800; }
+  .switch { width: 46px; height: 27px; border-radius: 20px; background: var(--empty); position: relative; cursor: pointer; transition: background .15s; flex: none; }
+  .switch.on { background: var(--blue); }
+  .switch .knob { position: absolute; top: 3px; left: 3px; width: 21px; height: 21px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+  .switch.on .knob { left: 22px; }
+  .btn-now {
+    font-family: inherit; font-size: 13px; font-weight: 800; padding: 0 16px;
+    border: 1.5px solid var(--blue); background: var(--blue-soft); color: var(--blue-deep);
+    border-radius: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .btn-now:hover { background: #e3e7f7; }
+  .checkstat { margin-top: 12px; font-size: 12.5px; font-weight: 700; color: var(--muted); }
+  .checkstat b { color: var(--ink); }
+  .nextin { margin-top: 6px; font-size: 11.5px; font-weight: 700; color: var(--blue-deep); }
+
+  /* dashboard */
+  .dash-status {
+    display: flex; align-items: center; gap: 13px;
+    border-radius: 15px; padding: 15px 16px; margin-bottom: 15px;
+    border: 1.5px solid var(--line);
+  }
+  .dash-status.good { background: #EDF5EE; border-color: #bfdcc2; }
+  .dash-status.mid  { background: #FBF1DE; border-color: #ecd6a6; }
+  .dash-status.low  { background: #FBEBE5; border-color: #eec3b4; }
+  .dash-status.none { background: var(--blue-soft); border-color: #cdd3f0; }
+  .dash-status .ring {
+    width: 52px; height: 52px; border-radius: 50%; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 800; color: #fff;
+  }
+  .dash-status.good .ring { background: var(--green); }
+  .dash-status.mid  .ring { background: var(--amber); }
+  .dash-status.low  .ring { background: var(--coral); }
+  .dash-status.none .ring { background: var(--blue); }
+  .dash-status .txt h3 { font-family: 'Fraunces', serif; font-weight: 600; font-size: 16px; margin-bottom: 1px; }
+  .dash-status .txt p { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+  .kpi { border: 1.5px solid var(--line); border-radius: 13px; padding: 11px 8px; text-align: center; }
+  .kpi .num { font-family: 'Fraunces', serif; font-weight: 600; font-size: 21px; line-height: 1.1; }
+  .kpi .lab { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin-top: 3px; }
+  .kpi.g .num { color: #4c7a51; } .kpi.a .num { color: #9a742a; } .kpi.c .num { color: #a8543b; } .kpi.b .num { color: var(--blue-deep); }
+  .apprec { margin-top: 13px; font-size: 13px; font-weight: 600; color: var(--ink); line-height: 1.5; padding: 11px 13px; background: #FAF6F1; border-radius: 12px; border: 1px solid var(--line); }
+  .apprec b { font-weight: 800; }
+  .progwrap { margin-bottom: 15px; }
+  .progtop { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .progtop span:first-child { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
+  .progtop span:last-child { font-family: 'Fraunces', serif; font-weight: 600; font-size: 18px; color: var(--blue-deep); }
+  .progbar { height: 12px; border-radius: 8px; background: var(--empty); overflow: hidden; }
+  .progfill { height: 100%; border-radius: 8px; background: linear-gradient(90deg, var(--blue), var(--green)); transition: width .5s ease; }
+  .progmarks { display: flex; justify-content: space-between; margin-top: 6px; }
+  .progmarks span { font-size: 9.5px; font-weight: 700; color: var(--muted); flex: 1; text-align: center; }
+  .progmarks span:first-child { text-align: left; } .progmarks span:last-child { text-align: right; }
+
+  /* carte du moment (contextuelle selon l'heure) */
+  .moment { border: 1.5px solid var(--blue); background: var(--blue-soft); }
+  .moment .eyebrow { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--blue-deep); margin-bottom: 3px; }
+  .moment h2 { color: var(--ink); }
+  .moment .qline { font-size: 14px; font-weight: 700; color: var(--ink); margin: 10px 0 14px; }
+  .moment .acts { display: flex; flex-direction: column; gap: 9px; }
+  .moment .acts button {
+    font-family: inherit; font-size: 14px; font-weight: 800; padding: 12px; border-radius: 12px; cursor: pointer;
+    border: 1.5px solid var(--line); background: #fff; color: var(--ink); text-align: left;
+  }
+  .moment .acts button:hover { border-color: var(--blue); }
+  .moment .acts button.g { border-color: var(--green); background: #EDF5EE; color: #4c7a51; }
+  .moment .acts button.a { border-color: var(--amber); background: #FBF1DE; color: #9a742a; }
+  .moment .acts button.c { border-color: var(--coral); background: #FBEBE5; color: #a8543b; }
+  .moment .done { text-align: center; padding: 6px 0; }
+  .moment .done .big { font-size: 30px; }
+  .moment .done p { font-size: 13.5px; font-weight: 700; color: var(--blue-deep); margin-top: 4px; }
+
+  /* bloc repliable */
+  .collapse-head {
+    display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;
+  }
+  .collapse-head .chev { font-size: 13px; color: var(--muted); transition: transform .2s; }
+  .collapse-head.open .chev { transform: rotate(180deg); }
+  .collapse-body { display: none; margin-top: 14px; }
+  .collapse-body.open { display: block; }
+
+  /* modal */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(40,32,50,0.55);
+    display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px;
+    backdrop-filter: blur(2px);
+  }
+  .overlay.show { display: flex; }
+  .modal {
+    background: var(--card); border-radius: 22px; padding: 26px 22px; max-width: 380px; width: 100%;
+    text-align: center; box-shadow: 0 12px 40px rgba(40,32,50,0.3);
+    animation: pop .18s ease-out;
+  }
+  @keyframes pop { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .modal .big { font-size: 38px; }
+  .modal h3 { font-family: 'Fraunces', serif; font-weight: 600; font-size: 20px; margin: 6px 0 4px; }
+  .modal p { color: var(--muted); font-size: 13.5px; font-weight: 600; margin-bottom: 20px; }
+  .modal .acts { display: flex; flex-direction: column; gap: 9px; }
+  .modal button {
+    font-family: inherit; font-size: 14.5px; font-weight: 800; padding: 13px; border-radius: 13px; cursor: pointer; border: none;
+  }
+  .modal .ok { background: var(--green); color: #fff; }
+  .modal .adj { background: #FBF1DE; color: #9a742a; border: 1.5px solid var(--amber); }
+  .modal .miss { background: #FBEBE5; color: #a8543b; border: 1.5px solid var(--coral); }
+  .fixsteps { text-align: left; margin: 0 0 20px; padding-left: 20px; }
+  .fixsteps li { font-size: 13.5px; font-weight: 600; color: var(--ink); margin-bottom: 8px; line-height: 1.45; }
+  .fixsteps li::marker { color: var(--coral); font-weight: 800; }
+
+  /* guide d'activité dans la carte du moment */
+  .guide { margin: 4px 0 14px; border-radius: 13px; overflow: hidden; border: 1.5px solid #cdd3f0; }
+  .guide .now {
+    display: flex; align-items: center; gap: 11px; padding: 12px 13px; background: #fff;
+  }
+  .guide .now .ic { font-size: 24px; flex: none; }
+  .guide .now .body { flex: 1; }
+  .guide .now .body .k { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: var(--blue-deep); }
+  .guide .now .body .v { font-size: 14.5px; font-weight: 800; color: var(--ink); line-height: 1.3; margin-top: 1px; }
+  .guide .now .body .t { font-size: 11.5px; font-weight: 700; color: var(--muted); margin-top: 2px; }
+  .guide .next {
+    display: flex; align-items: center; gap: 8px; padding: 9px 13px; background: var(--blue-soft);
+    font-size: 12px; font-weight: 700; color: var(--blue-deep); border-top: 1px solid #dbe0f5;
+  }
+  .guide .next .arrow { font-size: 13px; }
+  .tip {
+    display: flex; gap: 8px; align-items: flex-start;
+    background: #FAF6F1; border: 1px solid var(--line); border-radius: 11px;
+    padding: 10px 12px; margin: 12px 0 0; font-size: 12.5px; font-weight: 600; color: var(--ink); line-height: 1.45;
+  }
+  .tip .bulb { flex: none; font-size: 15px; }
+
+  /* mode supervisé */
+  .sup-card { border: 1.5px solid #d9c9ec; background: #F7F1FB; }
+  .sup-card h2 { color: #6b4c93; }
+  .sup-safety {
+    display: flex; gap: 8px; align-items: flex-start; font-size: 11.5px; font-weight: 700;
+    color: #7a5aa0; background: #F0E7F9; border: 1px solid #ddc9ef; border-radius: 10px;
+    padding: 9px 11px; margin: 10px 0 14px; line-height: 1.4;
+  }
+  .sup-btn {
+    width: 100%; font-family: inherit; font-size: 14.5px; font-weight: 800; padding: 13px;
+    border: none; border-radius: 13px; background: #8a5fc0; color: #fff; cursor: pointer;
+  }
+  .sup-btn:hover { background: #74499f; }
+  .sup-result { margin-top: 14px; display: none; }
+  .sup-result.show { display: block; }
+  .sup-result .lead { font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; color: #7a5aa0; margin-bottom: 9px; }
+  .equip { display: flex; align-items: center; gap: 11px; padding: 11px 12px; border-radius: 12px; border: 1.5px solid #e2d4f2; background: #fff; margin-bottom: 8px; }
+  .equip .ic { font-size: 22px; flex: none; }
+  .equip .body .n { font-size: 14px; font-weight: 800; color: var(--ink); }
+  .equip .body .d { font-size: 11.5px; font-weight: 600; color: var(--muted); margin-top: 1px; }
+  .equip.lock { border-color: var(--coral); background: #FBEBE5; }
+  .sup-note { font-size: 11.5px; font-weight: 700; color: var(--muted); margin-top: 6px; line-height: 1.45; }
+
+  /* durée de port */
+  .wear-kpis { display: grid; grid-template-columns: repeat(3,1fr); gap: 9px; margin-bottom: 4px; }
+  .wear-kpi { border:1.5px solid var(--line); border-radius:13px; padding:11px 8px; text-align:center; }
+  .wear-kpi .num { font-family:'Fraunces',serif; font-weight:600; font-size:20px; line-height:1.1; color:var(--blue-deep); }
+  .wear-kpi .lab { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.02em; color:var(--muted); margin-top:3px; }
+  .wear-list { margin-top:14px; }
+  .wear-row { display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--line); }
+  .wear-row:first-child { border-top:none; }
+  .wear-row .when { font-size:11.5px; font-weight:700; color:var(--muted); width:78px; flex:none; }
+  .wear-bar-wrap { flex:1; height:20px; background:var(--empty); border-radius:6px; overflow:hidden; position:relative; }
+  .wear-bar { height:100%; border-radius:6px; }
+  .wear-bar.ok { background:var(--green); } .wear-bar.mid { background:var(--amber); } .wear-bar.long { background:var(--coral); }
+  .wear-dur { font-size:12px; font-weight:800; width:52px; flex:none; text-align:right; }
+  .wear-empty { color:var(--muted); font-size:13px; text-align:center; padding:10px 0; font-weight:600; }
+</style>
+
+<div class="wrap">
+  <div class="head">
+    <div class="icon">🍼</div>
+    <h1>Journal de suivi</h1>
+    <p>Immersion 24/7 · 2 min matin & soir</p>
+  </div>
+
+  <div id="storeWarn" style="display:none; background:#FBEBE5; border:1.5px solid var(--coral); color:#a8543b; border-radius:13px; padding:11px 13px; font-size:12.5px; font-weight:700; margin-bottom:15px; line-height:1.45;"></div>
+
+  <div class="card" id="dashCard">
+    <h2>Habituation aux couches</h2>
+    <div class="sub">Ta progression sur le mois : régularité et baisse des situations à corriger, à parts égales.</div>
+    <div class="dash-status none" id="dashStatus">
+      <div class="ring" id="dashRing">—</div>
+      <div class="txt">
+        <h3 id="dashLabel">En attente de données</h3>
+        <p id="dashSince">Enregistre ta première journée pour lancer le suivi.</p>
+      </div>
+    </div>
+    <div class="progwrap">
+      <div class="progtop"><span id="progLabel">Progression</span><span id="progPct">—</span></div>
+      <div class="progbar"><div class="progfill" id="progFill" style="width:0%"></div></div>
+      <div class="progmarks" id="progMarks">
+        <span>Découverte</span><span>Ça s'installe</span><span>Automatisme</span><span>2ᵉ nature</span>
+      </div>
+    </div>
+    <div class="kpis">
+      <div class="kpi b"><div class="num" id="kpiStreak">—</div><div class="lab">Série en cours</div></div>
+      <div class="kpi g"><div class="num" id="kpiTrend">—</div><div class="lab">À corriger / tendance</div></div>
+      <div class="kpi a"><div class="num" id="kpiSkin">—</div><div class="lab">Peau verte</div></div>
+    </div>
+    <div class="apprec" id="dashApprec">Le tableau de bord s'activera dès tes premières entrées.</div>
+  </div>
+
+  <div class="card moment" id="momentCard">
+    <div class="eyebrow" id="momentEyebrow">Moment</div>
+    <h2 id="momentTitle">Point du moment</h2>
+    <div class="guide" id="guide"></div>
+    <div class="tip" id="tip"></div>
+    <div class="qline" id="momentQ">Chargement…</div>
+    <div class="acts" id="momentActs"></div>
+  </div>
+
+  <div class="card sup-card" id="supCard" style="display:none">
+    <h2>Mode supervisé</h2>
+    <div class="sub">Jour avec superviseur : tire au sort l'équipement du jour (2 à 5 pièces).</div>
+
+    <div id="supPrompt" style="display:none">
+      <div class="qline" style="font-size:13.5px;font-weight:700;margin:8px 0 12px">Ce jour est-il un jour supervisé ?</div>
+      <div style="display:flex;gap:9px">
+        <button class="sup-btn" id="markSup" style="flex:1">✅ Oui, supervisé</button>
+        <button class="sup-btn" id="markSolo" style="flex:1;background:#fff;color:#7a5aa0;border:1.5px solid #d9c9ec">Non, solo</button>
+      </div>
+    </div>
+
+    <div id="supInner" style="display:none">
+      <div class="sup-safety">
+        <span>🔒</span>
+        <span>La culotte Segufix verrouillée ne peut sortir que si ton superviseur est présent, éveillé, aux clés, du début à la fin. Jamais pendant la sieste ou la nuit.</span>
+      </div>
+      <button class="sup-btn" id="supDraw">🎲 Tirer l'équipement du jour</button>
+      <div class="sup-result" id="supResult">
+        <div class="lead" id="supLead">Équipement tiré</div>
+        <div id="supList"></div>
+        <div class="sup-note" id="supNote"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Peau sur 30 jours</h2>
+    <div class="sub">La ligne à surveiller. Une dérive se voit ici avant de faire mal.</div>
+    <div class="strip" id="strip"></div>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--green)"></i>Verte</span>
+      <span><i class="dot" style="background:var(--amber)"></i>À surveiller</span>
+      <span><i class="dot" style="background:var(--coral)"></i>À traiter</span>
+      <span><i class="dot" style="background:var(--empty)"></i>Non rempli</span>
+    </div>
+  </div>
+
+  <div class="card" id="wearCard">
+    <h2>Durée de port</h2>
+    <div class="sub">Temps entre deux changes, calculé sur tes changes enregistrés dans l'appli.</div>
+    <div class="wear-kpis">
+      <div class="wear-kpi"><div class="num" id="wearAvg">—</div><div class="lab">Moyenne jour</div></div>
+      <div class="wear-kpi"><div class="num" id="wearNight">—</div><div class="lab">Nuit (moy.)</div></div>
+      <div class="wear-kpi"><div class="num" id="wearMax">—</div><div class="lab">Plus long</div></div>
+    </div>
+    <div class="wear-list" id="wearList"></div>
+    <div class="sup-note" id="wearNote"></div>
+  </div>
+
+  <div class="card">
+    <h2>Vérif surprise</h2>
+    <div class="sub">À l'ouverture du tracker, une vérif peut tomber au hasard : couche bien en place ? Comme tu ouvres l'appli chaque jour pour tes suivis, la surprise vient du « quand ».</div>
+    <div class="checkrow">
+      <div class="toggle">
+        <span class="lbl">Vérif à l'ouverture</span>
+        <div class="switch" id="autoSwitch"><div class="knob"></div></div>
+      </div>
+      <button class="btn-now" id="checkNow">Vérifier maintenant</button>
+    </div>
+    <div class="checkstat" id="checkStat">Aujourd'hui : <b>0</b> vérif · <b>0</b> réajustement</div>
+    <div class="nextin" id="nextIn"></div>
+  </div>
+
+  <div class="card" id="formCard" style="display:none">
+    <div class="collapse-head" id="formHead">
+      <h2 style="margin:0">Bilan complet du soir</h2>
+      <span class="chev">▼</span>
+    </div>
+    <div class="collapse-body" id="formBody">
+    <div class="sub" id="formSub">Après le change de nuit : note la peau et le bilan du jour.</div>
+
+    <div class="datepick">
+      <label class="mini" for="dateInput">Date&nbsp;:</label>
+      <input type="date" id="dateInput">
+    </div>
+
+    <div class="field">
+      <label>🩺 Peau <span style="color:var(--coral)">(le champ clé)</span></label>
+      <div class="seg" id="skin">
+        <button data-v="verte" class="g">Verte</button>
+        <button data-v="surveiller" class="a">À surveiller</button>
+        <button data-v="traiter" class="c">À traiter</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>🍼 Biberons bus</label>
+      <div class="seg" id="bib">
+        <button data-v="0">0</button>
+        <button data-v="1">1</button>
+        <button data-v="2">2</button>
+        <button data-v="3">3</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>🌙 Nuit — couche tenue sans fuite jusqu'à 9h ?</label>
+      <div class="seg" id="nuit">
+        <button data-v="ok">Au sec</button>
+        <button data-v="limite">Limite</button>
+        <button data-v="fuite">Fuite</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Type de journée</label>
+      <div class="seg" id="type">
+        <button data-v="solo">Solo</button>
+        <button data-v="supervise">Supervisée</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>📝 Note libre</label>
+      <textarea id="note" placeholder="Ce qui a marché, ce qui a coincé, une observation…"></textarea>
+    </div>
+
+    <button class="save" id="saveBtn">Enregistrer le jour</button>
+    <div class="saved-flash" id="flash"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Historique</h2>
+    <div class="sub" id="histSub">Tes journées enregistrées, la plus récente en haut.</div>
+    <div id="history"></div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal" id="modalCheck">
+    <div class="big" id="checkIcon">🔍</div>
+    <h3 id="checkTitle">Vérif surprise !</h3>
+    <p id="checkQuestion">La couche est-elle bien en place&nbsp;?</p>
+    <div class="acts" id="checkActs"></div>
+  </div>
+
+  <div class="modal" id="modalFix" style="display:none">
+    <div class="big">⚠️</div>
+    <h3 id="fixTitle">À corriger tout de suite</h3>
+    <p id="fixIntro">Tu es hors cadre là&nbsp;: on te remet en couche maintenant, sans attendre.</p>
+    <ol class="fixsteps" id="fixSteps"></ol>
+    <div class="acts">
+      <button class="ok" id="fixDone">C'est fait</button>
+    </div>
+  </div>
+
+  <div class="modal" id="modalDue" style="display:none">
+    <div class="big">⏰</div>
+    <h3 id="dueTitle">C'est l'heure de changer</h3>
+    <p id="dueText">Le planning indique un change maintenant.</p>
+    <div class="acts">
+      <button class="ok" id="dueStart">🍼 Faire le change guidé</button>
+      <button class="adj" id="dueLater">Plus tard</button>
+    </div>
+  </div>
+
+  <div class="modal" id="modalChange" style="display:none">
+    <div class="big" id="chIcon">💧</div>
+    <h3 id="chTitle">État de la couche</h3>
+    <p id="chQ">Avant de la retirer, elle est comment ?</p>
+    <div class="acts" id="chActs"></div>
+  </div>
+
+  <div class="modal" id="modalPose" style="display:none">
+    <div class="big">🍼</div>
+    <h3>Pose de la couche fraîche</h3>
+    <p id="poseIntro">Suis les étapes dans l'ordre.</p>
+    <ol class="fixsteps" id="poseSteps"></ol>
+    <div class="acts">
+      <button class="ok" id="poseDone">✓ Couche fraîche posée</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* ---- Couche de stockage compatible navigateur ----
+     Utilise localStorage (persiste dans Chrome/Safari quand le fichier est
+     ouvert normalement). Repli en mémoire si localStorage est indisponible
+     (navigation privée stricte, restrictions) pour éviter tout plantage. */
+  const storage = (function() {
+    const PREFIX = 'habitrain:';
+    let mem = {};
+    let ok = false;
+    try {
+      const t = '__t__';
+      window.localStorage.setItem(t, '1');
+      window.localStorage.removeItem(t);
+      ok = true;
+    } catch(e) { ok = false; }
+
+    return {
+      persistent: ok,
+      async get(key) {
+        if (ok) {
+          const v = window.localStorage.getItem(PREFIX + key);
+          if (v === null) return null;
+          return { key, value: v };
+        }
+        return (key in mem) ? { key, value: mem[key] } : null;
+      },
+      async set(key, value) {
+        if (ok) { window.localStorage.setItem(PREFIX + key, value); }
+        else { mem[key] = value; }
+        return { key, value };
+      },
+      async delete(key) {
+        if (ok) { window.localStorage.removeItem(PREFIX + key); }
+        else { delete mem[key]; }
+        return { key, deleted: true };
+      },
+      async list(prefix) {
+        const p = prefix || '';
+        const keys = [];
+        if (ok) {
+          for (let i = 0; i < window.localStorage.length; i++) {
+            const full = window.localStorage.key(i);
+            if (full && full.startsWith(PREFIX + p)) keys.push(full.slice(PREFIX.length));
+          }
+        } else {
+          Object.keys(mem).forEach(k => { if (k.startsWith(p)) keys.push(k); });
+        }
+        return { keys, prefix: p };
+      }
+    };
+  })();
+  // Compatibilité : tout le code existant appelle window.storage.*
+  window.storage = storage;
+
+  const skinColors = { verte: 'var(--green)', surveiller: 'var(--amber)', traiter: 'var(--coral)' };
+  const skinShort = { verte: '✓', surveiller: '!', traiter: '⚠' };
+  const skinLabel = { verte: 'Verte', surveiller: 'À surveiller', traiter: 'À traiter' };
+  const nuitLabel = { ok: 'Nuit au sec', limite: 'Nuit limite', fuite: 'Nuit — fuite' };
+
+  const sel = {}; // current form selections
+  const groups = ['skin','bib','nuit','type'];
+
+  function todayStr() {
+    const d = new Date();
+    return d.toISOString().slice(0,10);
+  }
+
+  function wireGroup(id) {
+    const box = document.getElementById(id);
+    box.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        box.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        sel[id] = btn.dataset.v;
+      });
+    });
+  }
+  groups.forEach(wireGroup);
+
+  function resetForm() {
+    groups.forEach(id => {
+      document.getElementById(id).querySelectorAll('button').forEach(b => b.classList.remove('on'));
+      delete sel[id];
+    });
+    document.getElementById('note').value = '';
+  }
+
+  function loadInto(entry) {
+    resetForm();
+    if (!entry) return;
+    const map = { skin:'skin', bib:'bib', nuit:'nuit', type:'type' };
+    Object.keys(map).forEach(id => {
+      const v = entry[id];
+      if (v === undefined || v === null) return;
+      const btn = document.querySelector('#'+id+' button[data-v="'+v+'"]');
+      if (btn) { btn.classList.add('on'); sel[id] = String(v); }
+    });
+    document.getElementById('note').value = entry.note || '';
+  }
+
+  async function getAll() {
+    let entries = [];
+    try {
+      const res = await window.storage.list('day:');
+      const keys = (res && res.keys) ? res.keys : [];
+      for (const k of keys) {
+        try {
+          const r = await window.storage.get(k);
+          if (r && r.value) entries.push(JSON.parse(r.value));
+        } catch(e) {}
+      }
+    } catch(e) {}
+    entries.sort((a,b) => a.date < b.date ? 1 : -1);
+    return entries;
+  }
+
+  function renderStrip(entries) {
+    const byDate = {};
+    entries.forEach(e => byDate[e.date] = e);
+    const strip = document.getElementById('strip');
+    strip.innerHTML = '';
+    // 30 cells: today is last, going back 29 days
+    const cells = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      cells.push(d.toISOString().slice(0,10));
+    }
+    cells.forEach(date => {
+      const e = byDate[date];
+      const cell = document.createElement('div');
+      cell.className = 'cell' + (date === todayStr() ? ' today' : '');
+      if (e && e.skin) {
+        cell.style.background = skinColors[e.skin];
+        cell.textContent = skinShort[e.skin];
+      }
+      const dd = date.slice(8,10) + '/' + date.slice(5,7);
+      cell.title = dd + (e && e.skin ? ' — ' + skinLabel[e.skin] : ' — non rempli');
+      strip.appendChild(cell);
+    });
+  }
+
+  function renderHistory(entries) {
+    const box = document.getElementById('history');
+    box.innerHTML = '';
+    if (!entries.length) {
+      box.innerHTML = '<div class="empty-msg">Aucune entrée pour l\'instant. Ta première journée s\'affichera ici.</div>';
+      return;
+    }
+    entries.forEach(e => {
+      const div = document.createElement('div');
+      div.className = 'entry';
+      const dObj = new Date(e.date + 'T12:00:00');
+      const dtxt = dObj.toLocaleDateString('fr-FR', { weekday:'short', day:'numeric', month:'short' });
+      const typeBadge = e.type === 'supervise'
+        ? '<span class="badge sup">Supervisée</span>'
+        : (e.type === 'solo' ? '<span class="badge solo">Solo</span>' : '');
+      const skinPill = e.skin
+        ? '<span class="pill" style="background:'+skinColors[e.skin]+'">'+skinLabel[e.skin]+'</span>'
+        : '';
+      const bits = [];
+      if (e.bib !== undefined) bits.push('🍼 '+e.bib+'/3');
+      if (e.nuit) bits.push(nuitLabel[e.nuit]);
+      div.innerHTML =
+        '<div class="top"><span class="date">'+dtxt+'</span>'+skinPill+typeBadge+'</div>'+
+        (bits.length ? '<div class="meta">'+bits.join(' · ')+'</div>' : '')+
+        (e.note ? '<div class="note">« '+e.note.replace(/</g,'&lt;')+' »</div>' : '');
+      div.style.cursor = 'pointer';
+      div.title = 'Cliquer pour recharger et modifier ce jour';
+      div.addEventListener('click', () => {
+        document.getElementById('dateInput').value = e.date;
+        loadInto(e);
+        // Édition depuis l'historique : on révèle et ouvre le formulaire même hors du soir.
+        const formCard = document.getElementById('formCard');
+        formCard.style.display = '';
+        toggleForm(true);
+        document.getElementById('formSub').textContent = 'Modification du ' + dtxt + '. Réenregistre pour mettre à jour.';
+        formCard.scrollIntoView({ behavior:'smooth', block:'start' });
+      });
+      box.appendChild(div);
+    });
+  }
+
+  async function refresh() {
+    const entries = await getAll();
+    renderStrip(entries);
+    renderHistory(entries);
+    const filled = entries.length;
+    document.getElementById('histSub').textContent =
+      filled ? filled + ' jour' + (filled>1?'s':'') + ' enregistré' + (filled>1?'s':'') + ' sur le mois.'
+             : 'Tes journées enregistrées apparaîtront ici.';
+    await renderDashboard(entries);
+    await renderWear();
+  }
+
+  // Durée de port : intervalles entre changes enregistrés (result 'change_fait')
+  async function renderWear() {
+    // rassemble tous les changes horodatés des 14 derniers jours
+    const days = [];
+    for (let i = 13; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate()-i); days.push(d.toISOString().slice(0,10)); }
+    let changes = [];
+    for (const d of days) {
+      const list = await getChecks(d);
+      list.forEach(c => {
+        if (c.result === 'change_fait' && c.t) changes.push(new Date(c.t));
+      });
+    }
+    changes.sort((a,b) => a - b);
+
+    const listEl = document.getElementById('wearList');
+    const noteEl = document.getElementById('wearNote');
+
+    if (changes.length < 2) {
+      document.getElementById('wearAvg').textContent = '—';
+      document.getElementById('wearNight').textContent = '—';
+      document.getElementById('wearMax').textContent = '—';
+      listEl.innerHTML = '<div class="wear-empty">Il faut au moins 2 changes enregistrés via l\'appli pour calculer une durée. Passe par le change guidé pour alimenter ce suivi.</div>';
+      noteEl.textContent = '';
+      return;
+    }
+
+    // intervalles consécutifs
+    const intervals = [];
+    for (let i = 1; i < changes.length; i++) {
+      const start = changes[i-1], end = changes[i];
+      const hours = (end - start) / 3600000;
+      if (hours <= 0 || hours > 20) continue; // ignore aberrations (>20h = trou de saisie)
+      // nuit si l'intervalle démarre le soir (>=21h) ou couvre 2h-6h du matin
+      const startH = start.getHours();
+      const isNight = startH >= 21 || (startH <= 6);
+      intervals.push({ start, end, hours, isNight });
+    }
+
+    if (!intervals.length) {
+      listEl.innerHTML = '<div class="wear-empty">Pas encore d\'intervalle exploitable.</div>';
+      return;
+    }
+
+    const dayInts = intervals.filter(x => !x.isNight);
+    const nightInts = intervals.filter(x => x.isNight);
+    const avg = arr => arr.length ? arr.reduce((s,x)=>s+x.hours,0)/arr.length : null;
+    const fmtH = h => h==null ? '—' : (h < 1 ? Math.round(h*60)+'min' : (Math.floor(h)+'h'+(Math.round((h%1)*60)?String(Math.round((h%1)*60)).padStart(2,'0'):'')));
+
+    document.getElementById('wearAvg').textContent = fmtH(avg(dayInts));
+    document.getElementById('wearNight').textContent = fmtH(avg(nightInts));
+    const maxInt = intervals.reduce((m,x)=> x.hours>m.hours?x:m, intervals[0]);
+    document.getElementById('wearMax').textContent = fmtH(maxInt.hours);
+
+    // liste des derniers intervalles (les 8 plus récents), échelle sur 12h
+    const recent = intervals.slice(-8).reverse();
+    listEl.innerHTML = '';
+    recent.forEach(x => {
+      const pct = Math.min(100, x.hours / 12 * 100);
+      let cls = 'ok';
+      if (x.isNight) { cls = x.hours > 11 ? 'long' : 'ok'; }
+      else { cls = x.hours > 5 ? 'long' : (x.hours > 3.5 ? 'mid' : 'ok'); }
+      const label = x.start.toLocaleDateString('fr-FR',{day:'numeric',month:'short'}) + ' ' +
+                    String(x.start.getHours()).padStart(2,'0')+'h'+String(x.start.getMinutes()).padStart(2,'0');
+      const row = document.createElement('div');
+      row.className = 'wear-row';
+      row.innerHTML = '<div class="when">'+(x.isNight?'🌙 ':'☀️ ')+label+'</div>'+
+        '<div class="wear-bar-wrap"><div class="wear-bar '+cls+'" style="width:'+pct+'%"></div></div>'+
+        '<div class="wear-dur">'+fmtH(x.hours)+'</div>';
+      listEl.appendChild(row);
+    });
+
+    // note contextuelle
+    const longDay = dayInts.filter(x => x.hours > 5).length;
+    if (longDay > 0) {
+      noteEl.innerHTML = '⚠️ '+longDay+' port(s) de jour au-delà de 5h : sur la durée, ça augmente le risque peau. Vise des changes plus rapprochés en journée.';
+    } else {
+      noteEl.innerHTML = 'Rythme de changes sain. Rappel : ce suivi ne compte que les changes faits via le flux guidé de l\'appli.';
+    }
+  }
+
+  // Tableau de bord : niveau d'HABITUATION aux couches sur tout le programme
+  async function renderDashboard(entries) {
+    const byDate = {}; entries.forEach(e => byDate[e.date] = e);
+    const dates = Object.keys(byDate).sort(); // croissant
+    const filledTotal = dates.length;
+
+    if (filledTotal === 0) {
+      setDash('none', '—', 'En attente de données',
+        'Enregistre ta première journée pour lancer le suivi.',
+        '0%', 'Progression',
+        '—', '—', '—',
+        'Le tableau de bord s\'activera dès tes premières entrées.');
+      return;
+    }
+
+    // --- Ancienneté : jour X depuis la 1re entrée (borné à 30) ---
+    const first = new Date(dates[0] + 'T12:00:00');
+    const today = new Date(todayStr() + 'T12:00:00');
+    const dayNum = Math.min(30, Math.round((today - first) / 86400000) + 1);
+    const ageScore = Math.min(1, dayNum / 25); // ~plateau vers J25
+
+    // --- Régularité : série de jours consécutifs remplis en remontant depuis aujourd'hui ---
+    let streak = 0;
+    for (let i = 0; ; i++) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0,10);
+      if (byDate[key]) streak++;
+      else { if (i === 0) continue; break; } // tolère aujourd'hui pas encore rempli
+    }
+    const spanDays = Math.round((today - first) / 86400000) + 1;
+    const fillRate = spanDays ? filledTotal / spanDays : 1;
+    const regScore = Math.min(1, (Math.min(1, streak / 10) * 0.6) + (fillRate * 0.4));
+
+    // --- "À corriger" : tendance récente vs début ---
+    async function flagRateFor(dateList) {
+      let flags = 0, tot = 0;
+      for (const d of dateList) {
+        const list = await getChecks(d);
+        tot += list.length;
+        flags += list.filter(c => ['miss','sature','tet_miss'].includes(c.result)).length;
+      }
+      return { rate: tot ? flags/tot : null, flags, tot };
+    }
+    const last7 = [];
+    for (let i = 6; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate()-i); last7.push(d.toISOString().slice(0,10)); }
+    const recent = await flagRateFor(last7);
+    const early = await flagRateFor(dates.slice(0, Math.min(7, dates.length)));
+
+    // score "réflexes" : peu de flags récents = bon ; bonus si baisse vs début
+    let reflexScore;
+    if (recent.rate === null) reflexScore = 0.7; // pas encore de vérifs : neutre-positif
+    else {
+      reflexScore = 1 - recent.rate; // moins de flags = mieux
+      if (early.rate !== null && recent.rate < early.rate) reflexScore = Math.min(1, reflexScore + 0.15); // bonus tendance à la baisse
+    }
+
+    // tendance texte
+    let trendTxt = '—';
+    if (recent.rate !== null && early.rate !== null && dates.length >= 4) {
+      if (recent.rate < early.rate - 0.02) trendTxt = recent.flags + ' ↓';
+      else if (recent.rate > early.rate + 0.02) trendTxt = recent.flags + ' ↑';
+      else trendTxt = recent.flags + ' →';
+    } else {
+      trendTxt = (recent.flags || 0) + '';
+    }
+
+    // --- Score d'habituation : régularité 35 + réflexes 35 + ancienneté 30 ---
+    const score = Math.round(regScore*35 + reflexScore*35 + ageScore*30);
+
+    // --- Palier : bridé par l'ancienneté (l'habituation prend du temps) ---
+    // étape par le score (qualité) et étape par les jours écoulés ; on prend la plus basse.
+    let stageByScore;
+    if (score >= 80) stageByScore = 3;
+    else if (score >= 55) stageByScore = 2;
+    else if (score >= 30) stageByScore = 1;
+    else stageByScore = 0;
+
+    let stageByDay;
+    if (dayNum >= 21) stageByDay = 3;
+    else if (dayNum >= 11) stageByDay = 2;
+    else if (dayNum >= 5) stageByDay = 1;
+    else stageByDay = 0;
+
+    const stage = Math.min(stageByScore, stageByDay);
+    const STAGE_LABELS = ['Découverte', "Ça s'installe", 'Automatisme', 'Seconde nature'];
+    const STAGE_CLS = ['none', 'mid', 'good', 'good'];
+    const label = STAGE_LABELS[stage];
+    const cls = STAGE_CLS[stage];
+
+    const since = 'Jour ' + dayNum + ' du programme · palier ' + label.toLowerCase();
+
+    // --- Peau (garde-fou santé, hors score) ---
+    const skinFilled = dates.map(d => byDate[d]).filter(e => e && e.skin);
+    const greenPct = skinFilled.length ? Math.round(skinFilled.filter(e=>e.skin==='verte').length / skinFilled.length * 100) : 0;
+    const treatRecent = last7.map(d=>byDate[d]).filter(e=>e && e.skin==='traiter').length;
+
+    // --- Appréciation ---
+    let appr = [];
+    if (dayNum <= 4) appr.push('<b>Phase de découverte.</b> C\'est normal d\'y penser beaucoup et d\'avoir des ajustements — l\'automatisme vient plutôt vers J5-J7.');
+    else if (stage === 3) appr.push('<b>Le port est devenu une seconde nature.</b> Régularité tenue et réflexes installés : l\'habituation est là.');
+    else if (stage === 2) appr.push('<b>L\'automatisme s\'installe.</b> Tu penses de moins en moins au cadre, c\'est exactement la trajectoire recherchée.');
+    else appr.push('<b>Le régime commence à s\'ancrer.</b> Continue à remplir chaque jour, c\'est la régularité qui fait basculer vers l\'automatisme.');
+
+    if (streak >= 3) appr.push('Série de <b>'+streak+' jours consécutifs</b> suivis.');
+    if (recent.rate !== null && early.rate !== null && recent.rate < early.rate && dates.length >= 5)
+      appr.push('Les situations à corriger <b>diminuent</b> vs le début — les réflexes rentrent.');
+    else if (recent.flags > 0)
+      appr.push(recent.flags + ' situation'+(recent.flags>1?'s':'')+' à corriger cette semaine : regarde à quels moments ça décroche.');
+    if (treatRecent > 0) appr.push('⚠️ Peau <b>à traiter</b> récemment : côté santé, resserre changes et crème — indépendamment de l\'habituation.');
+
+    setDash(cls, score+'%', label, since,
+      score+'%', 'Habituation',
+      (streak)+ (streak>1?' j':' j'), trendTxt, greenPct+'%',
+      appr.join(' '));
+  }
+
+  function setDash(cls, ring, label, since, pct, progLabel, streak, trend, skin, apprec) {
+    const el = document.getElementById('dashStatus');
+    el.className = 'dash-status ' + cls;
+    document.getElementById('dashRing').textContent = ring;
+    document.getElementById('dashLabel').textContent = label;
+    document.getElementById('dashSince').textContent = since;
+    // barre de progression
+    const pctNum = parseInt(pct) || 0;
+    document.getElementById('progFill').style.width = pctNum + '%';
+    document.getElementById('progPct').textContent = pct;
+    document.getElementById('progLabel').textContent = progLabel;
+    // KPIs
+    document.getElementById('kpiStreak').textContent = streak;
+    document.getElementById('kpiTrend').textContent = trend;
+    document.getElementById('kpiSkin').textContent = skin;
+    document.getElementById('dashApprec').innerHTML = apprec;
+  }
+
+  document.getElementById('saveBtn').addEventListener('click', async () => {
+    const date = document.getElementById('dateInput').value || todayStr();
+    if (!sel.skin) {
+      const flash = document.getElementById('flash');
+      flash.style.color = 'var(--coral)';
+      flash.textContent = 'Renseigne au moins l\'état de la peau.';
+      setTimeout(()=>{ flash.textContent=''; flash.style.color='var(--green)'; }, 2200);
+      return;
+    }
+    const entry = {
+      date,
+      skin: sel.skin,
+      bib: sel.bib !== undefined ? Number(sel.bib) : undefined,
+      nuit: sel.nuit,
+      type: sel.type,
+      note: document.getElementById('note').value.trim()
+    };
+    try {
+      await window.storage.set('day:'+date, JSON.stringify(entry));
+      const flash = document.getElementById('flash');
+      flash.textContent = '✓ Enregistré';
+      setTimeout(()=> flash.textContent = '', 1800);
+      document.getElementById('formSub').textContent = 'Remplis la peau au minimum. Le reste va vite.';
+      await refresh();
+      await renderSupMode();
+    } catch(e) {
+      const flash = document.getElementById('flash');
+      flash.style.color = 'var(--coral)';
+      flash.textContent = 'Échec de l\'enregistrement, réessaie.';
+      setTimeout(()=>{ flash.textContent=''; flash.style.color='var(--green)'; }, 2200);
+    }
+  });
+
+  /* ---- Vérif surprise (types aléatoires) ---- */
+  let autoOn = true;               // activée par défaut
+  const OPEN_PROBABILITY = 0.5;    // ~1 ouverture sur 2 déclenche une vérif
+
+  // Définition des vérifs. Chaque option : {label, cls, result, fix?}
+  // fix = écran de correction (titre, intro, étapes) affiché après enregistrement.
+  const CHECK_TYPES = [
+    {
+      id: 'couche_place',
+      icon: '🔍',
+      title: 'Vérif surprise !',
+      question: 'La couche est-elle bien en place et bien ajustée aux cuisses ?',
+      options: [
+        { label: 'Oui, bien en place', cls: 'ok', result: 'ok' },
+        { label: "J'ai dû la réajuster", cls: 'adj', result: 'adj' },
+        { label: "Je n'ai pas ma couche", cls: 'miss', result: 'miss', fix: {
+          title: 'À corriger tout de suite',
+          intro: 'Tu es hors cadre là : on te remet en couche maintenant, sans attendre.',
+          steps: [
+            'Va à ton espace de change (lit ou tapis à langer).',
+            'Peau propre et sèche : essuie si besoin, laisse respirer 10 s.',
+            'Crème barrière sur les zones sensibles.',
+            'Mets une couche fraîche : ajuste bien les barrières anti-fuites aux cuisses.',
+            'Remets ta tenue ABDL du bloc en cours.',
+            'Reviens ici et confirme.'
+          ]
+        }}
+      ]
+    },
+    {
+      id: 'couche_etat',
+      icon: '💧',
+      title: 'Vérif surprise !',
+      question: 'Dans quel état est ta couche, là, maintenant ?',
+      options: [
+        { label: 'Sèche', cls: 'ok', result: 'sec' },
+        { label: 'Mouillée, ça va', cls: 'adj', result: 'mouille' },
+        { label: 'Saturée', cls: 'miss', result: 'sature', fix: {
+          title: 'Change maintenant',
+          intro: 'Couche saturée = peau au contact prolongé de l\'humidité. On change sans attendre — c\'est le point faible n°1 du mois.',
+          steps: [
+            'Va à ton espace de change.',
+            'Retire la couche saturée, peau propre et bien sèche.',
+            'Vérif peau au passage : rougeur ? irritation ? Si oui, tu traites.',
+            'Crème barrière.',
+            'Couche fraîche, barrières anti-fuites bien ajustées.',
+            'Reviens ici et confirme.'
+          ]
+        }}
+      ]
+    },
+    {
+      id: 'tetine',
+      icon: '🍭',
+      title: 'Vérif surprise !',
+      question: 'Ta tétine, tu l\'as sur toi / à portée ?',
+      options: [
+        { label: 'Oui, en bouche', cls: 'ok', result: 'tet_ok' },
+        { label: 'À portée, je la prends', cls: 'adj', result: 'tet_prise' },
+        { label: 'Non, introuvable', cls: 'miss', result: 'tet_miss', fix: {
+          title: 'Remets-toi dans le cadre',
+          intro: 'La tétine fait partie de ton immersion. On la récupère.',
+          steps: [
+            'Retrouve ta tétine (ou une propre de rechange).',
+            'Rince-la si elle a traîné.',
+            'Reprends-la et réinstalle-toi dans ton bloc en cours.',
+            'Reviens ici et confirme.'
+          ]
+        }}
+      ]
+    }
+  ];
+
+  const RESULT_LABEL = {
+    ok: 'en place', adj: 'réajustée', miss: 'sans couche', fixed: 'remise en couche',
+    sec: 'sèche', mouille: 'mouillée', sature: 'saturée',
+    tet_ok: 'tétine en bouche', tet_prise: 'tétine reprise', tet_miss: 'tétine absente'
+  };
+
+  let currentType = null;
+
+  async function getChecks(date) {
+    try {
+      const r = await window.storage.get('check:'+date);
+      if (r && r.value) return JSON.parse(r.value);
+    } catch(e) {}
+    return [];
+  }
+  async function saveCheck(result, typeId) {
+    const date = todayStr();
+    const list = await getChecks(date);
+    list.push({ t: new Date().toISOString(), result, type: typeId || (currentType && currentType.id) });
+    try { await window.storage.set('check:'+date, JSON.stringify(list)); } catch(e) {}
+    await renderCheckStat();
+    try { await renderDashboard(await getAll()); } catch(e) {}
+  }
+  async function renderCheckStat() {
+    const list = await getChecks(todayStr());
+    const total = list.length;
+    const flags = list.filter(c => ['miss','sature','tet_miss'].includes(c.result)).length;
+    let txt = "Aujourd'hui : <b>"+total+"</b> vérif"+(total>1?'s':'');
+    if (flags > 0) txt += " · <b style='color:var(--coral)'>"+flags+"</b> à corriger";
+    document.getElementById('checkStat').innerHTML = txt;
+  }
+
+  function buildCheck(type) {
+    currentType = type;
+    document.getElementById('checkIcon').textContent = type.icon;
+    document.getElementById('checkTitle').textContent = type.title;
+    document.getElementById('checkQuestion').innerHTML = type.question;
+    const acts = document.getElementById('checkActs');
+    acts.innerHTML = '';
+    type.options.forEach(opt => {
+      const b = document.createElement('button');
+      b.className = opt.cls;
+      b.textContent = opt.label;
+      b.addEventListener('click', async () => {
+        await saveCheck(opt.result, type.id);
+        if (opt.fix) { showFix(opt.fix); }
+        else { closeCheck(); }
+      });
+      acts.appendChild(b);
+    });
+  }
+
+  function popCheck(forcedType) {
+    const type = forcedType || CHECK_TYPES[Math.floor(Math.random() * CHECK_TYPES.length)];
+    buildCheck(type);
+    document.getElementById('modalCheck').style.display = '';
+    document.getElementById('modalFix').style.display = 'none';
+    document.getElementById('modalChange').style.display = 'none';
+    document.getElementById('modalPose').style.display = 'none';
+    document.getElementById('overlay').classList.add('show');
+  }
+  function showFix(fix) {
+    document.getElementById('fixTitle').textContent = fix.title;
+    document.getElementById('fixIntro').innerHTML = fix.intro;
+    const ol = document.getElementById('fixSteps');
+    ol.innerHTML = '';
+    fix.steps.forEach(s => {
+      const li = document.createElement('li');
+      li.innerHTML = s;
+      ol.appendChild(li);
+    });
+    document.getElementById('modalCheck').style.display = 'none';
+    document.getElementById('modalChange').style.display = 'none';
+    document.getElementById('modalPose').style.display = 'none';
+    document.getElementById('modalFix').style.display = '';
+  }
+  function closeCheck() {
+    document.getElementById('overlay').classList.remove('show');
+  }
+
+  /* ---- Flux de change guidé : état couche → guide de pose → fait ---- */
+  const POSE_STEPS = [
+    'Installe-toi sur ton espace de change (lit ou tapis à langer).',
+    'Retire la couche usagée, roule-la vers l\'intérieur, mets-la de côté (sac dédié).',
+    'Essuie du plus propre vers le moins propre, peau bien sèche.',
+    '👀 Coup d\'œil peau : rougeur ou irritation qui pointe ? Si oui, tu traites maintenant.',
+    'Crème barrière sur les zones sensibles.',
+    'Glisse la couche fraîche sous toi, remonte-la, centre-la.',
+    'Sors et ajuste les barrières anti-fuites aux cuisses (le geste anti-fuite).',
+    'Attache les adhésifs : contenant mais sans comprimer. Remets ta tenue.'
+  ];
+
+  const CHANGE_STATE_OPTS = [
+    { label: '☀️ Encore sèche', cls:'g', result:'sec' },
+    { label: '💧 Mouillée, normale', cls:'a', result:'mouille' },
+    { label: '🌊 Bien saturée', cls:'c', result:'sature' }
+  ];
+
+  let changeCtx = null; // 'check' | 'pilier'
+  let activeSlotKey = null; // créneau de change imposé en cours (marqué fait à la fin)
+
+  function popChangeDue(slot) {
+    activeSlotKey = slot.key;
+    document.getElementById('dueTitle').textContent = '⏰ ' + slot.label;
+    document.getElementById('dueText').textContent = slot.ctx === 'pilier'
+      ? 'C\'est l\'heure du change imposé. On le fait ensemble, étape par étape.'
+      : 'C\'est l\'heure du check. Regarde l\'état de la couche et change si besoin.';
+    document.getElementById('modalCheck').style.display = 'none';
+    document.getElementById('modalFix').style.display = 'none';
+    document.getElementById('modalChange').style.display = 'none';
+    document.getElementById('modalPose').style.display = 'none';
+    document.getElementById('modalDue').style.display = '';
+    document.getElementById('overlay').classList.add('show');
+    // mémorise le contexte pour le bouton "faire le change"
+    document.getElementById('dueStart').onclick = () => startChange(slot.ctx);
+    document.getElementById('dueLater').onclick = () => { activeSlotKey = null; closeCheck(); };
+  }
+
+  async function saveChangeState(result) {
+    // enregistré comme une vérif d'état, pour nourrir stats + tableau de bord
+    await saveCheck('etat_'+result, 'change_'+(changeCtx||'check'));
+  }
+
+  function startChange(ctx) {
+    changeCtx = ctx || 'check';
+    // écran 1 : état de la couche avant retrait
+    document.getElementById('chQ').textContent = ctx === 'pilier'
+      ? 'Change pilier. Avant de retirer, elle est comment ?'
+      : 'Avant de la retirer, elle est comment ?';
+    const acts = document.getElementById('chActs');
+    acts.innerHTML = '';
+    CHANGE_STATE_OPTS.forEach(opt => {
+      const b = document.createElement('button');
+      if (opt.cls) b.className = opt.cls;
+      b.textContent = opt.label;
+      b.addEventListener('click', async () => {
+        await saveChangeState(opt.result);
+        showPose();
+      });
+      acts.appendChild(b);
+    });
+    // afficher la modale état, masquer les autres
+    document.getElementById('modalCheck').style.display = 'none';
+    document.getElementById('modalFix').style.display = 'none';
+    document.getElementById('modalPose').style.display = 'none';
+    document.getElementById('modalDue').style.display = 'none';
+    document.getElementById('modalChange').style.display = '';
+    document.getElementById('overlay').classList.add('show');
+  }
+
+  function showPose() {
+    const ol = document.getElementById('poseSteps');
+    ol.innerHTML = '';
+    POSE_STEPS.forEach(s => {
+      const li = document.createElement('li');
+      li.innerHTML = s;
+      ol.appendChild(li);
+    });
+    document.getElementById('modalChange').style.display = 'none';
+    document.getElementById('modalPose').style.display = '';
+  }
+
+  document.getElementById('poseDone').addEventListener('click', async () => {
+    await saveCheck('change_fait', 'change_'+(changeCtx||'check'));
+    // si ce change répondait à un créneau imposé, on le marque fait pour la journée
+    if (activeSlotKey) {
+      try {
+        const r = await window.storage.get('slotdone:'+todayStr());
+        const done = (r && r.value) ? JSON.parse(r.value) : {};
+        done[activeSlotKey] = true;
+        await window.storage.set('slotdone:'+todayStr(), JSON.stringify(done));
+      } catch(e) {}
+      activeSlotKey = null;
+    }
+    closeCheck();
+    try { await renderCheckStat(); } catch(e) {}
+  });
+
+  async function loadAutoPref() {
+    try {
+      const r = await window.storage.get('pref:autocheck');
+      if (r && r.value) autoOn = JSON.parse(r.value);
+    } catch(e) {}
+    document.getElementById('autoSwitch').classList.toggle('on', autoOn);
+    document.getElementById('nextIn').textContent = autoOn
+      ? 'Active : une vérif au hasard (couche, état, tétine) tombe à l\'ouverture.'
+      : 'Désactivée : aucune vérif automatique.';
+  }
+  async function setAutoPref(v) {
+    autoOn = v;
+    try { await window.storage.set('pref:autocheck', JSON.stringify(v)); } catch(e) {}
+    document.getElementById('autoSwitch').classList.toggle('on', autoOn);
+    document.getElementById('nextIn').textContent = autoOn
+      ? 'Active : une vérif au hasard (couche, état, tétine) tombe à l\'ouverture.'
+      : 'Désactivée : aucune vérif automatique.';
+  }
+
+  document.getElementById('autoSwitch').addEventListener('click', () => setAutoPref(!autoOn));
+  document.getElementById('checkNow').addEventListener('click', () => popCheck());
+  document.getElementById('fixDone').addEventListener('click', async () => { await saveCheck('fixed'); closeCheck(); });
+
+  /* ---- Bloc repliable : saisie complète ---- */
+  function toggleForm(forceOpen) {
+    const head = document.getElementById('formHead');
+    const body = document.getElementById('formBody');
+    const open = forceOpen !== undefined ? forceOpen : !body.classList.contains('open');
+    body.classList.toggle('open', open);
+    head.classList.toggle('open', open);
+  }
+  document.getElementById('formHead').addEventListener('click', () => toggleForm());
+
+  /* ---- Carte du moment : contextuelle selon l'heure locale ---- */
+  // 5 fenêtres calées sur le planning. Chaque moment = question + options (result enregistré).
+  function currentMoment(now) {
+    const h = now.getHours();
+    if (h >= 7 && h < 9)  return MOMENTS.reveil;
+    if (h >= 9 && h < 13) return MOMENTS.matin;
+    if (h >= 13 && h < 19) return MOMENTS.aprem;
+    if (h >= 19 && h < 23) return MOMENTS.soir;
+    return MOMENTS.nuit; // 23h-6h59
+  }
+
+  const MOMENTS = {
+    reveil: {
+      key: 'reveil', eyebrow: 'Réveil · 7h-9h', title: 'Le point du matin',
+      q: 'Réveil. Comment a tenu la couche de nuit ?',
+      opts: [
+        { label: '☀️ Nuit au sec', cls:'g', result:'reveil_sec' },
+        { label: '💧 Bien mouillée', cls:'a', result:'reveil_mouille' },
+        { label: '⚠️ Fuite pendant la nuit', cls:'c', result:'reveil_fuite' }
+      ],
+      after: 'Le bilan peau se fera ce soir, au change de nuit. Prépare le change de 9h.'
+    },
+    matin: {
+      key: 'matin', eyebrow: 'Matinée · 9h-13h', title: 'Check de matinée',
+      q: 'Matinée. État de la couche, et as-tu bu ton 1er biberon ?',
+      opts: [
+        { label: '✅ Couche OK, biberon bu', cls:'g', result:'matin_ok' },
+        { label: '💧 Couche à changer bientôt', cls:'a', result:'matin_change' },
+        { label: '🍼 Pas encore hydraté', cls:'a', result:'matin_soif' }
+      ],
+      after: 'Pense au biberon si ce n\'est pas fait. Prochaine fenêtre : l\'après-midi.'
+    },
+    aprem: {
+      key: 'aprem', eyebrow: 'Après-midi · 13h-19h', title: 'Check d\'après-midi',
+      q: 'Après-midi. Couche, sieste, hydratation : où en es-tu ?',
+      opts: [
+        { label: '✅ Tout roule', cls:'g', result:'aprem_ok' },
+        { label: '😴 Sieste faite, check au réveil', cls:'g', result:'aprem_sieste' },
+        { label: '💧 Couche à changer', cls:'a', result:'aprem_change' }
+      ],
+      after: 'Garde le rythme d\'hydratation. Le bilan du soir arrive après 19h.'
+    },
+    soir: {
+      key: 'soir', eyebrow: 'Soirée · 19h-23h', title: 'Bilan du soir',
+      q: 'Soirée, le vrai pilier. Prêt pour le change de nuit et le bilan du jour ?',
+      opts: [
+        { label: '📝 Faire le bilan complet du jour', cls:'', result:'soir_bilan', openForm:true },
+        { label: '🌙 Change de nuit fait, tout OK', cls:'g', result:'soir_ok' },
+        { label: '⚠️ Peau à surveiller ce soir', cls:'a', result:'soir_souci', openForm:true }
+      ],
+      after: 'C\'est le moment d\'alléger l\'hydratation et de bien crémer pour la nuit.'
+    },
+    nuit: {
+      key: 'nuit', eyebrow: 'Nuit · 23h-7h', title: 'Mode nuit',
+      q: 'Il est tard. Debout pour un change nocturne, ou juste un coup d\'œil ?',
+      opts: [
+        { label: '🌙 Tout va bien, je retourne dormir', cls:'g', result:'nuit_ok' },
+        { label: '💧 Change nocturne effectué', cls:'a', result:'nuit_change' }
+      ],
+      after: 'Repose-toi. Le point du matin t\'attendra au réveil.'
+    }
+  };
+
+  async function getMoments(date) {
+    try {
+      const r = await window.storage.get('moment:'+date);
+      if (r && r.value) return JSON.parse(r.value);
+    } catch(e) {}
+    return {};
+  }
+  async function saveMoment(momentKey, result) {
+    const date = todayStr();
+    const all = await getMoments(date);
+    all[momentKey] = { result, t: new Date().toISOString() };
+    try { await window.storage.set('moment:'+date, JSON.stringify(all)); } catch(e) {}
+  }
+
+  /* ---- Guide d'activité : le déroulé de la journée type ---- */
+  // Chaque bloc : minute de début (depuis minuit), icône, activité, détail.
+  const SCHEDULE = [
+    { m: 7*60,      ic:'☀️', act:'Réveil en tenue de nuit',        det:'Grenouillère + couche de nuit, grand verre d\'eau, réveil doux.' },
+    { m: 8*60,      ic:'🥣', act:'Petit-déjeuner',                 det:'En grenouillère de nuit. Fibres + eau. Tu gardes la couche de nuit.' },
+    { m: 9*60,      ic:'🔑', act:'Change du matin',                det:'Fenêtre selles, toilette, vérif peau, crème, couche du jour, tenue de jour.' },
+    { m: 9*60+30,   ic:'🚶', act:'Bloc activité',                  det:'Le pic d\'énergie : sortie, marche, tâches, sport léger.' },
+    { m: 11*60+30,  ic:'✅', act:'Check + 1er biberon',            det:'Change si mouillé. Premier biberon de la journée.' },
+    { m: 12*60,     ic:'🧸', act:'Fenêtre régression douce',       det:'Harnais fleece, moment calme : lecture, musique douce.' },
+    { m: 13*60+30,  ic:'🍽️', act:'Déjeuner + 2e biberon',         det:'Repas fibres, check, deuxième biberon.' },
+    { m: 14*60+30,  ic:'😴', act:'Sieste',                        det:'Emmaillotage doux : grenouillère + couverture. Cocon.' },
+    { m: 16*60,     ic:'✅', act:'Check au réveil + 3e biberon',   det:'Systématique après la sieste. Troisième biberon.' },
+    { m: 16*60+30,  ic:'🚶', act:'Bloc activité',                  det:'Hobby, sortie, ménage — ce que tu veux.' },
+    { m: 19*60+30,  ic:'🍽️', act:'Dîner',                        det:'Check si mouillé.' },
+    { m: 20*60,     ic:'🧸', act:'Grande fenêtre régression',      det:'Le cocon du soir. Allège l\'hydratation à partir de maintenant.' },
+    { m: 22*60+30,  ic:'🔑', act:'Change de nuit + bilan',         det:'Fenêtre selles, toilette, vérif peau complète, crème, couche de nuit. Fais ton bilan du soir.' },
+    { m: 23*60,     ic:'🌙', act:'Coucher',                       det:'Sommeil toujours libre. Bonne nuit.' }
+  ];
+
+  function fmtTime(min) {
+    const h = Math.floor(min/60), m = min%60;
+    return h + 'h' + (m ? String(m).padStart(2,'0') : '');
+  }
+
+  function renderGuide() {
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    // bloc en cours = dernier bloc dont l'heure de début <= maintenant
+    let idx = -1;
+    for (let i = 0; i < SCHEDULE.length; i++) {
+      if (SCHEDULE[i].m <= nowMin) idx = i; else break;
+    }
+    const guide = document.getElementById('guide');
+
+    // avant 7h : nuit, le premier bloc n'a pas commencé
+    let cur, next;
+    if (idx === -1) {
+      cur = { ic:'🌙', act:'Nuit', det:'Sommeil. La journée démarre au réveil de 7h.' };
+      next = SCHEDULE[0];
+    } else {
+      cur = SCHEDULE[idx];
+      next = SCHEDULE[idx+1] || null;
+    }
+
+    let html = '<div class="now">'
+      + '<div class="ic">'+cur.ic+'</div>'
+      + '<div class="body">'
+      + '<div class="k">En ce moment' + (cur.m!==undefined ? ' · depuis '+fmtTime(cur.m) : '') + '</div>'
+      + '<div class="v">'+cur.act+'</div>'
+      + '<div class="t">'+cur.det+'</div>'
+      + '</div></div>';
+    if (next) {
+      html += '<div class="next"><span class="arrow">→</span> À '+fmtTime(next.m)+' : '+next.act+'</div>';
+    }
+    guide.innerHTML = html;
+  }
+
+  // Conseils contextuels : plusieurs par tranche, un tiré au hasard à chaque ouverture.
+  const TIPS = {
+    nuit:   [ 'Si tu es réveillé, un coup d\'œil rapide suffit : la couche de nuit est faite pour tenir jusqu\'à 7h.',
+              'Retourne dormir tranquille — le sommeil se fait toujours libre, sans contention.' ],
+    reveil: [ 'Grand verre d\'eau au réveil pour relancer l\'hydratation de la journée.',
+              'La couche de nuit reste jusqu\'après le petit-déj : profite du cocon.',
+              'Le bilan peau, c\'est ce soir au change de nuit — pas maintenant.' ],
+    matin:  [ 'Bois ton biberon sans te restreindre : moins d\'eau = urine concentrée = irritation.',
+              'Change dès que c\'est mouillé, pas « au bout de X heures ».',
+              'Un check, ce n\'est pas forcément un change : si c\'est sec, tu laisses.' ],
+    aprem:  [ 'Check systématique au réveil de sieste : ~1h de port sans bouger, la peau apprécie la vérif.',
+              'Toujours dans la fenêtre hydratation : garde le rythme des biberons.',
+              'Fenêtre selles ratée ce matin ? Ne force pas, ça reviendra au change du soir.' ],
+    soir:   [ 'Allège l\'hydratation à partir de maintenant pour ne pas saturer la couche de nuit.',
+              'Au change de nuit : vérif peau complète et crème barrière généreuse. C\'est le geste clé du mois.',
+              'Pense à faire ton bilan du soir dans l\'appli après le change.',
+              'Barrières anti-fuites bien ajustées aux cuisses pour la nuit, surtout si tu dors sur le côté.' ]
+  };
+
+  function currentTipKey(now) {
+    const h = now.getHours();
+    if (h >= 7 && h < 9)  return 'reveil';
+    if (h >= 9 && h < 13) return 'matin';
+    if (h >= 13 && h < 19) return 'aprem';
+    if (h >= 19 && h < 23) return 'soir';
+    return 'nuit';
+  }
+
+  function renderTip() {
+    const key = currentTipKey(new Date());
+    const pool = TIPS[key] || [];
+    const el = document.getElementById('tip');
+    if (!pool.length) { el.style.display = 'none'; return; }
+    const tip = pool[Math.floor(Math.random() * pool.length)];
+    el.style.display = 'flex';
+    el.innerHTML = '<span class="bulb">💡</span><span>' + tip + '</span>';
+  }
+
+  async function renderMoment() {
+    renderGuide();
+    renderTip();
+    const now = new Date();
+    const m = currentMoment(now);
+    document.getElementById('momentEyebrow').textContent = m.eyebrow;
+    document.getElementById('momentTitle').textContent = m.title;
+
+    // La saisie complète (peau + bilan) n'est proposée que le soir.
+    const formCard = document.getElementById('formCard');
+    if (m.key === 'soir') {
+      formCard.style.display = '';
+    } else {
+      formCard.style.display = 'none';
+      toggleForm(false);
+    }
+
+    const done = await getMoments(todayStr());
+    const acts = document.getElementById('momentActs');
+    const qEl = document.getElementById('momentQ');
+
+    if (done[m.key]) {
+      // déjà répondu pour ce moment aujourd'hui
+      qEl.textContent = m.q;
+      acts.innerHTML = '<div class="done"><div class="big">✓</div><p>Point du moment déjà fait.</p><p style="color:var(--muted);font-weight:600">'+m.after+'</p></div>';
+      // mais on garde l'accès au change guidé
+      if (['reveil','matin','aprem','soir'].includes(m.key)) {
+        const cb = document.createElement('button');
+        cb.style.cssText = 'width:100%;font-family:inherit;font-size:13.5px;font-weight:800;padding:11px;border-radius:12px;border:1.5px solid var(--amber);background:#FBF1DE;color:#9a742a;cursor:pointer;margin-top:4px';
+        cb.textContent = '🔄 Changer la couche (guidé)';
+        cb.addEventListener('click', () => startChange(m.key==='reveil'||m.key==='soir'?'pilier':'check'));
+        acts.appendChild(cb);
+      }
+      return;
+    }
+
+    qEl.textContent = m.q;
+    acts.innerHTML = '';
+    m.opts.forEach(opt => {
+      const b = document.createElement('button');
+      if (opt.cls) b.className = opt.cls;
+      b.textContent = opt.label;
+      b.addEventListener('click', async () => {
+        await saveMoment(m.key, opt.result);
+        if (opt.openForm) { toggleForm(true); }
+        if (opt.change) { startChange(opt.change); return; } // lance le change guidé
+        await renderMoment();
+        try { await renderCheckStat(); } catch(e) {}
+      });
+      acts.appendChild(b);
+    });
+
+    // Bouton "changer maintenant" toujours dispo sur les moments de journée
+    if (['matin','aprem'].includes(m.key)) {
+      const cb = document.createElement('button');
+      cb.className = 'a';
+      cb.textContent = '🔄 Changer la couche maintenant';
+      cb.addEventListener('click', () => startChange('check'));
+      acts.appendChild(cb);
+    }
+    if (m.key === 'reveil' || m.key === 'soir') {
+      const cb = document.createElement('button');
+      cb.textContent = m.key === 'soir' ? '🔑 Faire le change de nuit guidé' : '🔑 Faire le change du matin guidé';
+      cb.addEventListener('click', () => startChange('pilier'));
+      acts.appendChild(cb);
+    }
+  }
+
+  /* ---- Mode supervisé : tirage aléatoire d'équipement ---- */
+  const EQUIP_POOL = [
+    { id:'segufix', ic:'🔒', n:'Culotte Segufix verrouillée', d:'Uniquement pendant la présence active du superviseur.', lock:true },
+    { id:'mittens', ic:'🧤', n:'Mittens (non verrouillées)', d:'Sensation d\'entrave, retirables à tout moment.' },
+    { id:'combi',   ic:'🩱', n:'Combi anti-arrachage Seenin', d:'Maintien contenant, effet cocon.' },
+    { id:'harnais', ic:'🎽', n:'Harnais fleece à sous-cutale', d:'Enveloppement doux, par-dessus la couche, bien réglé.' },
+    { id:'crawling', ic:'🧦', n:'Crawling shoes (sans picots)', d:'Posture à quatre pattes, entrave de la marche. Picots retirés/neutralisés.' }
+  ];
+
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+    return a;
+  }
+
+  async function getDraw(date) {
+    try { const r = await window.storage.get('draw:'+date); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
+    return null;
+  }
+  async function saveDraw(date, ids) {
+    try { await window.storage.set('draw:'+date, JSON.stringify(ids)); } catch(e) {}
+  }
+
+  function renderDrawResult(ids) {
+    const list = document.getElementById('supList');
+    list.innerHTML = '';
+    const hasLock = ids.some(id => { const e = EQUIP_POOL.find(x=>x.id===id); return e && e.lock; });
+    ids.forEach(id => {
+      const e = EQUIP_POOL.find(x => x.id === id);
+      if (!e) return;
+      const div = document.createElement('div');
+      div.className = 'equip' + (e.lock ? ' lock' : '');
+      div.innerHTML = '<div class="ic">'+e.ic+'</div><div class="body"><div class="n">'+e.n+'</div><div class="d">'+e.d+'</div></div>';
+      list.appendChild(div);
+    });
+    const note = document.getElementById('supNote');
+    if (hasLock) {
+      note.innerHTML = '⚠️ Un élément verrouillé est tiré : vérifie que ton superviseur est bien présent, aux clés, et posez le signal d\'arrêt avant de commencer. Sur les fenêtres de régression (midi/soir), pas pendant sieste ou nuit.';
+    } else {
+      note.innerHTML = 'Tous les éléments tirés sont à libération : tu peux les porter en autonomie sur tes fenêtres de régression.';
+    }
+    document.getElementById('supResult').classList.add('show');
+  }
+
+  document.getElementById('supDraw').addEventListener('click', async () => {
+    const n = 2 + Math.floor(Math.random() * 4); // 2 à 5
+    const ids = shuffle(EQUIP_POOL).slice(0, n).map(e => e.id);
+    await saveDraw(todayStr(), ids);
+    document.getElementById('supLead').textContent = 'Équipement du jour (' + ids.length + ')';
+    renderDrawResult(ids);
+  });
+
+  document.getElementById('markSup').addEventListener('click', async () => {
+    try { await window.storage.set('daytype:'+todayStr(), JSON.stringify('supervise')); } catch(e) {}
+    await renderSupMode();
+  });
+  document.getElementById('markSolo').addEventListener('click', async () => {
+    try { await window.storage.set('daytype:'+todayStr(), JSON.stringify('solo')); } catch(e) {}
+    await renderSupMode();
+  });
+
+  // Affiche la carte supervisé seulement si le jour est marqué "supervisé"
+  async function renderSupMode() {
+    const supCard = document.getElementById('supCard');
+    let type = null;
+    try {
+      const r = await window.storage.get('day:'+todayStr());
+      if (r && r.value) { const e = JSON.parse(r.value); type = e.type || null; }
+    } catch(e) {}
+    // aussi : un marqueur léger posé depuis la carte elle-même
+    if (!type) {
+      try { const r2 = await window.storage.get('daytype:'+todayStr()); if (r2 && r2.value) type = JSON.parse(r2.value); } catch(e) {}
+    }
+
+    const prompt = document.getElementById('supPrompt');
+    const inner = document.getElementById('supInner');
+    if (type === 'supervise') {
+      supCard.style.display = '';
+      prompt.style.display = 'none';
+      inner.style.display = '';
+      const existing = await getDraw(todayStr());
+      if (existing && existing.length) {
+        document.getElementById('supLead').textContent = 'Équipement du jour (' + existing.length + ')';
+        renderDrawResult(existing);
+      }
+    } else if (type === 'solo') {
+      supCard.style.display = 'none';
+    } else {
+      // type inconnu : on propose de marquer le jour
+      supCard.style.display = '';
+      prompt.style.display = '';
+      inner.style.display = 'none';
+    }
+  }
+
+  // init
+  (async function() {
+    if (!storage.persistent) {
+      const w = document.getElementById('storeWarn');
+      w.style.display = 'block';
+      w.innerHTML = '⚠️ Stockage non persistant ici : tes saisies ne seront pas conservées après fermeture. Ouvre ce fichier dans Chrome ou Safari (hors navigation privée) pour que le suivi tienne sur le mois.';
+    }
+    document.getElementById('dateInput').value = todayStr();
+    await loadAutoPref();
+    await renderCheckStat();
+    await renderMoment();
+    await renderSupMode();
+    // preload today's entry if it exists
+    try {
+      const r = await window.storage.get('day:'+todayStr());
+      if (r && r.value) loadInto(JSON.parse(r.value));
+    } catch(e) {}
+    await refresh();
+
+    // --- Rappel de change automatique aux heures imposées ---
+    // Créneaux du planning (minute depuis minuit) + type + libellé.
+    const CHANGE_SLOTS = [
+      { key:'c0900', m:9*60,     ctx:'pilier', label:'Change du matin' },
+      { key:'c1130', m:11*60+30, ctx:'check',  label:'Check + 1er biberon' },
+      { key:'c1330', m:13*60+30, ctx:'check',  label:'Check du déjeuner' },
+      { key:'c1600', m:16*60,    ctx:'check',  label:'Check + 3e biberon' },
+      { key:'c1930', m:19*60+30, ctx:'check',  label:'Check du dîner' },
+      { key:'c2230', m:22*60+30, ctx:'pilier', label:'Change de nuit' }
+    ];
+    const TOL = 45; // fenêtre de déclenchement : jusqu'à 45 min après l'heure
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+
+    // trouver un créneau actif (heure atteinte, dans la tolérance) non encore fait aujourd'hui
+    let dueSlot = null;
+    for (const s of CHANGE_SLOTS) {
+      if (nowMin >= s.m && nowMin <= s.m + TOL) { dueSlot = s; break; }
+    }
+    let alreadyDone = false;
+    if (dueSlot) {
+      try {
+        const r = await window.storage.get('slotdone:'+todayStr());
+        const done = (r && r.value) ? JSON.parse(r.value) : {};
+        alreadyDone = !!done[dueSlot.key];
+      } catch(e) {}
+    }
+
+    if (dueSlot && !alreadyDone) {
+      // affiche le rappel "c'est l'heure" puis lance le flux guidé.
+      // Le créneau n'est PAS marqué ici : "Plus tard" doit le laisser réapparaître.
+      setTimeout(() => popChangeDue(dueSlot), 500);
+    } else if (autoOn && Math.random() < OPEN_PROBABILITY) {
+      // sinon, éventuellement une vérif surprise
+      setTimeout(() => popCheck(), 700);
+    }
+  })();
+
+  // Enregistrement du service worker (mode hors-ligne / installable)
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('service-worker.js').catch(() => {});
+    });
+  }
+</script>
