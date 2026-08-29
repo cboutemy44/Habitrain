@@ -400,6 +400,15 @@
     <div class="apprec" id="dashApprec">Le tableau de bord s'activera dès tes premières entrées.</div>
   </div>
 
+  <div class="card outfit-card" id="outfitCard" style="display:none">
+    <h2>Tenue du jour</h2>
+    <div class="sub">Tirée au sort une fois par jour : une tenue de jour et une tenue de nuit. Les équipements de restriction ne sont pas inclus ici.</div>
+    <button class="sup-btn" id="outfitDraw" style="background:#5c9463">🎲 Tirer la tenue du jour</button>
+    <div id="outfitList" style="margin-top:14px"></div>
+    <div class="outfit-note" id="outfitNote" style="display:none"></div>
+    <div class="outfit-note" id="outfitOnce" style="display:none;font-style:italic">🔒 Un seul tirage par jour — la tenue est fixée.</div>
+  </div>
+
   <div class="card moment" id="momentCard">
     <div class="eyebrow" id="momentEyebrow">Moment</div>
     <h2 id="momentTitle">Point du moment</h2>
@@ -407,15 +416,6 @@
     <div class="tip" id="tip"></div>
     <div class="qline" id="momentQ">Chargement…</div>
     <div class="acts" id="momentActs"></div>
-  </div>
-
-  <div class="card outfit-card" id="outfitCard" style="display:none">
-    <h2>Tenue du jour</h2>
-    <div class="sub">Tirée au sort une fois par jour, cohérente avec chaque moment. Les équipements de restriction ne sont pas inclus ici.</div>
-    <button class="sup-btn" id="outfitDraw" style="background:#5c9463">🎲 Tirer la tenue du jour</button>
-    <div id="outfitList" style="margin-top:14px"></div>
-    <div class="outfit-note" id="outfitNote" style="display:none"></div>
-    <div class="outfit-note" id="outfitOnce" style="display:none;font-style:italic">🔒 Un seul tirage par jour — la tenue est fixée.</div>
   </div>
 
   <div class="card sup-card" id="supCard" style="display:none">
@@ -646,7 +646,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '3.7';
+  const APP_VERSION = '3.8';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1664,31 +1664,27 @@
   function renderOutfitResult(o) {
     const now = new Date();
     const nowMin = now.getHours()*60 + now.getMinutes();
-    // blocs de la journée avec la tenue tirée
-    const blocks = [
-      { from:7*60, to:9*60, ic:'🌙', moment:'Réveil & petit-déj', wear:o.nuit + ' (couche de nuit gardée)' },
-      { from:9*60, to:14*60+30, ic:'🧸', moment:'Journée', wear:o.jour },
-      { from:14*60+30, to:16*60, ic:'😴', moment:'Sieste', wear:o.sieste + ' + couverture' },
-      { from:16*60, to:19*60+30, ic:'🚶', moment:'Après-midi', wear:o.jour },
-      { from:19*60+30, to:22*60+30, ic:'🛋️', moment:'Détente du soir', wear:o.nuit },
-      { from:22*60+30, to:24*60+7*60, ic:'🌙', moment:'Nuit', wear:o.nuit }
+    // Nuit = 22h30 → 9h (réveil/petit-déj + détente du soir + nuit) ; Jour = 9h → 22h30.
+    const isNightNow = (nowMin >= 22*60+30) || (nowMin < 9*60);
+    const cards = [
+      { key:'jour', ic:'☀️', moment:'Tenue de jour', wear:o.jour, active:!isNightNow },
+      { key:'nuit', ic:'🌙', moment:'Tenue de nuit / repos', wear:o.nuit, active:isNightNow }
     ];
     const list = document.getElementById('outfitList');
     list.innerHTML = '';
-    blocks.forEach(b => {
-      let isNow = (nowMin >= b.from && nowMin < b.to);
-      if (b.to > 24*60) { const w = b.to - 24*60; isNow = (nowMin >= b.from) || (nowMin < w); }
+    cards.forEach(c => {
       const row = document.createElement('div');
-      row.className = 'outfit-row' + (isNow ? ' now-block' : '');
-      row.innerHTML = '<div class="ic">'+b.ic+'</div><div class="body"><div class="moment">'+b.moment+(isNow?' · maintenant':'')+'</div><div class="wear">'+b.wear+'</div></div>';
+      row.className = 'outfit-row' + (c.active ? ' now-block' : '');
+      row.innerHTML = '<div class="ic">'+c.ic+'</div><div class="body"><div class="moment">'+c.moment+(c.active?' · maintenant':'')+'</div><div class="wear">'+c.wear+'</div></div>';
       list.appendChild(row);
     });
-    // cache-couche
+    // note cache-couche + sieste
     const note = document.getElementById('outfitNote');
     note.style.display = '';
-    note.innerHTML = o.cache
-      ? '🩲 <b>Cache-couche Rearz Safari</b> aujourd\'hui : porté par-dessus la couche sur les blocs de journée.'
-      : '🩲 Pas de cache-couche aujourd\'hui.';
+    note.innerHTML = (o.cache
+      ? '🩲 <b>Cache-couche Rearz Safari</b> aujourd\'hui, par-dessus la couche en journée.'
+      : '🩲 Pas de cache-couche aujourd\'hui.')
+      + ' &nbsp;·&nbsp; 😴 Sieste : tu peux repasser en tenue de nuit pour le confort.';
     document.getElementById('outfitOnce').style.display = '';
   }
 
