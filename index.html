@@ -523,7 +523,7 @@
 
   <div class="card">
     <h2>Historique</h2>
-    <div class="sub" id="histSub">Tes journées enregistrées, la plus récente en haut.</div>
+    <div class="sub" id="histSub">Rapports du soir et détail des checks, le plus récent en haut.</div>
     <div id="history"></div>
   </div>
 </div>
@@ -625,7 +625,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '3.1';
+  const APP_VERSION = '3.2';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -719,51 +719,125 @@
     });
   }
 
-  function renderHistory(entries) {
+  // libellé lisible pour n'importe quel résultat de check/vérif
+  function labelResult(res) {
+    if (!res) return '';
+    const map = {
+      ok:'couche en place', adj:'couche réajustée', miss:'sans couche', fixed:'remise en couche',
+      sec:'sèche', mouille:'mouillée', sature:'saturée',
+      etat_sec:'sèche', etat_mouille:'mouillée', etat_sature:'saturée',
+      change_fait:'change effectué',
+      tet_ok:'tétine en bouche', tet_prise:'tétine reprise', tet_miss:'tétine absente',
+      reveil_sec:'nuit au sec', reveil_mouille:'nuit mouillée', reveil_fuite:'fuite la nuit',
+      matin_ok:'matinée OK', matin_change:'à changer', matin_soif:'pas hydraté',
+      aprem_ok:'après-midi OK', aprem_sieste:'sieste faite', aprem_change:'à changer',
+      soir_ok:'soir OK', soir_bilan:'bilan lancé', soir_souci:'peau à surveiller',
+      nuit_ok:'nuit OK', nuit_change:'change nocturne'
+    };
+    return map[res] || res;
+  }
+  function resultColor(res) {
+    if (['miss','sature','etat_sature','tet_miss','reveil_fuite','soir_souci'].includes(res)) return 'var(--coral)';
+    if (['adj','mouille','etat_mouille','matin_change','aprem_change','matin_soif'].includes(res)) return 'var(--amber)';
+    return 'var(--green)';
+  }
+  function fmtClock(iso) {
+    try { const d = new Date(iso); return String(d.getHours()).padStart(2,'0')+'h'+String(d.getMinutes()).padStart(2,'0'); } catch(e) { return ''; }
+  }
+
+  async function renderHistory(entries) {
     const box = document.getElementById('history');
     box.innerHTML = '';
-    if (!entries.length) {
+
+    // rassemble tous les jours : ceux avec un rapport + ceux avec seulement des checks
+    const byDate = {}; entries.forEach(e => byDate[e.date] = e);
+    const dateSet = new Set(Object.keys(byDate));
+    // scanne les 30 derniers jours pour des checks isolés
+    for (let i = 0; i < 31; i++) {
+      const d = new Date(); d.setDate(d.getDate()-i);
+      const ds = d.toISOString().slice(0,10);
+      const checks = await getChecks(ds);
+      if (checks.length) dateSet.add(ds);
+    }
+    const allDates = Array.from(dateSet).sort((a,b)=> a<b?1:-1); // récent en haut
+
+    if (!allDates.length) {
       box.innerHTML = '<div class="empty-msg">Aucune entrée pour l\'instant. Ta première journée s\'affichera ici.</div>';
       return;
     }
-    entries.forEach(e => {
+
+    for (const date of allDates) {
+      const e = byDate[date] || null;
+      const checks = await getChecks(date);
       const div = document.createElement('div');
       div.className = 'entry';
-      const dObj = new Date(e.date + 'T12:00:00');
+      const dObj = new Date(date + 'T12:00:00');
       const dtxt = dObj.toLocaleDateString('fr-FR', { weekday:'short', day:'numeric', month:'short' });
-      const typeBadge = e.type === 'supervise'
+
+      const typeBadge = e && e.type === 'supervise'
         ? '<span class="badge sup">Supervisée</span>'
-        : (e.type === 'solo' ? '<span class="badge solo">Solo</span>' : '');
-      const skinPill = e.skin
+        : (e && e.type === 'solo' ? '<span class="badge solo">Solo</span>' : '');
+      const skinPill = e && e.skin
         ? '<span class="pill" style="background:'+skinColors[e.skin]+'">'+skinLabel[e.skin]+'</span>'
         : '';
       const bits = [];
-      if (e.bib !== undefined) bits.push('🍼 '+e.bib+'/3');
-      if (e.nuit) bits.push(nuitLabel[e.nuit]);
+      if (e && e.bib !== undefined) bits.push('🍼 '+e.bib+'/3');
+      if (e && e.nuit) bits.push(nuitLabel[e.nuit]);
+      if (checks.length) bits.push('✅ '+checks.length+' check'+(checks.length>1?'s':''));
+
+      // détail des checks (repliable)
+      let checksHtml = '';
+      if (checks.length) {
+        const rows = checks.map(c => {
+          const time = c.t ? fmtClock(c.t) : '';
+          const col = resultColor(c.result);
+          return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;font-weight:600">'
+            + '<span style="color:var(--muted);width:44px;flex:none">'+time+'</span>'
+            + '<span style="width:8px;height:8px;border-radius:50%;background:'+col+';flex:none"></span>'
+            + '<span>'+labelResult(c.result)+'</span></div>';
+        }).join('');
+        checksHtml = '<div class="check-detail" style="display:none;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)">'+rows+'</div>';
+      }
+
       div.innerHTML =
         '<div class="top"><span class="date">'+dtxt+'</span>'+skinPill+typeBadge+'</div>'+
         (bits.length ? '<div class="meta">'+bits.join(' · ')+'</div>' : '')+
-        (e.note ? '<div class="note">« '+e.note.replace(/</g,'&lt;')+' »</div>' : '');
+        (e && e.note ? '<div class="note">« '+e.note.replace(/</g,'&lt;')+' »</div>' : '')+
+        (checks.length ? '<button class="hist-toggle" style="margin-top:6px;background:none;border:none;color:var(--blue-deep);font-family:inherit;font-size:11.5px;font-weight:800;cursor:pointer;padding:0">▸ Voir les '+checks.length+' check'+(checks.length>1?'s':'')+'</button>' : '')+
+        checksHtml;
+
+      // toggle détail checks
+      const tgl = div.querySelector('.hist-toggle');
+      if (tgl) {
+        tgl.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const det = div.querySelector('.check-detail');
+          const open = det.style.display !== 'none';
+          det.style.display = open ? 'none' : 'block';
+          tgl.textContent = (open ? '▸ Voir les ' : '▾ Masquer les ') + checks.length + ' check' + (checks.length>1?'s':'');
+        });
+      }
+
+      // clic sur l'entrée = éditer le rapport (si un rapport existe ou pour en créer un)
       div.style.cursor = 'pointer';
       div.title = 'Cliquer pour recharger et modifier ce jour';
       div.addEventListener('click', () => {
-        document.getElementById('dateInput').value = e.date;
-        loadInto(e);
-        // Édition depuis l'historique : on révèle et ouvre le formulaire même hors du soir.
+        document.getElementById('dateInput').value = date;
+        if (e) loadInto(e); else resetForm();
         const formCard = document.getElementById('formCard');
         formCard.style.display = '';
         toggleForm(true);
-        document.getElementById('formSub').textContent = 'Modification du ' + dtxt + '. Réenregistre pour mettre à jour.';
+        document.getElementById('formSub').textContent = (e?'Modification':'Nouveau rapport') + ' du ' + dtxt + '.';
         formCard.scrollIntoView({ behavior:'smooth', block:'start' });
       });
       box.appendChild(div);
-    });
+    }
   }
 
   async function refresh() {
     const entries = await getAll();
     renderStrip(entries);
-    renderHistory(entries);
+    await renderHistory(entries);
     const filled = entries.length;
     document.getElementById('histSub').textContent =
       filled ? filled + ' jour' + (filled>1?'s':'') + ' enregistré' + (filled>1?'s':'') + ' sur le mois.'
