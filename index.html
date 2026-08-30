@@ -459,6 +459,7 @@
     <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
       <button class="settings-toggle-btn" id="openSettings">⚙️ Réglages</button>
       <button class="settings-toggle-btn" id="toggleVoice">🧸 Caregiver</button>
+      <button class="settings-toggle-btn" id="openDebug">🐞 Debug</button>
     </div>
   </div>
 
@@ -479,6 +480,22 @@
     <div id="setGroups"></div>
 
     <div class="set-note" id="setNote">Rappel : une appli web ne garantit pas les notifications quand elle est complètement fermée. Pour les rappels critiques, garde tes alarmes système.</div>
+  </div>
+
+  <div class="card" id="debugCard" style="display:none">
+    <h2>🐞 Debug</h2>
+    <div class="sub">Outils de test. La tenue choisie ici remplace le tirage du jour de Foxy.</div>
+    <div class="set-cat"><h4>Tenue de Foxy (aujourd'hui)</h4>
+      <div id="debugOutfits" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+    </div>
+    <div class="set-cat"><h4>Mode voix</h4>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="settings-toggle-btn" data-vm="report">📋 Reporting</button>
+        <button class="settings-toggle-btn" data-vm="care">🧸 Caregiver</button>
+        <button class="settings-toggle-btn" data-vm="foxy">🦊 Foxy</button>
+      </div>
+    </div>
+    <div class="set-note">Ces réglages sont là pour tester le rendu. La tenue reste celle choisie jusqu'à ce que tu en tires une autre ou changes de jour.</div>
   </div>
 
   <div class="card" id="imChat">
@@ -720,7 +737,7 @@
     <p id="poseIntro">Suis les étapes dans l'ordre.</p>
     <ol class="fixsteps" id="poseSteps"></ol>
     <div class="acts">
-      <button class="ok" id="poseDone">✓ Couche fraîche posée</button>
+      <button class="ok" id="poseDone">🐾 Couche fraîche posée</button>
     </div>
   </div>
 </div>
@@ -779,7 +796,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '5.0';
+  const APP_VERSION = '5.1';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1550,7 +1567,7 @@
   });
 
   const skinColors = { verte: 'var(--green)', surveiller: 'var(--amber)', traiter: 'var(--coral)' };
-  const skinShort = { verte: '✓', surveiller: '!', traiter: '⚠' };
+  const skinShort = { verte: '🐾', surveiller: '!', traiter: '⚠' };
   const skinLabel = { verte: 'Verte', surveiller: 'À surveiller', traiter: 'À traiter' };
   const nuitLabel = { ok: 'Nuit au sec', limite: 'Nuit limite', fuite: 'Nuit — fuite' };
 
@@ -1896,7 +1913,7 @@
       const on = !!breachSel[b.id];
       const row = document.createElement('div');
       row.className = 'breach-row' + (on ? ' on' : '');
-      row.innerHTML = '<div class="breach-box">'+(on?'✓':'')+'</div>'+
+      row.innerHTML = '<div class="breach-box">'+(on?'🐾':'')+'</div>'+
         '<div class="info"><div class="n">'+b.n+'</div><div class="g '+b.grav+'">'+GRAV_LABEL[b.grav]+'</div></div>';
       row.addEventListener('click', () => {
         // bascule locale uniquement (pas d'enregistrement, pas d'impact note)
@@ -2085,7 +2102,7 @@
     try {
       await window.storage.set('day:'+date, JSON.stringify(entry));
       const flash = document.getElementById('flash');
-      flash.textContent = '✓ Enregistré';
+      flash.textContent = '🐾 Enregistré';
       setTimeout(()=> flash.textContent = '', 1800);
       document.getElementById('formSub').textContent = 'Remplis la peau au minimum. Le reste va vite.';
       await refresh();
@@ -2740,7 +2757,7 @@
     if (done[m.key]) {
       // déjà répondu pour ce moment aujourd'hui
       qEl.textContent = v(m.q, m.qi || m.q);
-      acts.innerHTML = '<div class="done"><div class="big">'+(immersive?'💛':'✓')+'</div><p>'+v('Point du moment déjà fait.', 'C\'est fait, bravo.')+'</p><p style="color:var(--muted);font-weight:600">'+v(m.after, m.afteri || m.after)+'</p></div>';
+      acts.innerHTML = '<div class="done"><div class="big">'+(voiceMode==='foxy'?'🐾':(voiceMode==='care'?'💛':'🐾'))+'</div><p>'+v('Point du moment déjà fait.', 'C\'est fait, bravo.')+'</p><p style="color:var(--muted);font-weight:600">'+v(m.after, m.afteri || m.after)+'</p></div>';
       // mais on garde l'accès au change guidé
       if (['reveil','matin','aprem','soir'].includes(m.key)) {
         const cb = document.createElement('button');
@@ -2860,7 +2877,7 @@
     await saveBreaches(todayStr(), breachSel || {});
     updateBreachSummary(true);
     const flash = document.getElementById('breachFlash');
-    flash.textContent = '✓ Entorses enregistrées';
+    flash.textContent = '🐾 Entorses enregistrées';
     setTimeout(() => flash.textContent = '', 1800);
     try { await renderDashboard(await getAll()); } catch(e) {}
   });
@@ -3000,6 +3017,22 @@
   // Planification locale : programme les notifs restantes de la journée tant que l'appli vit.
   let notifTimers = [];
   function clearNotifTimers() { notifTimers.forEach(t => clearTimeout(t)); notifTimers = []; }
+  // variantes Foxy des notifications (ton pote complice)
+  const FOXY_NOTIF = {
+    reveil:'Hey, debout ! Bien dormi ? On checke ta couche de nuit ?',
+    change_matin:'C\'est l\'heure du grand change du matin, viens on s\'en occupe !',
+    change_nuit:'Change de nuit + bilan ! On te prépare une couche bien épaisse.',
+    coucher:'Allez, au dodo mec. On se capte demain !',
+    reg_midi:'Petite pause régression de midi, blottis-toi tranquille.',
+    sieste:'La sieste, le meilleur moment ! File dans ton cocon.',
+    reg_soir:'Grosse détente du soir ! Allège l\'eau et profite.',
+    check1:'Check + premier biberon ! Pense à bien boire.',
+    check3:'Check au réveil de sieste + ton troisième bibi !',
+    petitdej:'Petit-déj en tenue de nuit, régale-toi !',
+    dejeuner:'Déjeuner + deuxième biberon, bon app\' !',
+    diner:'C\'est l\'heure du dîner ! Un petit check si besoin.',
+    surprise:'Vérif surprise ! Ta couche est comment ?'
+  };
   function scheduleNotifications() {
     clearNotifTimers();
     if (notifPermState() !== 'granted') return;
@@ -3010,18 +3043,29 @@
       if (it.m <= nowMin) return; // déjà passé aujourd'hui
       const msUntil = (it.m - nowMin) * 60000 - now.getSeconds()*1000;
       if (msUntil > 0 && msUntil < 24*3600000) {
-        const t = setTimeout(() => { showLocalNotif(it.n, it.body || it.n); }, msUntil);
+        const t = setTimeout(() => { showLocalNotif(it.n, it.body || it.n, it.id); }, msUntil);
         notifTimers.push(t);
       }
     }));
   }
-  function showLocalNotif(title, body) {
+  function showLocalNotif(title, body, itemId) {
     if (notifPermState() !== 'granted') return;
+    // en mode Foxy, ton et emoji adaptés
+    let icon = 'icon-192.png';
+    let prefix = '🍼 ';
+    let finalBody = body;
+    if (voiceMode === 'foxy') {
+      prefix = '🦊 ';
+      icon = foxyOutfit ? foxyOutfit.sheet : 'icon-192.png';
+      if (itemId && FOXY_NOTIF[itemId]) finalBody = FOXY_NOTIF[itemId];
+    } else if (voiceMode === 'care') {
+      prefix = '🧸 ';
+    }
     try {
       if (navigator.serviceWorker && navigator.serviceWorker.ready) {
-        navigator.serviceWorker.ready.then(reg => reg.showNotification('🍼 '+title, { body, icon:'icon-192.png', badge:'icon-192.png', tag:title }));
+        navigator.serviceWorker.ready.then(reg => reg.showNotification(prefix+title, { body: finalBody, icon, badge:'icon-192.png', tag:title }));
       } else {
-        new Notification('🍼 '+title, { body, icon:'icon-192.png' });
+        new Notification(prefix+title, { body: finalBody, icon });
       }
     } catch(e) {}
   }
@@ -3038,6 +3082,34 @@
       updatePermBanner();
       if (res === 'granted') scheduleNotifications();
     } catch(e) {}
+  });
+
+  // ---- Menu debug ----
+  function renderDebugOutfits() {
+    const box = document.getElementById('debugOutfits');
+    if (!box) return;
+    box.innerHTML = '';
+    FOXY_OUTFITS.forEach(o => {
+      const b = document.createElement('button');
+      b.className = 'settings-toggle-btn';
+      b.textContent = (foxyOutfit.id === o.id ? '🐾 ' : '') + o.name;
+      b.addEventListener('click', async () => {
+        foxyOutfit = o;
+        try { await window.storage.set('foxyfit:'+todayStr(), JSON.stringify(o.id)); } catch(e) {}
+        renderDebugOutfits();
+        if (voiceMode === 'foxy') { try { await imRunMoment(); } catch(e) {} }
+      });
+      box.appendChild(b);
+    });
+  }
+  document.getElementById('openDebug').addEventListener('click', async () => {
+    const card = document.getElementById('debugCard');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) { await loadFoxyOutfit(); renderDebugOutfits(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
+  document.querySelectorAll('#debugCard [data-vm]').forEach(btn => {
+    btn.addEventListener('click', () => setVoiceMode(btn.dataset.vm));
   });
 
   // init
