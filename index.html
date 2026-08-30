@@ -160,6 +160,19 @@
   }
   .tab.active { background:#c86b3a; color:#fff; border-color:#c86b3a; box-shadow:0 3px 10px rgba(200,107,58,.3); }
 
+  /* Notre aventure (quête) */
+  .quest-bar { height:12px; border-radius:8px; background:#efe4d2; overflow:hidden; }
+  .quest-fill { height:100%; border-radius:8px; background:linear-gradient(90deg,#e0a060,#c86b3a); transition:width .5s; }
+  .quest-marks { display:flex; justify-content:space-between; margin-top:6px; }
+  .quest-marks span { font-size:9.5px; font-weight:800; color:var(--muted); flex:1; text-align:center; }
+  .chapter { display:flex; gap:12px; padding:12px 0; border-top:1px solid var(--line); }
+  .chapter:first-child { border-top:none; }
+  .chapter .cportrait { width:60px; height:60px; flex:none; border-radius:14px; border:2px solid #e0a060; background-color:#FDF3EA; background-repeat:no-repeat; }
+  .chapter.locked .cportrait { filter:grayscale(1) opacity(.4); }
+  .chapter .cbody .ctitle { font-family:'Fraunces',serif; font-weight:600; font-size:15px; color:#5a4326; }
+  .chapter .ctext { font-size:13px; font-weight:600; color:var(--ink); line-height:1.5; margin-top:4px; }
+  .chapter.locked .ctext { color:var(--muted); font-style:italic; }
+
   /* ===== Reporting = tableau d'enfant avec gommettes ===== */
   body.report {
     background:
@@ -173,7 +186,7 @@
 
 
   /* chaque carte = feuille de papier épinglée, légèrement de travers */
-  body.report .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard) {
+  body.report .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard):not(#questCard) {
     background:#fffdf8;
     border:1px solid #efe4d2;
     border-radius:8px;
@@ -181,9 +194,9 @@
     position:relative;
     transform:rotate(-0.5deg);
   }
-  body.report .card:nth-of-type(even):not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard) { transform:rotate(0.6deg); }
+  body.report .card:nth-of-type(even):not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard):not(#questCard) { transform:rotate(0.6deg); }
   /* washi tape en haut de chaque carte */
-  body.report .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard)::before {
+  body.report .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard):not(#questCard)::before {
     content:''; position:absolute; top:-11px; left:50%; transform:translateX(-50%) rotate(-2deg);
     width:74px; height:22px; border-radius:3px;
     background:repeating-linear-gradient(45deg,#f4b8c4 0 7px,#f7c9d3 7px 14px);
@@ -480,7 +493,7 @@
   /* ===== Mode immersif : conversation plein cadre ===== */
   body.immersive { background: linear-gradient(180deg,#F5EEF6,#EEF0FA) !important; }
   /* on masque tout le reporting */
-  body.immersive .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard) { display:none !important; }
+  body.immersive .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard):not(#questCard) { display:none !important; }
   body.immersive #verBadge { opacity:0.5; }
 
   #imChat { display:none; }
@@ -571,6 +584,7 @@
     <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
       <button class="settings-toggle-btn" id="openSettings">⚙️ Réglages</button>
       <button class="settings-toggle-btn" id="toggleVoice">🦊 Mode Foxy</button>
+      <button class="settings-toggle-btn" id="openQuest">🗺️ Notre aventure</button>
       <button class="settings-toggle-btn" id="openDebug">🐞 Debug</button>
     </div>
   </div>
@@ -614,6 +628,13 @@
       </div>
     </div>
     <div class="set-note">Ces réglages sont là pour tester le rendu. La tenue reste celle choisie jusqu'à ce que tu en tires une autre ou changes de jour.</div>
+  </div>
+
+  <div class="card" id="questCard" style="display:none">
+    <h2>🗺️ Notre aventure</h2>
+    <div class="sub">Le Voyage de Foxy — l'histoire qu'on écrit ensemble, au fil de ton mois.</div>
+    <div id="questProgress" style="margin:12px 0"></div>
+    <div id="questChapters"></div>
   </div>
 
   <div class="card" id="imChat">
@@ -943,7 +964,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '6.2';
+  const APP_VERSION = '6.3';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -977,7 +998,7 @@
   // Personnage courant (caregiver ou foxy)
   function persona() {
     if (voiceMode === 'foxy') return {
-      name:'Foxy', avatar:'🦊', status:'ton pote qui a réussi le programme',
+      name:'Foxy', avatar:'🦊', status:'ton compagnon de voyage 🦊',
       grad:'linear-gradient(135deg,#f0a060,#d9743a)', headbg:'linear-gradient(180deg,#FDEFE2,#FBF3EA)',
       whoColor:'#a85a2a', statusColor:'#c8843a', bubble:'#FCEBDD', bubbleInk:'#7a4420',
       meGrad:'linear-gradient(135deg,#e08840,#c8703a)'
@@ -1594,10 +1615,67 @@
         ? 'Ah mais on a déjà fait le point tout à l\'heure ! ' + foxyAfter(m)
         : 'On a déjà fait notre petit point tout à l\'heure. ' + (m.afteri || m.after), 800, pickExpr('positive'));
       buildMomentReplies(m, true);
+      if (voiceMode === 'foxy') runQuestBeat(m);
       return;
     }
     await imSay(foxyOrCare(m, 'q'), 900, pickExpr('think'));
     buildMomentReplies(m, false);
+    if (voiceMode === 'foxy') runQuestBeat(m);
+  }
+
+  // Beat narratif : débloque un chapitre si palier franchi, propose le rituel du jour
+  async function runQuestBeat(m) {
+    // 1) déblocage de chapitre selon le palier courant
+    let stage = 0;
+    try { const r = await window.storage.get('queststage'); if (r && r.value) stage = JSON.parse(r.value); } catch(e) {}
+    const chapter = await checkChapterUnlock(stage);
+    if (chapter) {
+      // Foxy révèle le nouveau chapitre, ton senpai complice
+      pendingExpr = chapter.expr;
+      await imSay('Eh... attends. Je crois qu\'on vient de passer un cap, toi et moi. 🦊', 900, chapter.expr);
+      await imSay(chapter.text, 1000, chapter.expr);
+      await imSay('Un nouveau chapitre de notre aventure vient de s\'ouvrir. Tu le retrouveras dans « Notre aventure » quand tu veux.', 900, 'joy');
+      pendingExpr = 'neutral';
+      buildMomentReplies(m, true);
+      return;
+    }
+    // 2) rituel du jour, si c'est le moment tiré et pas encore proposé
+    const q = await ensureTodayRitual();
+    if (q.ritualMoment === m.key && q.ritualDoneDate !== todayStr() && q.ritualProposedDate !== todayStr()) {
+      q.ritualProposedDate = todayStr();
+      await saveQuest(q);
+      const ritual = QUEST_RITUALS.find(r => r.id === q.todayRitual) || QUEST_RITUALS[0];
+      await imSay('Au fait ! J\'ai un petit rituel pour nous deux aujourd\'hui.', 800, 'joy');
+      await imSay(ritual.ask, 900, 'happy');
+      imSetActions([
+        { label:'🤝 Ça marche, je le fais pour nous', onClick: async () => {
+          imAddMe('Ça marche, je le fais !');
+          await imSay('Trop bien ! Ça me fait plaisir qu\'on avance ensemble sur ce chemin. Je note ça dans notre aventure.', 800, 'proud');
+          await collectFragmentMaybe();
+          await imOfferHelp(m);
+        }},
+        { soft:true, label:'Une autre fois', onClick: async () => {
+          imAddMe('Une autre fois.');
+          await imSay('Pas de souci, à ton rythme. On est deux sur la même route, y\'a pas de pression.', 700, 'neutral');
+          await imOfferHelp(m);
+        }}
+      ]);
+    }
+  }
+
+  // récolte parfois un fragment de souvenir (récompense narrative)
+  async function collectFragmentMaybe() {
+    const q = await getQuest();
+    // fragment non encore récolté
+    const remaining = QUEST_FRAGMENTS.filter(f => !(q.fragments || []).includes(f));
+    if (!remaining.length) return;
+    const frag = remaining[Math.floor(Math.random()*remaining.length)];
+    q.fragments = q.fragments || [];
+    q.fragments.push(frag);
+    q.ritualDoneDate = todayStr();
+    await saveQuest(q);
+    await imSay('Tiens, ça me rappelle un truc... ' + frag, 1100, 'teach');
+    await imSay('Voilà, un souvenir de plus rangé dans notre aventure. Merci d\'être là, franchement. 🦊', 900, 'happy');
   }
 
   function updateFoxyStatus() {
@@ -1734,6 +1812,74 @@
     'Cool. Éclate-toi, on se recapte plus tard !',
     'Ça marche mec. Profite bien.'
   ];
+
+  /* ============================================================
+     LE VOYAGE DE FOXY — quête initiatique, il revit son mois
+     ============================================================ */
+  // 4 chapitres calés sur les paliers d'habituation (stage 0..3).
+  const QUEST_CHAPTERS = [
+    { stage:0, title:'Chapitre 1 — Le grand saut', expr:'pensive', text:
+      'Tu sais, quand j\'ai commencé mon mois, j\'étais exactement là où tu es maintenant. Tout nouveau, j\'y pensais sans arrêt... et surtout, j\'étais tout seul. Alors franchement ? Ça me fait super plaisir de le refaire avec toi cette fois. On est deux, maintenant. Un jour après l\'autre, côte à côte. Je connais un peu le chemin, je te montrerai les passages — mais on avance ensemble, au même rythme.' },
+    { stage:1, title:'Chapitre 2 — Ça prend racine', expr:'happy', text:
+      'Un matin de ma première semaine, je me suis réveillé sans même penser à ma couche. C\'était devenu... normal. Et là je me rappelle m\'être dit : « j\'aurais tellement aimé avoir quelqu\'un à qui le raconter. » Bah voilà, aujourd\'hui je t\'ai, toi. Et toi aussi tu commences à le sentir, ce petit basculement, pas vrai ? Je suis trop content de voir ça arriver pour toi.' },
+    { stage:2, title:'Chapitre 3 — Le rythme du cœur', expr:'joy', text:
+      'Au milieu de mon mois, tout coulait tout seul. Mon corps connaissait la musique par cœur. Mes fenêtres de régression, j\'avais hâte — ces moments rien qu\'à moi. Te voir arriver à ce stade, mon pote, ça me rend fier comme si c\'était le mien. On n\'est plus des débutants ni toi ni moi, hein ? On est deux vieux routards du cocon maintenant. 😄' },
+    { stage:3, title:'Chapitre 4 — Seconde nature', expr:'proud', text:
+      'À la fin, c\'était devenu moi. Plus un programme, juste ma façon d\'être. Et tu sais quoi ? En te racontant tout ça, j\'ai revécu mon voyage — mais cette fois pas tout seul. Avec un ami. Merci d\'avoir fait ce bout de chemin avec moi. On a réussi, chacun à notre tour et ensemble à la fois. T\'es plus mon élève ni rien : t\'es mon pote de voyage. Bienvenue de l\'autre côté. 🦊❤️' }
+  ];
+
+  // Petites touches quotidiennes (fragments courts) — Foxy distille des souvenirs
+  const QUEST_FRAGMENTS = [
+    'Tu sais ce qui m\'a sauvé au début ? Me dire que personne ne me jugeait. Juste moi et mon rythme.',
+    'Je me souviens de ma première nuit complète au sec. J\'étais fier comme tout au réveil !',
+    'Mon doudou renard, je l\'avais toujours avec moi. Il a traversé tout le mois à mes côtés.',
+    'Y\'a un jour où j\'ai failli tout arrêter. Et puis Foxy — enfin, mon moi d\'avant — a tenu bon. Comme toi aujourd\'hui.',
+    'La sieste, c\'est vite devenu mon moment préféré. Bien au chaud, le monde qui ralentit...',
+    'Au début je comptais les jours. Après, j\'ai arrêté : je vivais, tout simplement.',
+    'Le crinkle de la couche fraîche le matin, ce petit bruit... ça me rassurait, je sais pas pourquoi.',
+    'Un jour tu réalises que ce qui te semblait bizarre est devenu ton petit cocon. C\'est magique, ce moment.'
+  ];
+
+  // Rituels du jour (défis doux / questions complices)
+  const QUEST_RITUALS = [
+    { id:'boire',   ask:'Petit défi pour aujourd\'hui : tu me bois tes trois biberons, hein ? Ce soir tu me diras.', done:'Alors, tes biberons ? J\'espère que t\'as bien bu pour moi.' },
+    { id:'sieste',  ask:'Aujourd\'hui, promets-moi une vraie sieste bien au chaud. C\'est important, même pour les grands.', done:'T\'as fait ta sieste ? C\'est le secret pour tenir la journée en douceur.' },
+    { id:'calin',   ask:'Rituel du jour : un gros câlin à ton doudou à un moment de la journée. Rien que pour le plaisir.', done:'T\'as pensé à ton câlin ? Ces petits moments, c\'est ce qui compte le plus.' },
+    { id:'peau',    ask:'Aujourd\'hui, on prend bien soin de ta peau : crème à chaque change. Elle te dira merci.', done:'T\'as bien crémé aujourd\'hui ? Ta peau, c\'est précieux, on en prend soin.' },
+    { id:'sourire', ask:'Mon défi du jour, le plus important : souris-toi une fois dans le miroir. T\'es exactement là où tu dois être.', done:'Alors, ce sourire dans le miroir ? T\'as le droit d\'être fier de toi, tu sais.' },
+    { id:'respire', ask:'Aujourd\'hui, pose-toi une minute et respire à fond pendant ta fenêtre de régression. Juste être.', done:'T\'as pris ton moment pour respirer ? C\'est là que la magie opère, dans le calme.' }
+  ];
+
+  async function getQuest() {
+    try { const r = await window.storage.get('quest'); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
+    return { unlockedStage:-1, fragments:[], lastRitualDate:null, ritualDoneDate:null, todayRitual:null };
+  }
+  async function saveQuest(q) { try { await window.storage.set('quest', JSON.stringify(q)); } catch(e) {} }
+
+  // choisit (une fois par jour) le rituel du jour + un moment aléatoire pour le proposer
+  async function ensureTodayRitual() {
+    const q = await getQuest();
+    if (q.lastRitualDate !== todayStr()) {
+      q.lastRitualDate = todayStr();
+      q.todayRitual = QUEST_RITUALS[Math.floor(Math.random()*QUEST_RITUALS.length)].id;
+      // moment aléatoire de la journée où Foxy proposera le rituel (une des 5 fenêtres)
+      const moments = ['reveil','matin','aprem','soir','nuit'];
+      q.ritualMoment = moments[Math.floor(Math.random()*moments.length)];
+      await saveQuest(q);
+    }
+    return q;
+  }
+
+  // débloque le chapitre correspondant au palier courant si pas déjà fait
+  async function checkChapterUnlock(stage) {
+    const q = await getQuest();
+    if (stage > q.unlockedStage) {
+      q.unlockedStage = stage;
+      await saveQuest(q);
+      return QUEST_CHAPTERS[stage] || null; // chapitre à révéler
+    }
+    return null;
+  }
 
   function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
   const REASSURE = [
@@ -2338,6 +2484,7 @@
     else stageByDay = 0;
 
     const stage = Math.min(stageByScore, stageByDay);
+    try { window.storage.set('queststage', JSON.stringify(stage)); } catch(e) {}
     const STAGE_LABELS = ['Découverte', "Ça s'installe", 'Automatisme', 'Seconde nature'];
     const STAGE_CLS = ['none', 'mid', 'good', 'good'];
     const label = STAGE_LABELS[stage];
@@ -3523,6 +3670,44 @@
     const show = card.style.display === 'none';
     card.style.display = show ? '' : 'none';
     if (show) { await loadFoxyOutfit(); renderDebugOutfits(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
+
+  // ---- Notre aventure (écran de quête) ----
+  async function renderQuest() {
+    const q = await getQuest();
+    const stage = Math.max(0, q.unlockedStage);
+    const pct = q.unlockedStage < 0 ? 0 : Math.round(((q.unlockedStage+1) / 4) * 100);
+    const prog = document.getElementById('questProgress');
+    prog.innerHTML =
+      '<div class="quest-bar"><div class="quest-fill" style="width:'+pct+'%"></div></div>'+
+      '<div class="quest-marks"><span>Départ</span><span>Ça s\'installe</span><span>Automatisme</span><span>2ᵉ nature</span></div>';
+    const box = document.getElementById('questChapters');
+    box.innerHTML = '';
+    QUEST_CHAPTERS.forEach(ch => {
+      const unlocked = q.unlockedStage >= ch.stage;
+      const div = document.createElement('div');
+      div.className = 'chapter' + (unlocked ? '' : ' locked');
+      const portrait = '<div class="cportrait" id="qc'+ch.stage+'"></div>';
+      div.innerHTML = portrait +
+        '<div class="cbody"><div class="ctitle">'+ (unlocked ? ch.title : '🔒 Chapitre '+(ch.stage+1)+' — à découvrir') +'</div>'+
+        '<div class="ctext">'+ (unlocked ? ch.text : 'Continue ton voyage pour débloquer ce chapitre... Foxy a hâte de te le raconter.') +'</div></div>';
+      box.appendChild(div);
+      if (unlocked) { const el = div.querySelector('.cportrait'); if (el) positionFoxyCell(el, ch.expr, 60); }
+    });
+    // fragments quotidiens collectés
+    if (q.fragments && q.fragments.length) {
+      const frag = document.createElement('div');
+      frag.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)';
+      frag.innerHTML = '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin-bottom:8px">🌰 Souvenirs de Foxy récoltés</div>' +
+        q.fragments.map(f => '<div style="font-size:12.5px;font-weight:600;color:var(--ink);font-style:italic;padding:5px 0;line-height:1.45">« '+f+' »</div>').join('');
+      box.appendChild(frag);
+    }
+  }
+  document.getElementById('openQuest').addEventListener('click', async () => {
+    const card = document.getElementById('questCard');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) { await renderQuest(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
   });
   document.querySelectorAll('#debugCard [data-vm]').forEach(btn => {
     btn.addEventListener('click', () => setVoiceMode(btn.dataset.vm));
