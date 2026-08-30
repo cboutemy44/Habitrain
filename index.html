@@ -669,7 +669,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '4.0';
+  const APP_VERSION = '4.1';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1418,11 +1418,11 @@
       });
       addBtn(acts, 'a', '🔄 Mouillée — je change', async () => {
         await saveCheck('etat_mouille', 'check_'+slot.key);
-        startChange('check'); // le flux guidé marquera le slot à la fin
+        startChange('check', true); // état déjà pris → direct au guide de pose
       });
       addBtn(acts, 'c', '🌊 Saturée — je change', async () => {
         await saveCheck('etat_sature', 'check_'+slot.key);
-        startChange('check');
+        startChange('check', true);
       });
       addBtn(acts, 'adj', 'Plus tard', () => { activeSlotKey = null; closeCheck(); });
     }
@@ -1451,9 +1451,19 @@
     await saveCheck('etat_'+result, 'change_'+(changeCtx||'check'));
   }
 
-  function startChange(ctx) {
+  function startChange(ctx, skipState) {
     changeCtx = ctx || 'check';
-    // écran 1 : état de la couche avant retrait
+    // Si l'état a déjà été déclaré (au check), on va directement au guide de pose.
+    if (skipState) {
+      document.getElementById('modalCheck').style.display = 'none';
+      document.getElementById('modalFix').style.display = 'none';
+      document.getElementById('modalDue').style.display = 'none';
+      document.getElementById('modalChange').style.display = 'none';
+      showPose();
+      document.getElementById('overlay').classList.add('show');
+      return;
+    }
+    // écran 1 : état de la couche avant retrait (cas d'un change lancé sans check préalable)
     document.getElementById('chQ').textContent = ctx === 'pilier'
       ? 'Change pilier. Avant de retirer, elle est comment ?'
       : 'Avant de la retirer, elle est comment ?';
