@@ -211,6 +211,32 @@
   .since-say { font-size:13.5px; font-weight:700; color:#5a3418; margin-top:5px; line-height:1.4; }
   .since-none { font-size:13px; font-weight:600; color:var(--muted); }
 
+  /* frise chronologique de la journée */
+  .timeline { position:relative; padding-left:6px; }
+  .tl-item { display:flex; gap:12px; padding:7px 0; position:relative; }
+  .tl-rail { flex:none; width:34px; display:flex; flex-direction:column; align-items:center; position:relative; }
+  .tl-dot {
+    width:18px; height:18px; border-radius:50%; background:#cdbfa8; border:2px solid #fffdf8;
+    box-shadow:0 0 0 1px #cdbfa8; z-index:2; margin-top:2px; font-size:9px; display:flex; align-items:center; justify-content:center; color:#fff;
+  }
+  .tl-item.pilier .tl-dot { width:24px; height:24px; background:#c86b3a; box-shadow:0 0 0 2px #f0c39a; font-size:12px; }
+  .tl-item.check .tl-dot { background:#6e77bc; }
+  .tl-item.now .tl-dot { background:#4c7a51; box-shadow:0 0 0 3px #bfe0c5; animation:tlPulse 1.6s infinite; }
+  @keyframes tlPulse { 0%,100%{box-shadow:0 0 0 3px #bfe0c5;} 50%{box-shadow:0 0 0 6px #bfe0c580;} }
+  .tl-line { position:absolute; top:20px; bottom:-9px; width:2px; background:#e0d3bd; z-index:1; }
+  .tl-item:last-child .tl-line { display:none; }
+  .tl-body { flex:1; padding-bottom:2px; }
+  .tl-time { font-size:11.5px; font-weight:800; color:#8a7355; }
+  .tl-item.pilier .tl-time { color:#c86b3a; }
+  .tl-act { font-size:14px; font-weight:800; color:var(--ink); line-height:1.25; }
+  .tl-det { font-size:11.5px; font-weight:600; color:var(--muted); margin-top:1px; }
+  .tl-tag { display:inline-block; font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.03em; padding:1px 7px; border-radius:20px; margin-left:6px; vertical-align:middle; }
+  .tl-tag.pilier { background:#f7e0d0; color:#a8543b; }
+  .tl-tag.check { background:#e4e7f6; color:#4c5497; }
+  .tl-item.past { opacity:.42; }
+  .tl-item.now .tl-act { color:#3a7a44; }
+  .tl-item.now::after { content:'maintenant'; position:absolute; right:0; top:8px; font-size:10px; font-weight:800; color:#4c7a51; }
+
   /* surprise check */
   .checkrow { display: flex; gap: 10px; align-items: stretch; }
   .toggle {
@@ -602,6 +628,12 @@
     </div>
   </div>
 
+  <div class="card" id="timelineCard">
+    <h2>Ton emploi du temps</h2>
+    <div class="sub">Ta journée en frise. Les moments passés sont grisés, les 🔑 piliers (changes obligatoires) ressortent.</div>
+    <div class="timeline" id="timeline"></div>
+  </div>
+
   <div class="card" id="dashCard">
     <h2>Habituation aux couches</h2>
     <div class="sub">Ta progression sur le mois : régularité et baisse des situations à corriger, à parts égales.</div>
@@ -879,7 +911,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '5.8';
+  const APP_VERSION = '5.9';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1963,6 +1995,7 @@
     await renderDashboard(entries);
     await renderWear();
     await renderSince();
+    renderTimeline();
   }
 
   // Depuis combien de temps la couche actuelle est portée (dernier change enregistré)
@@ -2021,7 +2054,7 @@
     sayEl.textContent = c.say;
   }
   // met à jour le compteur régulièrement
-  setInterval(() => { renderSince(); }, 60000);
+  setInterval(() => { renderSince(); renderTimeline(); }, 60000);
 
   // Durée de port : intervalles entre changes enregistrés (result 'change_fait')
   async function renderWear() {
@@ -2824,23 +2857,53 @@
   const SCHEDULE = [
     { m: 7*60,      ic:'☀️', act:'Réveil en tenue de nuit',        det:'Grenouillère + couche de nuit, grand verre d\'eau, réveil doux.' },
     { m: 8*60,      ic:'🥣', act:'Petit-déjeuner',                 det:'En grenouillère de nuit. Fibres + eau. Tu gardes la couche de nuit.' },
-    { m: 9*60,      ic:'🔑', act:'Change du matin',                det:'Fenêtre selles, toilette, vérif peau, crème, couche du jour, tenue de jour.' },
+    { m: 9*60,      ic:'🔑', act:'Change du matin',                det:'Fenêtre selles, toilette, vérif peau, crème, couche du jour, tenue de jour.', kind:'pilier' },
     { m: 9*60+30,   ic:'🚶', act:'Bloc activité',                  det:'Le pic d\'énergie : sortie, marche, tâches, sport léger.' },
-    { m: 11*60+30,  ic:'✅', act:'Check + 1er biberon',            det:'Change si mouillé. Premier biberon de la journée.' },
+    { m: 11*60+30,  ic:'✅', act:'Check + 1er biberon',            det:'Change si mouillé. Premier biberon de la journée.', kind:'check' },
     { m: 12*60,     ic:'🧸', act:'Fenêtre régression douce',       det:'Harnais fleece, moment calme : lecture, musique douce.' },
-    { m: 13*60+30,  ic:'🍽️', act:'Déjeuner + 2e biberon',         det:'Repas fibres, check, deuxième biberon.' },
+    { m: 13*60+30,  ic:'🍽️', act:'Déjeuner + 2e biberon',         det:'Repas fibres, check, deuxième biberon.', kind:'check' },
     { m: 14*60+30,  ic:'😴', act:'Sieste',                        det:'Emmaillotage doux : grenouillère + couverture. Cocon.' },
-    { m: 16*60,     ic:'🔑', act:'Change de sortie de sieste + 3e biberon', det:'Change OBLIGATOIRE au réveil de sieste. Troisième biberon.' },
+    { m: 16*60,     ic:'🔑', act:'Change de sortie de sieste + 3e biberon', det:'Change OBLIGATOIRE au réveil de sieste. Troisième biberon.', kind:'pilier' },
     { m: 16*60+30,  ic:'🚶', act:'Bloc activité',                  det:'Hobby, sortie, ménage — ce que tu veux.' },
-    { m: 19*60+30,  ic:'🍽️', act:'Dîner',                        det:'Check si mouillé.' },
+    { m: 19*60+30,  ic:'🍽️', act:'Dîner',                        det:'Check si mouillé.', kind:'check' },
     { m: 20*60,     ic:'🧸', act:'Grande fenêtre régression',      det:'Le cocon du soir. Allège l\'hydratation à partir de maintenant.' },
-    { m: 22*60+30,  ic:'🔑', act:'Change de nuit + bilan',         det:'Fenêtre selles, toilette, vérif peau complète, crème, couche de nuit. Fais ton bilan du soir.' },
+    { m: 22*60+30,  ic:'🔑', act:'Change de nuit + bilan',         det:'Fenêtre selles, toilette, vérif peau complète, crème, couche de nuit. Fais ton bilan du soir.', kind:'pilier' },
     { m: 23*60,     ic:'🌙', act:'Coucher',                       det:'Sommeil toujours libre. Bonne nuit.' }
   ];
 
   function fmtTime(min) {
     const h = Math.floor(min/60), m = min%60;
     return h + 'h' + (m ? String(m).padStart(2,'0') : '');
+  }
+
+  // Frise chronologique dynamique de la journée
+  function renderTimeline() {
+    const box = document.getElementById('timeline');
+    if (!box) return;
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    // bloc "en cours" = dernier dont l'heure <= maintenant
+    let curIdx = -1;
+    for (let i = 0; i < SCHEDULE.length; i++) { if (SCHEDULE[i].m <= nowMin) curIdx = i; else break; }
+    box.innerHTML = '';
+    SCHEDULE.forEach((s, i) => {
+      const past = (i < curIdx);
+      const isNow = (i === curIdx);
+      const kind = s.kind || '';
+      const item = document.createElement('div');
+      item.className = 'tl-item ' + kind + (past ? ' past' : '') + (isNow ? ' now' : '');
+      const dotGlyph = kind === 'pilier' ? '🔑' : (kind === 'check' ? '✓' : '');
+      const tag = kind === 'pilier' ? '<span class="tl-tag pilier">Pilier</span>'
+                : (kind === 'check' ? '<span class="tl-tag check">Check</span>' : '');
+      item.innerHTML =
+        '<div class="tl-rail"><div class="tl-dot">'+dotGlyph+'</div><div class="tl-line"></div></div>'+
+        '<div class="tl-body">'+
+          '<div class="tl-time">'+fmtTime(s.m)+'</div>'+
+          '<div class="tl-act">'+s.ic+' '+s.act+tag+'</div>'+
+          '<div class="tl-det">'+s.det+'</div>'+
+        '</div>';
+      box.appendChild(item);
+    });
   }
 
   function renderGuide() {
