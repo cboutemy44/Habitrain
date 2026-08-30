@@ -423,6 +423,32 @@
   body.foxy .im-actions button:hover { border-color:#d9743a; background:#FDF1E6; }
   body.foxy .im-actions button.soft { background:#FBEADB; }
   body.foxy .moment { border-color:#f0d0b0; background:linear-gradient(180deg,#FDF3EA,#FBEADB); }
+
+  /* ===== Scène de dialogue RPG (mode Foxy) ===== */
+  #rpgStage { display:none; }
+  body.foxy #rpgStage { display:flex; gap:12px; align-items:flex-end; padding:16px; }
+  body.foxy .im-thread, body.foxy #imChat .im-head { display:none; }
+  .rpg-portrait {
+    width:132px; height:132px; flex:none; border-radius:16px;
+    background-image:url('foxy-main.png'); background-repeat:no-repeat;
+    background-size:528px 528px; /* 132 * 4 */
+    border:2.5px solid #e0a060; box-shadow:0 4px 14px rgba(200,120,60,0.25);
+    background-color:#FDF3EA;
+  }
+  .rpg-portrait.change { background-image:url('foxy-change.png'); }
+  .rpg-box {
+    flex:1; min-height:132px; background:#fff; border:2.5px solid #e0a060; border-radius:16px;
+    padding:14px 16px; position:relative; box-shadow:0 4px 14px rgba(200,120,60,0.12);
+    display:flex; flex-direction:column;
+  }
+  .rpg-name {
+    position:absolute; top:-13px; left:14px; background:#d9743a; color:#fff;
+    font-family:'Fraunces',serif; font-weight:600; font-size:13px; padding:2px 12px; border-radius:20px;
+  }
+  .rpg-text { font-size:15px; font-weight:600; line-height:1.5; color:#5a3418; margin-top:6px; flex:1; }
+  .rpg-next { align-self:flex-end; font-size:16px; color:#d9743a; animation:imBlink 1s infinite; margin-top:4px; }
+  body.foxy #imActions { border-top:none; background:transparent; padding:6px 16px 16px; }
+  body.foxy #imActions button { border-color:#e6c0a0; }
 </style>
 
 <div class="wrap">
@@ -460,6 +486,14 @@
     <div class="im-head">
       <div class="im-avatar">🧸</div>
       <div><div class="who">Ton caregiver</div><div class="status" id="imStatus">Présent · veille sur toi</div></div>
+    </div>
+    <div id="rpgStage">
+      <div class="rpg-portrait" id="rpgPortrait"></div>
+      <div class="rpg-box">
+        <div class="rpg-name" id="rpgName">Foxy</div>
+        <div class="rpg-text" id="rpgText"></div>
+        <div class="rpg-next" id="rpgNext" style="visibility:hidden">▼</div>
+      </div>
     </div>
     <div class="im-thread" id="imThread"></div>
     <div class="im-safety" id="imSafety" style="display:none"></div>
@@ -746,7 +780,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '4.6';
+  const APP_VERSION = '4.8';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -798,15 +832,55 @@
   const imThread = () => document.getElementById('imThread');
   const imActions = () => document.getElementById('imActions');
 
-  function imClear() { imThread().innerHTML = ''; imActions().innerHTML = ''; document.getElementById('imSafety').style.display='none'; }
+  // Expressions Foxy → index de cellule (grille 4×4, 0..15, lecture ligne par ligne)
+  const EXPR = {
+    happy:0, concern:1, pensive:2, surprised:3,
+    neutral:6, relaxed:7,
+    wave:9, cuddle:10, laugh:11,
+    joy:12, proud:12, explain:14, sleep:15
+  };
+  // vérifié : 0=content doudou, 1=triste, 2=pensif(?), 3=surpris(pattes joues),
+  // 6=neutre sourire, 7=allongé détendu, 9=coucou main, 10=câlin doudou,
+  // 11=rigole, 12=debout joyeux/fier, 14=lecture(explique), 15=dodo(zzz)
+  let pendingExpr = 'neutral'; // expression du prochain message Foxy
+
+  function setFoxyPortrait(expr) {
+    const p = document.getElementById('rpgPortrait');
+    if (!p) return;
+    if (expr === 'change') {
+      p.classList.add('change');
+      // couche : on montre une pose contente (cellule 0)
+      p.style.backgroundPosition = '0px 0px';
+      return;
+    }
+    p.classList.remove('change');
+    const idx = (expr in EXPR) ? EXPR[expr] : EXPR.neutral;
+    const col = idx % 4, row = Math.floor(idx / 4);
+    const size = 132;
+    p.style.backgroundPosition = (-(col*size)) + 'px ' + (-(row*size)) + 'px';
+  }
+
+  function imClear() {
+    imThread().innerHTML = ''; imActions().innerHTML = ''; document.getElementById('imSafety').style.display='none';
+    const rt = document.getElementById('rpgText'); if (rt) rt.textContent='';
+    const rn = document.getElementById('rpgNext'); if (rn) rn.style.visibility='hidden';
+  }
   function imScroll() { const t = imThread(); t.scrollTop = t.scrollHeight; }
 
   function imAddMe(text) {
+    if (voiceMode === 'foxy') {
+      // en RPG, la réponse du joueur s'affiche brièvement dans la boîte
+      const rt = document.getElementById('rpgText');
+      if (rt) { rt.innerHTML = '<span style="color:#a86a3a">› ' + text + '</span>'; }
+      return;
+    }
     const d = document.createElement('div'); d.className = 'im-msg me'; d.textContent = text;
     imThread().appendChild(d); imScroll();
   }
-  // ajoute un message caregiver avec effet "en train d'écrire"
-  function imSay(text, delay) {
+
+  // dit un message ; en mode Foxy → boîte RPG avec typewriter + expression
+  function imSay(text, delay, expr) {
+    if (voiceMode === 'foxy') return rpgSay(text, expr);
     return new Promise(resolve => {
       const typing = document.createElement('div');
       typing.className = 'im-typing'; typing.innerHTML = '<span></span><span></span><span></span>';
@@ -817,6 +891,30 @@
         imThread().appendChild(d); imScroll();
         resolve();
       }, delay || 800);
+    });
+  }
+
+  // effet machine à écrire dans la boîte RPG
+  function rpgSay(text, expr) {
+    return new Promise(resolve => {
+      setFoxyPortrait(expr || pendingExpr || 'neutral');
+      const rt = document.getElementById('rpgText');
+      const rn = document.getElementById('rpgNext');
+      if (!rt) { resolve(); return; }
+      rn.style.visibility = 'hidden';
+      rt.textContent = '';
+      const plain = text.replace(/<[^>]+>/g,''); // pas de HTML dans le typewriter
+      let i = 0;
+      const speed = 18;
+      const timer = setInterval(() => {
+        rt.textContent = plain.slice(0, i+1);
+        i++;
+        if (i >= plain.length) {
+          clearInterval(timer);
+          rn.style.visibility = 'visible';
+          resolve();
+        }
+      }, speed);
     });
   }
   async function imSaySeq(lines) { for (const l of lines) { await imSay(l); } }
@@ -838,41 +936,340 @@
   }
 
   // Réactions du caregiver selon la réponse (résultat)
-  const CARE_REACT = {
-    reveil_sec: 'Oh, tu es resté bien au sec toute la nuit ? C\'est très bien ça.',
-    reveil_mouille: 'Une bonne couche mouillée, c\'est parfait, c\'est exactement ce qu\'on veut la nuit.',
-    reveil_fuite: 'Une petite fuite ? Ce n\'est rien du tout, on ajustera mieux ce soir. Ne t\'inquiète pas.',
-    matin_ok: 'Tu es sage. Couche vérifiée et bien hydraté, je suis fier de toi.',
-    matin_change: 'D\'accord, on va s\'occuper de te changer alors. Viens.',
-    matin_soif: 'Il faut boire, c\'est important. Prends ton biberon pour moi, d\'accord ?',
-    aprem_ok: 'Tout roule, c\'est parfait. Continue comme ça.',
-    aprem_sieste: 'Tu as bien dormi ? Une petite sieste, ça fait du bien. On vérifie ta couche ?',
-    aprem_change: 'Ta couche a bien travaillé, on va la changer. Allonge-toi.',
-    soir_ok: 'Ta nuit est prête, tu es tout propre et au sec. Bravo pour cette journée.',
-    soir_souci: 'Montre-moi ta peau... on va bien crémer pour que ça aille mieux. Je m\'occupe de toi.',
-    nuit_ok: 'Chut... tout va bien. Rendors-toi, je veille.',
-    nuit_change: 'Voilà, une couche toute fraîche. Rendors-toi bien maintenant.'
-  };
-  // Foxy = pair complice qui a réussi le programme, tutoiement chaleureux
-  const FOXY_REACT = {
-    reveil_sec: 'Au sec toute la nuit ? Bien joué ! Moi ça m\'a pris une semaine avant d\'y arriver, t\'es sur la bonne voie.',
-    reveil_mouille: 'Bien mouillée, nickel — c\'est exactement ce qu\'on veut le matin. T\'es à fond dedans, j\'adore.',
-    reveil_fuite: 'Ah, une fuite ! T\'inquiète, ça arrive à tout le monde au début. Un coup à choper le bon réglage aux cuisses et c\'est réglé.',
-    matin_ok: 'Couche ok, biberon bu — t\'es carré. Franchement tu gères mieux que moi à tes débuts.',
-    matin_change: 'Allez, go pour un change ! Je te laisse t\'installer, tu connais la chanson.',
-    matin_soif: 'Eh, faut boire hein ! Je sais, on oublie facile. Attrape ton bibi, à deux c\'est plus sympa.',
-    aprem_ok: 'Tranquille, tout roule. Tu commences à prendre le rythme, ça se sent.',
-    aprem_sieste: 'La sieste, LE meilleur moment je trouve. Bien au chaud dans sa grenouillère... on checke ta couche vite fait ?',
-    aprem_change: 'Elle a bien bossé ta couche ! Allez hop, on change, c\'est parti.',
-    soir_ok: 'Et voilà, journée bouclée, t\'es tout propre pour la nuit. Bravo mec, sérieux.',
-    soir_souci: 'La peau qui tire un peu ? Ça m\'est arrivé aussi. Crème bien ce soir, demain c\'est déjà mieux, tu vas voir.',
-    nuit_ok: 'Allez, dodo. Tout est nickel. On se capte demain !',
-    nuit_change: 'Change de nuit fait, propre comme un sou neuf. File dormir !'
+  // Pools de 10 réactions par résultat et par persona (déjà liés à la période via le résultat).
+  const REACT_POOLS = {
+    care: {
+      reveil_sec: [
+        'Oh, tu es resté bien au sec toute la nuit ? C\'est très bien ça.',
+        'Une nuit toute sèche, bravo. Tu commences la journée du bon pied.',
+        'Sec au réveil, c\'est parfait. Tu as bien dormi en plus ?',
+        'Très bien. Ta couche a tenu, tu es tout propre pour commencer la journée.',
+        'C\'est une belle nuit ça. Je suis content pour toi.',
+        'Au sec, parfait. Bois un peu d\'eau maintenant pour relancer la journée.',
+        'Tu vois comme tu gères bien la nuit ? Continue comme ça.',
+        'Nickel, rien à signaler. On se prépare pour le petit-déjeuner ?',
+        'Bien au sec, c\'est exactement ce qu\'on veut. Bonne matinée qui commence.',
+        'Voilà une nuit réussie. Tu peux être fier de toi ce matin.'
+      ],
+      reveil_mouille: [
+        'Une bonne couche mouillée, c\'est parfait, c\'est exactement ce qu\'on veut la nuit.',
+        'Bien mouillée, très bien. Ta couche a fait son travail cette nuit.',
+        'C\'est parfait ça. On va te changer tranquillement au petit-déjeuner.',
+        'Une nuit bien remplie, c\'est normal et c\'est très bien. Tu es à l\'aise ?',
+        'Voilà, c\'est exactement le but. Tu as bien lâché prise cette nuit.',
+        'Parfait. Garde-la encore un peu, on fera ton grand change à 9h.',
+        'Bien mouillée au réveil, c\'est signe que tu es à fond dedans. Bravo.',
+        'C\'est très bien mon grand. La nuit a bien fonctionné.',
+        'Rien d\'inquiétant, au contraire. Ta couche a bien absorbé.',
+        'Une belle nuit de sommeil et une couche bien pleine, tout va bien.'
+      ],
+      reveil_fuite: [
+        'Une petite fuite ? Ce n\'est rien du tout, on ajustera mieux ce soir.',
+        'Ça arrive, ne t\'inquiète pas. On regardera les barrières aux cuisses ce soir.',
+        'Pas de souci pour la fuite. On va juste mieux te border la prochaine fois.',
+        'Ce n\'est pas grave du tout. Ces choses-là s\'ajustent facilement.',
+        'Une fuite, ça se règle. Ce soir on fera plus attention à la pose, ensemble.',
+        'Ne culpabilise pas, ça n\'a rien à voir avec toi. C\'est juste un réglage.',
+        'On va changer tout ça et repartir propre. Rien de grave, promis.',
+        'Une petite fuite nocturne, ça arrive à tout le monde. On s\'en occupe.',
+        'Pas d\'inquiétude. Ce soir je vérifie que tout est bien ajusté pour toi.',
+        'C\'est rien. On te change, et on améliorera le calage cette nuit.'
+      ],
+      matin_ok: [
+        'Tu es sage. Couche vérifiée et bien hydraté, je suis fier de toi.',
+        'Parfait, tout est en ordre ce matin. Continue comme ça.',
+        'Couche ok et biberon bu, tu gères ta matinée comme un chef.',
+        'Très bien. Tu prends soin de toi ce matin, ça me fait plaisir.',
+        'C\'est nickel. Profite bien de ta matinée maintenant.',
+        'Bravo, tout est au point. Tu es bien lancé pour la journée.',
+        'Impeccable. Tu as pensé à tout ce matin.',
+        'Voilà, c\'est ça que j\'aime voir. Une belle matinée bien gérée.',
+        'Tout roule ce matin. Tu peux vaquer tranquille, je veille.',
+        'Bien joué. Hydraté et au propre, tu as tout bon.'
+      ],
+      matin_change: [
+        'D\'accord, on va s\'occuper de te changer alors. Viens.',
+        'Pas de souci, on te change tout de suite. Installe-toi.',
+        'C\'est le moment alors. Allonge-toi, je te guide.',
+        'On s\'occupe de ça maintenant. Tu vas être tout propre.',
+        'Très bien, on fait un change. Prends ton temps.',
+        'Allez, on te met une couche fraîche pour la matinée.',
+        'Bien vu de le signaler. On te change et c\'est reparti.',
+        'On y va tranquillement, tu seras bien au sec après.',
+        'C\'est parti pour un petit change du matin. Détends-toi.',
+        'Parfait, on te remet au propre. Suis les étapes avec moi.'
+      ],
+      matin_soif: [
+        'Il faut boire, c\'est important. Prends ton biberon pour moi, d\'accord ?',
+        'Allez, un bon biberon d\'eau. Tu en as besoin pour bien commencer.',
+        'On n\'oublie pas de s\'hydrater le matin. Va chercher ton biberon.',
+        'C\'est le moment de boire. Fais-le pour moi, ça me rassure.',
+        'Ton corps a soif après la nuit. Un bon biberon et ça repart.',
+        'Bois bien ce matin, c\'est ce qui te garde en forme toute la journée.',
+        'Prends le temps de boire, il n\'y a rien de plus important là.',
+        'Un biberon d\'eau maintenant, et tu seras parfaitement hydraté.',
+        'On rattrape ça tout de suite. Ton biberon, et je suis content.',
+        'L\'hydratation d\'abord, mon grand. Va boire tranquillement.'
+      ],
+      aprem_ok: [
+        'Tout roule, c\'est parfait. Continue comme ça.',
+        'Bel après-midi bien géré. Tu es sur ta lancée.',
+        'Nickel, rien à signaler. Tu tiens bien ton rythme.',
+        'C\'est très bien. Ton après-midi se passe tranquillement.',
+        'Parfait. Tu gères ta journée avec beaucoup de soin.',
+        'Impeccable. Profite de ton après-midi, je veille.',
+        'Tout est en ordre. Tu peux être content de toi.',
+        'Voilà, c\'est ça. Une belle journée qui suit son cours.',
+        'Bien joué. Ton après-midi est aussi carré que ta matinée.',
+        'Rien à redire, tout va bien. Continue doucement.'
+      ],
+      aprem_sieste: [
+        'Tu as bien dormi ? Une petite sieste, ça fait du bien. On vérifie ta couche ?',
+        'Bien reposé après ta sieste ? On regarde ta couche au réveil.',
+        'La sieste c\'est important, je suis content que tu l\'aies faite.',
+        'Tu t\'es bien reposé, parfait. Un petit check maintenant ?',
+        'Une bonne sieste dans ton cocon, rien de mieux. Comment tu te sens ?',
+        'Voilà qui fait du bien. On vérifie que tout va bien après le repos ?',
+        'Le repos fait partie du programme, tu as bien fait. On checke ?',
+        'Bien dormi ? Ton corps en avait besoin. On regarde ta couche ensemble.',
+        'Parfait, une sieste réparatrice. Maintenant un petit contrôle tranquille.',
+        'Content que tu te sois reposé. Un check au réveil et on repart.'
+      ],
+      aprem_change: [
+        'Ta couche a bien travaillé, on va la changer. Allonge-toi.',
+        'C\'est le moment d\'un change. Installe-toi, je te guide.',
+        'On te remet au propre pour la fin de journée. Viens.',
+        'Bien vu. On te change tranquillement maintenant.',
+        'Allez, une couche fraîche pour l\'après-midi. Détends-toi.',
+        'On s\'occupe de ça. Tu seras tout confortable après.',
+        'Parfait, on fait un change. Prends ton temps, rien ne presse.',
+        'Ta couche a bien absorbé, on la change. Suis-moi.',
+        'C\'est parti pour te remettre au sec. Allonge-toi bien.',
+        'On te change et tu repars propre pour la soirée qui vient.'
+      ],
+      soir_ok: [
+        'Ta nuit est prête, tu es tout propre et au sec. Bravo pour cette journée.',
+        'Voilà, tout est en ordre pour la nuit. Belle journée accomplie.',
+        'Tu es paré pour dormir, bien au chaud et au sec. Je suis fier de toi.',
+        'Change de nuit fait, tout est nickel. Repose-toi bien maintenant.',
+        'Parfait. Tu as tenu ta journée du début à la fin. Bravo mon grand.',
+        'Tout est prêt pour une bonne nuit. Tu peux être content de toi.',
+        'Belle journée, bien bouclée. Maintenant place au repos.',
+        'Tu es tout propre pour la nuit. Une journée de plus de réussie.',
+        'Voilà une journée complète. Dors bien, tu l\'as mérité.',
+        'Nickel, prêt pour la nuit. Je veille pendant que tu dors.'
+      ],
+      soir_souci: [
+        'Montre-moi ta peau... on va bien crémer pour que ça aille mieux.',
+        'On va s\'occuper de ta peau ce soir. Une bonne couche de crème et ça ira.',
+        'Ne t\'inquiète pas, on soigne ça tout de suite. Crème généreuse ce soir.',
+        'Un peu de rougeur ? On traite maintenant, avant que ça s\'installe.',
+        'On prend soin de ta peau, c\'est le plus important. Laisse-moi faire.',
+        'Bien que tu me le dises. On crème comme il faut et demain c\'est mieux.',
+        'Ta peau a besoin d\'un peu d\'attention ce soir. On s\'en occupe ensemble.',
+        'On va bien te protéger pour la nuit. Crème épaisse et couche fraîche.',
+        'Rien de grave, mais on ne laisse pas traîner. Soin ce soir.',
+        'Je m\'occupe de ta peau. Demain matin ça ira déjà beaucoup mieux.'
+      ],
+      nuit_ok: [
+        'Chut... tout va bien. Rendors-toi, je veille.',
+        'Tout est calme, tu peux te rendormir. Je suis là.',
+        'Rien à signaler, mon grand. Referme les yeux, je veille sur toi.',
+        'Tu es en sécurité, tout va bien. Rendors-toi doucement.',
+        'C\'est bon, tout est en ordre. Retourne dans tes rêves.',
+        'Chut, repose-toi. La nuit t\'appartient, je monte la garde.',
+        'Tout va bien cette nuit. Rendors-toi bien au chaud.',
+        'Rien ne presse, tout est calme. Dors, je suis là.',
+        'Ferme les yeux, tu es bien. À demain matin.',
+        'Doucement, rendors-toi. Je veille jusqu\'au matin.'
+      ],
+      nuit_change: [
+        'Voilà, une couche toute fraîche. Rendors-toi bien maintenant.',
+        'C\'est fait, tu es tout propre. Retourne vite au lit.',
+        'Change nocturne terminé. Rendors-toi, je veille sur le reste.',
+        'Te voilà au sec pour finir la nuit. Dors bien.',
+        'Parfait, couche fraîche posée. Referme les yeux tranquille.',
+        'On t\'a remis au propre. Bonne fin de nuit, mon grand.',
+        'C\'est réglé, tu es confortable. Rendors-toi doucement.',
+        'Voilà, tout propre. La nuit peut reprendre, je veille.',
+        'Change fait dans le calme. Retourne dormir, tout va bien.',
+        'Te revoilà au sec. Dors bien jusqu\'au matin.'
+      ]
+    },
+    foxy: {
+      reveil_sec: [
+        'Au sec toute la nuit ? Bien joué ! Moi ça m\'a pris une semaine avant d\'y arriver.',
+        'Nickel, nuit sèche ! Tu démarres fort la journée, respect.',
+        'Ah la nuit sèche, le luxe ! Profite, t\'as bien géré.',
+        'Sec au réveil, t\'es un pro déjà. Allez, debout, la journée t\'attend !',
+        'Bien joué mec, moi les premiers jours c\'était jamais sec. T\'es sur la bonne voie.',
+        'Nuit tranquille alors ! Bois un coup d\'eau et c\'est parti pour la journée.',
+        'Sec, propre, frais — t\'as tout bon ce matin. Continue comme ça !',
+        'Ha, t\'as tenu toute la nuit ! Tu vois quand je te disais que ça rentre tout seul.',
+        'Impec, nuit sèche. T\'es carré, franchement.',
+        'Belle nuit ! Rien de mieux pour bien commencer. Allez, on attaque !'
+      ],
+      reveil_mouille: [
+        'Bien mouillée, nickel — c\'est exactement ce qu\'on veut le matin. T\'es à fond dedans !',
+        'Ha, bonne couche pleine ! C\'est ça une nuit réussie, bravo.',
+        'Bien mouillée au réveil, c\'est le signe que t\'as bien lâché prise. Top.',
+        'Parfait ça ! Garde-la jusqu\'au petit-déj, tu connais la routine.',
+        'Ouais, une couche qui a bien bossé cette nuit ! C\'est tout bon.',
+        'Bien pleine, comme il faut. Moi j\'adore ce moment du matin, pas toi ?',
+        'C\'est ça le but ! T\'es en plein dedans, ça fait plaisir à voir.',
+        'Nickel, bien mouillée. On te changera tout à l\'heure, tranquille.',
+        'Ha, ça c\'est une vraie nuit d\'ABDL ! Bien joué mec.',
+        'Parfait, ta couche a fait le taf. Allez, bonne matinée !'
+      ],
+      reveil_fuite: [
+        'Ah, une fuite ! T\'inquiète, ça arrive à tout le monde au début.',
+        'Une fuite de nuit ? La loose, mais franchement c\'est rien. Un réglage aux cuisses et c\'est réglé.',
+        'Eh, pas de panique pour la fuite. Moi la première semaine c\'était systématique !',
+        'Ça m\'est arrivé cent fois au début. C\'est juste le calage, tu vas choper le truc.',
+        'Une petite fuite, bof, rien de grave. On ajuste mieux ce soir et zou.',
+        'T\'inquiète pas pour ça. C\'est le genre de truc qui se règle en deux nuits.',
+        'Fuite nocturne, classique du débutant ! Pas de stress, ça se corrige vite.',
+        'Bah, ça arrive. Vérifie bien les barrières la prochaine fois, c\'est que ça.',
+        'Pas grave mec ! Moi j\'ai galéré une semaine là-dessus, maintenant zéro souci.',
+        'Une fuite c\'est pas un échec, c\'est juste un réglage. On s\'en occupe.'
+      ],
+      matin_ok: [
+        'Couche ok, biberon bu — t\'es carré. Franchement tu gères mieux que moi à tes débuts.',
+        'Tout bon ce matin ! T\'as le rythme, ça se voit.',
+        'Nickel, hydraté et au propre. T\'es un vrai pro déjà.',
+        'Ha, matinée carrée ! Continue comme ça mec.',
+        'Bien joué, t\'as pensé à tout. Moi j\'oubliais toujours le biberon au début !',
+        'Impec ! Tu prends soin de toi, c\'est exactement le truc.',
+        'T\'es à fond et bien organisé. Respect, franchement.',
+        'Matinée réussie ! Allez, profite bien de la suite.',
+        'Tout roule ! Tu vois, quand ça devient une habitude ?',
+        'Carré comme d\'hab. T\'es sur une super lancée.'
+      ],
+      matin_change: [
+        'Allez, go pour un change ! Je te laisse t\'installer, tu connais la chanson.',
+        'Hop, petit change du matin ! T\'as l\'habitude maintenant.',
+        'C\'est parti pour te remettre au propre. Easy.',
+        'Allez zou, on change ! Ça prend deux minutes, tu gères.',
+        'Un change et c\'est reparti frais pour la matinée. Go !',
+        'Ok, change time ! Installe-toi, tu vas être nickel.',
+        'Bien vu, faut changer. Allez, tu connais le truc par cœur.',
+        'C\'est le moment ! Une couche fraîche et t\'es reparti.',
+        'Hop hop, on te remet au sec. C\'est rapide, t\'inquiète.',
+        'Change du matin, la routine ! Vas-y, je te suis.'
+      ],
+      matin_soif: [
+        'Eh, faut boire hein ! Je sais, on oublie facile. Attrape ton bibi.',
+        'Ah le biberon oublié, le classique ! Allez, hydrate-toi mec.',
+        'Faut boire, sérieux, c\'est LE truc qui change tout. Va chercher ton bibi.',
+        'Oups, pas encore bu ? Moi c\'était pareil au début. Allez, un bon biberon.',
+        'L\'hydratation c\'est la base ! Bois un coup, tu vas te sentir mieux.',
+        'Eh oh, ton biberon t\'attend ! Bois bien, c\'est important pour tenir.',
+        'Pense à boire mec, ton corps te dira merci. Attrape ton bibi.',
+        'Le truc que j\'oubliais tout le temps ! Allez, bois maintenant.',
+        'Hydratation d\'abord ! Un bon biberon et t\'es reparti en forme.',
+        'File boire, c\'est le secret pour que tout se passe bien. Go !'
+      ],
+      aprem_ok: [
+        'Tranquille, tout roule. Tu commences à prendre le rythme, ça se sent.',
+        'Bel aprèm bien géré ! T\'es dans le flow.',
+        'Nickel, rien à signaler. Tu tiens ta journée comme un chef.',
+        'Ha, tout carré cet après-midi ! Continue mec.',
+        'T\'es sur ta lancée, ça fait plaisir. Bien joué.',
+        'Impec ! Ton après-midi est aussi propre que ta matinée.',
+        'Tout roule ! Tu vois, une fois lancé c\'est que du bonheur.',
+        'Rien à redire, t\'assures. Profite de ton aprèm.',
+        'Carré ! T\'as vraiment chopé le rythme maintenant.',
+        'Tranquille, tout va bien. T\'es un pro de la journée ABDL !'
+      ],
+      aprem_sieste: [
+        'La sieste, LE meilleur moment je trouve ! Bien au chaud... on checke ta couche ?',
+        'Ha, la sieste dans la grenouillère, y\'a pas mieux ! Bien dormi ?',
+        'Le kif de l\'après-midi, la sieste ! On regarde ta couche au réveil ?',
+        'Bien reposé ? Moi la sieste c\'était mon moment préféré du programme.',
+        'Une bonne sieste, rien de tel ! Allez, petit check et on repart.',
+        'Le cocon de l\'après-midi, j\'adore ça. Comment tu te sens au réveil ?',
+        'Bien dormi dans ton petit nid ? On vérifie que tout va bien ?',
+        'La sieste c\'est sacré ! Content que tu l\'aies faite. On checke ?',
+        'Ah, le repos de l\'aprèm, le vrai luxe ! Un check tranquille et c\'est bon.',
+        'Bien pioncé ? Ton corps en avait besoin. Allez, petit contrôle.'
+      ],
+      aprem_change: [
+        'Elle a bien bossé ta couche ! Allez hop, on change, c\'est parti.',
+        'Change de l\'aprèm ! Tu connais, installe-toi.',
+        'Ha, faut changer ! Allez, une fraîche et c\'est reparti.',
+        'Bien vu, on te remet au propre. Easy peasy.',
+        'Ta couche a fait son taf, on la change. Go !',
+        'C\'est l\'heure d\'une couche fraîche ! Détends-toi, je te suis.',
+        'Hop, change de l\'après-midi ! Ça roule, tu gères.',
+        'Allez zou, on te remet au sec pour la soirée. Vas-y.',
+        'Elle a bien absorbé, on change ! T\'as l\'habitude.',
+        'C\'est parti pour un change ! Une fraîche et t\'es nickel.'
+      ],
+      soir_ok: [
+        'Et voilà, journée bouclée, t\'es tout propre pour la nuit. Bravo mec, sérieux.',
+        'Ha, belle journée dans la boîte ! T\'es paré pour la nuit, bien joué.',
+        'Change de nuit fait, t\'es carré. Franchement, super journée.',
+        'Journée complète, propre pour dormir. T\'as assuré du début à la fin !',
+        'Voilà, encore une journée de gagnée. Respect mec, t\'as tenu.',
+        'Nickel, prêt pour la nuit ! Une journée de plus vers l\'habitude.',
+        'Belle journée bouclée ! Repose-toi, tu l\'as bien mérité.',
+        'T\'es tout propre pour la nuit, mission accomplie. Bravo !',
+        'Ha, journée réussie ! Chaque jour comme ça, c\'est l\'habitude qui rentre.',
+        'Carré jusqu\'au bout ! Allez, bonne nuit mec, à demain.'
+      ],
+      soir_souci: [
+        'La peau qui tire un peu ? Ça m\'est arrivé aussi. Crème bien ce soir, demain c\'est déjà mieux.',
+        'Ah, un peu de rougeur ? Pas de panique, une bonne crème et ça part vite.',
+        'Ta peau fait des siennes ? Classique. Crème épaisse ce soir, tu vas voir.',
+        'Eh, prends soin de ta peau ce soir. Moi j\'ai eu ça, ça passe avec de la crème.',
+        'Un peu irritée ? On laisse pas traîner. Bonne couche de crème et au lit.',
+        'La peau c\'est le truc à surveiller, t\'as raison de le dire. Crème bien ce soir.',
+        'Ça arrive quand on porte 24/7. Crème généreuse et demain c\'est oublié.',
+        'Pas de stress pour la peau, mais soigne-la ce soir. Demain ça ira mieux.',
+        'Ah je connais ça ! Le secret c\'est la crème barrière. Mets-en une bonne dose.',
+        'Ta peau a besoin d\'un peu d\'amour ce soir. Crème bien, ça se règle vite.'
+      ],
+      nuit_ok: [
+        'Allez, dodo. Tout est nickel. On se capte demain !',
+        'Rien à signaler, retourne dormir mec. À demain !',
+        'Chut, tout va bien. Rendors-toi, je monte la garde.',
+        'Tout est calme, file au lit. On se voit demain matin !',
+        'Nickel, rendors-toi tranquille. Bonne nuit !',
+        'C\'est bon, tout roule. Retourne dans tes rêves, à demain.',
+        'Rien qui presse, tout va bien. Dors mec, je veille.',
+        'Allez au dodo, tout est en ordre. À demain !',
+        'Tranquille, rendors-toi. La nuit t\'appartient.',
+        'Tout est calme, referme les yeux. On se capte au réveil !'
+      ],
+      nuit_change: [
+        'Change de nuit fait, propre comme un sou neuf. File dormir !',
+        'Hop, couche fraîche ! Allez, retourne vite au lit.',
+        'Nickel, te voilà au sec. Rendors-toi mec, à demain.',
+        'C\'est réglé, tout propre. File dans les bras de Morphée !',
+        'Change nocturne terminé ! Retourne dormir, tout va bien.',
+        'Voilà, frais et propre. Allez, dodo, on se capte demain.',
+        'Couche changée dans le calme. File au lit, bonne fin de nuit !',
+        'Te revoilà au sec ! Rendors-toi tranquille mec.',
+        'C\'est fait, t\'es nickel. Retourne vite sous la couette.',
+        'Propre pour finir la nuit ! Allez, dors bien, à demain.'
+      ]
+    }
   };
   function react(result) {
-    const table = voiceMode === 'foxy' ? FOXY_REACT : CARE_REACT;
-    return table[result] || (voiceMode === 'foxy' ? 'Ok, noté ! Merci de me dire.' : 'C\'est noté, merci de me le dire.');
+    const persona = voiceMode === 'foxy' ? 'foxy' : 'care';
+    const pool = REACT_POOLS[persona] && REACT_POOLS[persona][result];
+    if (pool && pool.length) return pool[Math.floor(Math.random()*pool.length)];
+    return voiceMode === 'foxy' ? 'Ok, noté !' : 'C\'est noté, merci de me le dire.';
   }
+  // expression Foxy selon le résultat
+  const EXPR_FOR_RESULT = {
+    reveil_sec:'happy', reveil_mouille:'neutral', reveil_fuite:'surprised',
+    matin_ok:'proud', matin_change:'change', matin_soif:'explain',
+    aprem_ok:'joy', aprem_sieste:'relaxed', aprem_change:'change',
+    soir_ok:'proud', soir_souci:'concern', nuit_ok:'sleep', nuit_change:'change',
+    soir_bilan:'explain'
+  };
+  function exprForResult(r) { return EXPR_FOR_RESULT[r] || 'neutral'; }
 
   // Construit la conversation du moment courant
   async function imRunMoment() {
@@ -885,16 +1282,16 @@
 
     // salutation + question selon le persona
     const opener = voiceMode === 'foxy' ? foxyOpener(m) : (m.titi ? m.titi : m.title);
-    await imSay(opener, 500);
+    await imSay(opener, 500, 'wave');
     if (done[m.key]) {
-      await imSay(foxyOrCare(m, 'q'), 700);
+      await imSay(foxyOrCare(m, 'q'), 700, 'neutral');
       await imSay(voiceMode === 'foxy'
         ? 'Ah mais on a déjà fait le point tout à l\'heure ! ' + foxyAfter(m)
-        : 'On a déjà fait notre petit point tout à l\'heure. ' + (m.afteri || m.after), 800);
+        : 'On a déjà fait notre petit point tout à l\'heure. ' + (m.afteri || m.after), 800, 'happy');
       buildMomentReplies(m, true);
       return;
     }
-    await imSay(foxyOrCare(m, 'q'), 900);
+    await imSay(foxyOrCare(m, 'q'), 900, 'pensive');
     buildMomentReplies(m, false);
   }
 
@@ -940,7 +1337,7 @@
           imAddMe(opt.label.replace(/^[^\wÀ-ÿ]+/, '').trim());
           await saveMoment(m.key, opt.result);
           const reaction = react(opt.result);
-          await imSay(reaction, 700);
+          await imSay(reaction, 700, exprForResult(opt.result));
           if (opt.openForm) { await imSay(voiceMode==='foxy'?'Allez, on remplit ton bilan du soir, je te montre où.':'On va faire ton bilan du soir ensemble, je te montre.', 700); toggleFormImmersive(); }
           await imOfferHelp(m); // le caregiver reste disponible
         }});
@@ -966,33 +1363,35 @@
       'Je suis là. Qu\'est-ce qui te ferait du bien ?',
       'Dis-moi ce dont tu as besoin, je m\'occupe de toi.'
     ];
-    await imSay(pick(openers), 700);
+    await imSay(pick(openers), 700, 'neutral');
 
     const buttons = [
       { label:'💭 Je fais quoi maintenant ?', onClick: async () => {
         imAddMe('Je fais quoi maintenant ?');
-        await imSay(nextStepText(), 800);
+        await imSay(nextStepText(), 800, 'explain');
         await imOfferHelp(m);
       }},
       { label: isFoxy ? '💪 Motive-moi un peu' : '🫂 J\'ai besoin d\'être rassuré', onClick: async () => {
         imAddMe(isFoxy ? 'Motive-moi un peu.' : 'J\'ai besoin d\'être rassuré.');
-        await imSay(pick(isFoxy ? FOXY_REASSURE : REASSURE), 800);
+        await imSay(pick(isFoxy ? FOXY_REASSURE : REASSURE), 800, 'joy');
         await imOfferHelp(m);
       }},
       { label: isFoxy ? '🦊 Raconte comment c\'était pour toi' : '🧸 Juste un câlin', onClick: async () => {
         imAddMe(isFoxy ? 'Raconte, c\'était comment pour toi ?' : 'Juste un câlin.');
-        await imSay(pick(isFoxy ? FOXY_STORY : CUDDLE), 800);
+        await imSay(pick(isFoxy ? FOXY_STORY : CUDDLE), 800, isFoxy ? 'explain' : 'cuddle');
         await imOfferHelp(m);
       }},
       { label:'😟 Je ne me sens pas bien', onClick: async () => {
         imAddMe('Je ne me sens pas bien.');
+        pendingExpr = 'concern';
         await imSaySeq(pick(isFoxy ? FOXY_NOTWELL : NOTWELL));
+        pendingExpr = 'neutral';
         await imOfferHelp(m);
       }},
       { soft:true, label:'🍼 Me changer maintenant', onClick: () => startChange(m.key==='reveil'||m.key==='soir'?'pilier':'check') },
       { soft:true, label: isFoxy ? '👍 Ça roule, merci' : '💛 Ça va, merci', onClick: async () => {
         imAddMe(isFoxy ? 'Ça roule, merci.' : 'Ça va, merci.');
-        await imSay(pick(isFoxy ? FOXY_OKAY : OKAY), 700);
+        await imSay(pick(isFoxy ? FOXY_OKAY : OKAY), 700, 'wave');
         imSetActions([
           { soft:true, label:'💭 Finalement, j\'ai une question', onClick: () => imOfferHelp(m) },
           { soft:true, label:'📋 Revenir en mode reporting', onClick: () => setVoiceMode('report') }
