@@ -198,6 +198,19 @@
   }
   body.report .cell { border-radius:50%; }
 
+  /* carte "depuis combien de temps" avec Foxy */
+  .since-card { display:flex; align-items:center; gap:14px; }
+  .since-portrait {
+    width:88px; height:88px; flex:none; border-radius:18px;
+    background-repeat:no-repeat; background-color:#FDF3EA;
+    border:2.5px solid #e0a060; box-shadow:0 3px 12px rgba(200,120,60,0.22);
+  }
+  .since-body { flex:1; }
+  .since-time { font-family:'Fraunces',serif; font-weight:600; font-size:26px; line-height:1.1; color:var(--ink); }
+  .since-time.ok { color:#4c7a51; } .since-time.mid { color:#9a742a; } .since-time.long { color:#a8543b; }
+  .since-say { font-size:13.5px; font-weight:700; color:#5a3418; margin-top:5px; line-height:1.4; }
+  .since-none { font-size:13px; font-weight:600; color:var(--muted); }
+
   /* surprise check */
   .checkrow { display: flex; gap: 10px; align-items: stretch; }
   .toggle {
@@ -578,6 +591,17 @@
     <div class="im-actions" id="imActions"></div>
   </div>
 
+  <div class="card" id="sinceCard">
+    <h2>Ta couche du moment</h2>
+    <div class="since-card">
+      <div class="since-portrait" id="sincePortrait"></div>
+      <div class="since-body">
+        <div class="since-time" id="sinceTime">—</div>
+        <div class="since-say" id="sinceSay"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="card" id="dashCard">
     <h2>Habituation aux couches</h2>
     <div class="sub">Ta progression sur le mois : régularité et baisse des situations à corriger, à parts égales.</div>
@@ -855,7 +879,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '5.6';
+  const APP_VERSION = '5.8';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1938,7 +1962,66 @@
              : 'Tes journées enregistrées apparaîtront ici.';
     await renderDashboard(entries);
     await renderWear();
+    await renderSince();
   }
+
+  // Depuis combien de temps la couche actuelle est portée (dernier change enregistré)
+  async function lastChangeTime() {
+    // cherche le change_fait le plus récent sur les 2 derniers jours
+    let latest = null;
+    for (let i = 0; i < 2; i++) {
+      const d = new Date(); d.setDate(d.getDate()-i);
+      const list = await getChecks(d.toISOString().slice(0,10));
+      list.forEach(c => {
+        if (c.result === 'change_fait' && c.t) {
+          const t = new Date(c.t);
+          if (!latest || t > latest) latest = t;
+        }
+      });
+    }
+    return latest;
+  }
+
+  function sinceComment(hours, isNight) {
+    // renvoie {expr, cls, say}
+    if (isNight) {
+      if (hours < 9) return { expr:'sleep', cls:'ok', say:'Couche de nuit, tout roule. Dors tranquille, je veille.' };
+      if (hours < 11) return { expr:'relaxed', cls:'ok', say:'Belle nuit ! Bientôt l\'heure du change du matin.' };
+      return { expr:'surprised', cls:'long', say:'Ça fait une longue nuit ! On change dès le réveil, hein.' };
+    }
+    if (hours < 1)   return { expr:'happy',    cls:'ok',   say:'Couche toute fraîche ! Nickel, profite.' };
+    if (hours < 2.5) return { expr:'joy',      cls:'ok',   say:'Ça roule, ta couche est encore au top.' };
+    if (hours < 4)   return { expr:'neutral',  cls:'ok',   say:'Tranquille, on est dans le bon rythme.' };
+    if (hours < 5)   return { expr:'pensive',  cls:'mid',  say:'Commence à faire un moment... garde un œil dessus.' };
+    if (hours < 6)   return { expr:'concern',  cls:'mid',  say:'Ça fait un bail là. Pense à checker, un change serait pas mal.' };
+    return { expr:'surprised', cls:'long', say:'Oh là, ça fait trop longtemps ! On change maintenant, viens.' };
+  }
+
+  async function renderSince() {
+    const portrait = document.getElementById('sincePortrait');
+    const timeEl = document.getElementById('sinceTime');
+    const sayEl = document.getElementById('sinceSay');
+    if (!timeEl) return;
+    const last = await lastChangeTime();
+    if (!last) {
+      positionFoxyCell(portrait, 'pensive', 88);
+      timeEl.className = 'since-time';
+      timeEl.textContent = '—';
+      sayEl.textContent = 'Pas encore de change enregistré via l\'appli. Fais ton premier change guidé et je compte le temps pour toi !';
+      return;
+    }
+    const now = new Date();
+    const hours = (now - last) / 3600000;
+    const h = Math.floor(hours), min = Math.floor((hours - h) * 60);
+    const isNight = last.getHours() >= 21 || last.getHours() < 6 || now.getHours() >= 23 || now.getHours() < 7;
+    const c = sinceComment(hours, isNight);
+    positionFoxyCell(portrait, c.expr, 88);
+    timeEl.className = 'since-time ' + c.cls;
+    timeEl.textContent = (h > 0 ? h + 'h' + (min < 10 ? '0'+min : min) : min + ' min');
+    sayEl.textContent = c.say;
+  }
+  // met à jour le compteur régulièrement
+  setInterval(() => { renderSince(); }, 60000);
 
   // Durée de port : intervalles entre changes enregistrés (result 'change_fait')
   async function renderWear() {
@@ -2747,7 +2830,7 @@
     { m: 12*60,     ic:'🧸', act:'Fenêtre régression douce',       det:'Harnais fleece, moment calme : lecture, musique douce.' },
     { m: 13*60+30,  ic:'🍽️', act:'Déjeuner + 2e biberon',         det:'Repas fibres, check, deuxième biberon.' },
     { m: 14*60+30,  ic:'😴', act:'Sieste',                        det:'Emmaillotage doux : grenouillère + couverture. Cocon.' },
-    { m: 16*60,     ic:'✅', act:'Check au réveil + 3e biberon',   det:'Systématique après la sieste. Troisième biberon.' },
+    { m: 16*60,     ic:'🔑', act:'Change de sortie de sieste + 3e biberon', det:'Change OBLIGATOIRE au réveil de sieste. Troisième biberon.' },
     { m: 16*60+30,  ic:'🚶', act:'Bloc activité',                  det:'Hobby, sortie, ménage — ce que tu veux.' },
     { m: 19*60+30,  ic:'🍽️', act:'Dîner',                        det:'Check si mouillé.' },
     { m: 20*60,     ic:'🧸', act:'Grande fenêtre régression',      det:'Le cocon du soir. Allège l\'hydratation à partir de maintenant.' },
@@ -3137,7 +3220,7 @@
     ]},
     { cat:'Rythme', items:[
       { id:'check1', n:'Check + 1er biberon', d:'11h30', m:11*60+30, body:'✅ Check + 1er biberon.' },
-      { id:'check3', n:'Check + 3e biberon', d:'16h00', m:16*60, body:'✅ Check au réveil de sieste + 3e biberon.' }
+      { id:'check3', n:'Change de sortie de sieste + 3e biberon', d:'16h00', m:16*60, body:'🔑 Change de sortie de sieste + 3e biberon.' }
     ]},
     { cat:'Repas', items:[
       { id:'petitdej', n:'Petit-déjeuner', d:'8h00', m:8*60, body:'🥣 Petit-déjeuner en tenue de nuit.' },
@@ -3218,7 +3301,7 @@
     sieste:'La sieste, le meilleur moment ! File dans ton cocon.',
     reg_soir:'Grosse détente du soir ! Allège l\'eau et profite.',
     check1:'Check + premier biberon ! Pense à bien boire.',
-    check3:'Check au réveil de sieste + ton troisième bibi !',
+    check3:'Sortie de sieste : on change ta couche + ton troisième bibi !',
     petitdej:'Petit-déj en tenue de nuit, régale-toi !',
     dejeuner:'Déjeuner + deuxième biberon, bon app\' !',
     diner:'C\'est l\'heure du dîner ! Un petit check si besoin.',
@@ -3328,7 +3411,7 @@
       { key:'c0900', m:9*60,     ctx:'pilier', label:'Change du matin' },
       { key:'c1130', m:11*60+30, ctx:'check',  label:'Check + 1er biberon' },
       { key:'c1330', m:13*60+30, ctx:'check',  label:'Check du déjeuner' },
-      { key:'c1600', m:16*60,    ctx:'check',  label:'Check + 3e biberon' },
+      { key:'c1600', m:16*60,    ctx:'pilier', label:'Change de sortie de sieste' },
       { key:'c1930', m:19*60+30, ctx:'check',  label:'Check du dîner' },
       { key:'c2230', m:22*60+30, ctx:'pilier', label:'Change de nuit' }
     ];
