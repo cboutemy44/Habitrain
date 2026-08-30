@@ -36,6 +36,19 @@
   }
   .head { text-align: center; margin-bottom: 22px; }
   .head .icon { font-size: 30px; }
+  /* portrait Foxy réutilisable (cellule de spritesheet) */
+  .foxy-portrait {
+    background-repeat:no-repeat; border-radius:14px; background-color:#FDF3EA;
+    display:inline-block; vertical-align:middle;
+  }
+  .head #headFoxy {
+    width:56px; height:56px; margin:0 auto; border-radius:16px;
+    border:2px solid #e0a060; box-shadow:0 3px 10px rgba(200,120,60,0.22);
+  }
+  .modal .big.foxy-portrait {
+    width:76px; height:76px; margin:0 auto 4px; border-radius:16px;
+    border:2px solid #e0a060; box-shadow:0 3px 10px rgba(200,120,60,0.22);
+  }
   .head h1 {
     font-family: 'Fraunces', serif;
     font-weight: 600;
@@ -146,7 +159,7 @@
   }
   body.report .head h1 { font-family:'Gochi Hand',cursive; font-size:30px; color:#5a4326; }
   body.report .head p { color:#7a6042; }
-  body.report .head .icon::after { content:' 🦊'; }
+
 
   /* chaque carte = feuille de papier épinglée, légèrement de travers */
   body.report .card:not(#imChat):not(#settingsCard):not(#debugCard) {
@@ -412,7 +425,7 @@
   /* mode immersif : ambiance plus chaleureuse */
   body.immersive .moment { border-color:#e6c9d6; background:linear-gradient(180deg,#FBF3F7,#F7EEF9); }
   body.immersive .moment .eyebrow { color:#a05a86; }
-  body.immersive .head .icon::after { content:' 🧸'; }
+
 
   /* ===== Mode immersif : conversation plein cadre ===== */
   body.immersive { background: linear-gradient(180deg,#F5EEF6,#EEF0FA) !important; }
@@ -502,7 +515,7 @@
 <div class="wrap">
   <div id="verBadge" style="position:absolute; top:12px; right:14px; font-size:10.5px; font-weight:800; color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:20px; padding:3px 9px; z-index:5;">v—</div>
   <div class="head">
-    <div class="icon">🍼</div>
+    <div class="icon foxy-portrait" id="headFoxy"></div>
     <h1>Journal de suivi</h1>
     <p>Immersion 24/7 · 2 min matin & soir</p>
     <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
@@ -757,7 +770,7 @@
   </div>
 
   <div class="modal" id="modalFix" style="display:none">
-    <div class="big">⚠️</div>
+    <div class="big foxy-portrait" id="fixIcon"></div>
     <h3 id="fixTitle">À corriger tout de suite</h3>
     <p id="fixIntro">Tu es hors cadre là&nbsp;: on te remet en couche maintenant, sans attendre.</p>
     <ol class="fixsteps" id="fixSteps"></ol>
@@ -767,7 +780,7 @@
   </div>
 
   <div class="modal" id="modalDue" style="display:none">
-    <div class="big">⏰</div>
+    <div class="big foxy-portrait" id="dueIcon"></div>
     <h3 id="dueTitle">C'est l'heure de changer</h3>
     <p id="dueText">Le planning indique un change maintenant.</p>
     <div class="acts" id="dueActs"></div>
@@ -781,7 +794,7 @@
   </div>
 
   <div class="modal" id="modalPose" style="display:none">
-    <div class="big">🍼</div>
+    <div class="big foxy-portrait" id="poseIcon"></div>
     <h3>Pose de la couche fraîche</h3>
     <p id="poseIntro">Suis les étapes dans l'ordre.</p>
     <ol class="fixsteps" id="poseSteps"></ol>
@@ -845,7 +858,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '5.2';
+  const APP_VERSION = '5.3';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -928,6 +941,7 @@
     foxyOutfit = FOXY_OUTFITS[Math.floor(Math.random()*FOXY_OUTFITS.length)];
     try { await window.storage.set('foxyfit:'+date, JSON.stringify(foxyOutfit.id)); } catch(e) {}
   }
+  function afterOutfitSet() { try { refreshHeadFoxy(); } catch(e) {} }
 
   const EXPR_SETS = {
     positive:['happy','joy','proud','wave'],
@@ -954,6 +968,43 @@
     const col = idx % 4, row = Math.floor(idx / 4);
     const size = 132;
     p.style.backgroundPosition = (-(col*size)) + 'px ' + (-(row*size)) + 'px';
+  }
+
+  // positionne une cellule de la sheet du jour sur n'importe quel élément
+  function positionFoxyCell(el, expr, sizePx) {
+    if (!el) return;
+    const map = exprMap();
+    const idx = (expr in map) ? map[expr] : map.neutral;
+    const col = idx % 4, row = Math.floor(idx / 4);
+    el.style.backgroundImage = "url('" + foxyOutfit.sheet + "')";
+    el.style.backgroundSize = (sizePx*4) + 'px ' + (sizePx*4) + 'px';
+    el.style.backgroundRepeat = 'no-repeat';
+    el.style.backgroundPosition = (-(col*sizePx)) + 'px ' + (-(row*sizePx)) + 'px';
+  }
+  // rafraîchit le portrait du titre (tenue du jour)
+  function refreshHeadFoxy() {
+    const el = document.getElementById('headFoxy');
+    if (el) positionFoxyCell(el, 'happy', 56);
+  }
+  // fabrique un dataURL d'une cellule (pour l'icône de notification)
+  function foxyCellDataURL(expr, size) {
+    size = size || 192;
+    return new Promise(resolve => {
+      const map = exprMap();
+      const idx = (expr in map) ? map[expr] : map.neutral;
+      const col = idx % 4, row = Math.floor(idx / 4);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const cv = document.createElement('canvas'); cv.width = size; cv.height = size;
+          const ctx = cv.getContext('2d');
+          ctx.drawImage(img, col*256, row*256, 256, 256, 0, 0, size, size);
+          resolve(cv.toDataURL('image/png'));
+        } catch(e) { resolve('icon-192.png'); }
+      };
+      img.onerror = () => resolve('icon-192.png');
+      img.src = foxyOutfit.sheet;
+    });
   }
 
   function imClear() {
@@ -2266,7 +2317,10 @@
 
   function buildCheck(type) {
     currentType = type;
-    document.getElementById('checkIcon').textContent = type.icon;
+    const ic = document.getElementById('checkIcon');
+    ic.textContent = '';
+    ic.classList.add('foxy-portrait');
+    positionFoxyCell(ic, 'pensive', 76);
     document.getElementById('checkTitle').textContent = type.title;
     document.getElementById('checkQuestion').innerHTML = type.qFoxy || type.question;
     const acts = document.getElementById('checkActs');
@@ -2294,6 +2348,7 @@
     document.getElementById('overlay').classList.add('show');
   }
   function showFix(fix) {
+    positionFoxyCell(document.getElementById('fixIcon'), 'concern', 76);
     document.getElementById('fixTitle').textContent = fix.title;
     document.getElementById('fixIntro').innerHTML = fix.intro;
     const ol = document.getElementById('fixSteps');
@@ -2335,6 +2390,7 @@
 
   function popChangeDue(slot) {
     activeSlotKey = slot.key;
+    positionFoxyCell(document.getElementById('dueIcon'), 'wave', 76);
     document.getElementById('dueTitle').textContent = '⏰ ' + slot.label;
     document.getElementById('modalCheck').style.display = 'none';
     document.getElementById('modalFix').style.display = 'none';
@@ -2401,6 +2457,7 @@
 
   function startChange(ctx, skipState) {
     changeCtx = ctx || 'check';
+    positionFoxyCell(document.getElementById('chIcon'), 'pensive', 76);
     // Si l'état a déjà été déclaré (au check), on va directement au guide de pose.
     if (skipState) {
       document.getElementById('modalCheck').style.display = 'none';
@@ -2437,6 +2494,7 @@
   }
 
   function showPose() {
+    positionFoxyCell(document.getElementById('poseIcon'), 'happy', 76);
     const ol = document.getElementById('poseSteps');
     ol.innerHTML = '';
     POSE_STEPS.forEach(s => {
@@ -3092,11 +3150,11 @@
       }
     }));
   }
-  function showLocalNotif(title, body, itemId) {
+  async function showLocalNotif(title, body, itemId) {
     if (notifPermState() !== 'granted') return;
-    // Foxy partout : ton pote t'envoie le rappel
     const prefix = '🦊 ';
-    const icon = (typeof foxyOutfit !== 'undefined' && foxyOutfit) ? foxyOutfit.sheet : 'icon-192.png';
+    let icon = 'icon-192.png';
+    try { icon = await foxyCellDataURL('happy', 192); } catch(e) {}
     let finalBody = (itemId && FOXY_NOTIF[itemId]) ? FOXY_NOTIF[itemId] : body;
     try {
       if (navigator.serviceWorker && navigator.serviceWorker.ready) {
@@ -3134,6 +3192,7 @@
         foxyOutfit = o;
         try { await window.storage.set('foxyfit:'+todayStr(), JSON.stringify(o.id)); } catch(e) {}
         renderDebugOutfits();
+        refreshHeadFoxy();
         if (voiceMode === 'foxy') { try { await imRunMoment(); } catch(e) {} }
       });
       box.appendChild(b);
@@ -3159,6 +3218,8 @@
     document.getElementById('dateInput').value = todayStr();
     await loadAutoPref();
     await loadNotifPrefs();
+    await loadFoxyOutfit();
+    refreshHeadFoxy();
     await loadVoice();
     scheduleNotifications();
     await renderCheckStat();
