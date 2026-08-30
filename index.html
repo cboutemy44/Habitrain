@@ -779,7 +779,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '4.9';
+  const APP_VERSION = '5.0';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -832,22 +832,26 @@
   const imActions = () => document.getElementById('imActions');
 
   // Expressions Foxy → index de cellule (grille 4×4, 0..15, lecture ligne par ligne)
-  const EXPR = {
+  // Deux familles de sheets avec des ordres d'expressions DIFFÉRENTS (vérifié case par case).
+  // Famille A : paw + diaper. Famille B : blue + blue2.
+  const EXPR_A = {
     happy:0, concern:1, pensive:2, surprised:3,
-    neutral:6, relaxed:7,
-    wave:9, cuddle:10, laugh:11,
+    neutral:6, relaxed:7, wave:9, cuddle:10, laugh:11,
     joy:12, proud:12, explain:14, sleep:15
   };
-  // vérifié : 0=content doudou, 1=triste, 2=pensif(?), 3=surpris(pattes joues),
-  // 6=neutre sourire, 7=allongé détendu, 9=coucou main, 10=câlin doudou,
-  // 11=rigole, 12=debout joyeux/fier, 14=lecture(explique), 15=dodo(zzz)
+  const EXPR_B = {
+    happy:0, concern:1, pensive:2, surprised:3,
+    neutral:0, relaxed:7, wave:11, cuddle:0, laugh:15,
+    joy:4, proud:11, explain:14, sleep:13
+  };
+  function exprMap() { return foxyOutfit.fam === 'B' ? EXPR_B : EXPR_A; }
 
-  // Tenues de Foxy (sheets partageant le même ordre d'expressions)
+  // Tenues de Foxy, chacune rattachée à sa famille d'expressions
   const FOXY_OUTFITS = [
-    { id:'paw',    sheet:'foxy-paw.png',    name:'grenouillère à pattes' },
-    { id:'blue',   sheet:'foxy-blue.png',   name:'grenouillère bleue' },
-    { id:'blue2',  sheet:'foxy-blue2.png',  name:'pyjama bleu' },
-    { id:'diaper', sheet:'foxy-diaper.png', name:'couche' }
+    { id:'paw',    sheet:'foxy-paw.png',    name:'grenouillère à pattes', fam:'A' },
+    { id:'diaper', sheet:'foxy-diaper.png', name:'couche',                fam:'A' },
+    { id:'blue',   sheet:'foxy-blue.png',   name:'grenouillère bleue',    fam:'B' },
+    { id:'blue2',  sheet:'foxy-blue2.png',  name:'pyjama bleu',           fam:'B' }
   ];
   let foxyOutfit = FOXY_OUTFITS[0];
   async function loadFoxyOutfit() {
@@ -856,12 +860,10 @@
       const r = await window.storage.get('foxyfit:'+date);
       if (r && r.value) { const id = JSON.parse(r.value); const f = FOXY_OUTFITS.find(o=>o.id===id); if (f) { foxyOutfit = f; return; } }
     } catch(e) {}
-    // pas encore de tenue aujourd'hui → on en tire une
     foxyOutfit = FOXY_OUTFITS[Math.floor(Math.random()*FOXY_OUTFITS.length)];
     try { await window.storage.set('foxyfit:'+date, JSON.stringify(foxyOutfit.id)); } catch(e) {}
   }
 
-  // variation : chaque "humeur" pioche parmi plusieurs expressions proches
   const EXPR_SETS = {
     positive:['happy','joy','proud','wave'],
     calm:['neutral','relaxed'],
@@ -881,9 +883,9 @@
   function setFoxyPortrait(expr) {
     const p = document.getElementById('rpgPortrait');
     if (!p) return;
-    // tenue du jour comme fond
     p.style.backgroundImage = "url('" + foxyOutfit.sheet + "')";
-    const idx = (expr in EXPR) ? EXPR[expr] : EXPR.neutral;
+    const map = exprMap();
+    const idx = (expr in map) ? map[expr] : map.neutral;
     const col = idx % 4, row = Math.floor(idx / 4);
     const size = 132;
     p.style.backgroundPosition = (-(col*size)) + 'px ' + (-(row*size)) + 'px';
