@@ -430,12 +430,11 @@
   body.foxy .im-thread, body.foxy #imChat .im-head { display:none; }
   .rpg-portrait {
     width:132px; height:132px; flex:none; border-radius:16px;
-    background-image:url('foxy-main.png'); background-repeat:no-repeat;
+    background-image:url('foxy-paw.png'); background-repeat:no-repeat;
     background-size:528px 528px; /* 132 * 4 */
     border:2.5px solid #e0a060; box-shadow:0 4px 14px rgba(200,120,60,0.25);
     background-color:#FDF3EA;
   }
-  .rpg-portrait.change { background-image:url('foxy-change.png'); }
   .rpg-box {
     flex:1; min-height:132px; background:#fff; border:2.5px solid #e0a060; border-radius:16px;
     padding:14px 16px; position:relative; box-shadow:0 4px 14px rgba(200,120,60,0.12);
@@ -780,7 +779,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '4.8';
+  const APP_VERSION = '4.9';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -842,18 +841,48 @@
   // vérifié : 0=content doudou, 1=triste, 2=pensif(?), 3=surpris(pattes joues),
   // 6=neutre sourire, 7=allongé détendu, 9=coucou main, 10=câlin doudou,
   // 11=rigole, 12=debout joyeux/fier, 14=lecture(explique), 15=dodo(zzz)
-  let pendingExpr = 'neutral'; // expression du prochain message Foxy
+
+  // Tenues de Foxy (sheets partageant le même ordre d'expressions)
+  const FOXY_OUTFITS = [
+    { id:'paw',    sheet:'foxy-paw.png',    name:'grenouillère à pattes' },
+    { id:'blue',   sheet:'foxy-blue.png',   name:'grenouillère bleue' },
+    { id:'blue2',  sheet:'foxy-blue2.png',  name:'pyjama bleu' },
+    { id:'diaper', sheet:'foxy-diaper.png', name:'couche' }
+  ];
+  let foxyOutfit = FOXY_OUTFITS[0];
+  async function loadFoxyOutfit() {
+    const date = todayStr();
+    try {
+      const r = await window.storage.get('foxyfit:'+date);
+      if (r && r.value) { const id = JSON.parse(r.value); const f = FOXY_OUTFITS.find(o=>o.id===id); if (f) { foxyOutfit = f; return; } }
+    } catch(e) {}
+    // pas encore de tenue aujourd'hui → on en tire une
+    foxyOutfit = FOXY_OUTFITS[Math.floor(Math.random()*FOXY_OUTFITS.length)];
+    try { await window.storage.set('foxyfit:'+date, JSON.stringify(foxyOutfit.id)); } catch(e) {}
+  }
+
+  // variation : chaque "humeur" pioche parmi plusieurs expressions proches
+  const EXPR_SETS = {
+    positive:['happy','joy','proud','wave'],
+    calm:['neutral','relaxed'],
+    tender:['cuddle','happy'],
+    worried:['concern','surprised'],
+    think:['pensive','neutral'],
+    teach:['explain'],
+    sleepy:['sleep','relaxed'],
+    fun:['laugh','joy','wave']
+  };
+  function pickExpr(set) {
+    const arr = EXPR_SETS[set] || ['neutral'];
+    return arr[Math.floor(Math.random()*arr.length)];
+  }
+  let pendingExpr = 'neutral';
 
   function setFoxyPortrait(expr) {
     const p = document.getElementById('rpgPortrait');
     if (!p) return;
-    if (expr === 'change') {
-      p.classList.add('change');
-      // couche : on montre une pose contente (cellule 0)
-      p.style.backgroundPosition = '0px 0px';
-      return;
-    }
-    p.classList.remove('change');
+    // tenue du jour comme fond
+    p.style.backgroundImage = "url('" + foxyOutfit.sheet + "')";
     const idx = (expr in EXPR) ? EXPR[expr] : EXPR.neutral;
     const col = idx % 4, row = Math.floor(idx / 4);
     const size = 132;
@@ -894,7 +923,8 @@
     });
   }
 
-  // effet machine à écrire dans la boîte RPG
+  // effet machine à écrire dans la boîte RPG, avance à l'appui (comme un jeu vidéo)
+  let rpgAdvance = null;
   function rpgSay(text, expr) {
     return new Promise(resolve => {
       setFoxyPortrait(expr || pendingExpr || 'neutral');
@@ -903,18 +933,18 @@
       if (!rt) { resolve(); return; }
       rn.style.visibility = 'hidden';
       rt.textContent = '';
-      const plain = text.replace(/<[^>]+>/g,''); // pas de HTML dans le typewriter
-      let i = 0;
-      const speed = 18;
+      const plain = text.replace(/<[^>]+>/g,'');
+      let i = 0, typing = true;
+      const speed = 20;
       const timer = setInterval(() => {
-        rt.textContent = plain.slice(0, i+1);
-        i++;
-        if (i >= plain.length) {
-          clearInterval(timer);
-          rn.style.visibility = 'visible';
-          resolve();
-        }
+        rt.textContent = plain.slice(0, ++i);
+        if (i >= plain.length) { clearInterval(timer); typing = false; rn.style.visibility = 'visible'; }
       }, speed);
+      // un appui : termine le texte s'il s'écrit, sinon avance
+      rpgAdvance = () => {
+        if (typing) { clearInterval(timer); rt.textContent = plain; typing = false; rn.style.visibility = 'visible'; }
+        else { rpgAdvance = null; resolve(); }
+      };
     });
   }
   async function imSaySeq(lines) { for (const l of lines) { await imSay(l); } }
@@ -1261,38 +1291,46 @@
     if (pool && pool.length) return pool[Math.floor(Math.random()*pool.length)];
     return voiceMode === 'foxy' ? 'Ok, noté !' : 'C\'est noté, merci de me le dire.';
   }
-  // expression Foxy selon le résultat
-  const EXPR_FOR_RESULT = {
-    reveil_sec:'happy', reveil_mouille:'neutral', reveil_fuite:'surprised',
-    matin_ok:'proud', matin_change:'change', matin_soif:'explain',
-    aprem_ok:'joy', aprem_sieste:'relaxed', aprem_change:'change',
-    soir_ok:'proud', soir_souci:'concern', nuit_ok:'sleep', nuit_change:'change',
-    soir_bilan:'explain'
+  // humeur (set d'expressions) selon le résultat → variation à chaque fois
+  const MOOD_FOR_RESULT = {
+    reveil_sec:'positive', reveil_mouille:'calm', reveil_fuite:'worried',
+    matin_ok:'positive', matin_change:'tender', matin_soif:'teach',
+    aprem_ok:'fun', aprem_sieste:'sleepy', aprem_change:'tender',
+    soir_ok:'positive', soir_souci:'worried', nuit_ok:'sleepy', nuit_change:'tender',
+    soir_bilan:'teach'
   };
-  function exprForResult(r) { return EXPR_FOR_RESULT[r] || 'neutral'; }
+  function exprForResult(r) { return pickExpr(MOOD_FOR_RESULT[r] || 'calm'); }
 
   // Construit la conversation du moment courant
   async function imRunMoment() {
     imClear();
+    if (voiceMode === 'foxy') { await loadFoxyOutfit(); updateFoxyStatus(); }
     const now = new Date();
     const m = currentMoment(now);
     const done = await getMoments(todayStr());
     const p = persona();
-    document.getElementById('imStatus').textContent = m.eyebrow + ' · ' + p.status;
+    const outfitTxt = voiceMode === 'foxy' ? (' · en ' + foxyOutfit.name) : '';
+    document.getElementById('imStatus').textContent = m.eyebrow + ' · ' + p.status + outfitTxt;
 
     // salutation + question selon le persona
     const opener = voiceMode === 'foxy' ? foxyOpener(m) : (m.titi ? m.titi : m.title);
-    await imSay(opener, 500, 'wave');
+    await imSay(opener, 500, pickExpr('fun'));
     if (done[m.key]) {
-      await imSay(foxyOrCare(m, 'q'), 700, 'neutral');
+      await imSay(foxyOrCare(m, 'q'), 700, pickExpr('think'));
       await imSay(voiceMode === 'foxy'
         ? 'Ah mais on a déjà fait le point tout à l\'heure ! ' + foxyAfter(m)
-        : 'On a déjà fait notre petit point tout à l\'heure. ' + (m.afteri || m.after), 800, 'happy');
+        : 'On a déjà fait notre petit point tout à l\'heure. ' + (m.afteri || m.after), 800, pickExpr('positive'));
       buildMomentReplies(m, true);
       return;
     }
-    await imSay(foxyOrCare(m, 'q'), 900, 'pensive');
+    await imSay(foxyOrCare(m, 'q'), 900, pickExpr('think'));
     buildMomentReplies(m, false);
+  }
+
+  function updateFoxyStatus() {
+    if (voiceMode !== 'foxy') return;
+    const st = document.getElementById('imStatus');
+    // (le statut détaillé est mis à jour dans imRunMoment ; ici on garde la tenue en mémoire)
   }
 
   // variantes Foxy pour les moments
@@ -1363,22 +1401,22 @@
       'Je suis là. Qu\'est-ce qui te ferait du bien ?',
       'Dis-moi ce dont tu as besoin, je m\'occupe de toi.'
     ];
-    await imSay(pick(openers), 700, 'neutral');
+    await imSay(pick(openers), 700, pickExpr('calm'));
 
     const buttons = [
       { label:'💭 Je fais quoi maintenant ?', onClick: async () => {
         imAddMe('Je fais quoi maintenant ?');
-        await imSay(nextStepText(), 800, 'explain');
+        await imSay(nextStepText(), 800, pickExpr('teach'));
         await imOfferHelp(m);
       }},
       { label: isFoxy ? '💪 Motive-moi un peu' : '🫂 J\'ai besoin d\'être rassuré', onClick: async () => {
         imAddMe(isFoxy ? 'Motive-moi un peu.' : 'J\'ai besoin d\'être rassuré.');
-        await imSay(pick(isFoxy ? FOXY_REASSURE : REASSURE), 800, 'joy');
+        await imSay(pick(isFoxy ? FOXY_REASSURE : REASSURE), 800, pickExpr('positive'));
         await imOfferHelp(m);
       }},
       { label: isFoxy ? '🦊 Raconte comment c\'était pour toi' : '🧸 Juste un câlin', onClick: async () => {
         imAddMe(isFoxy ? 'Raconte, c\'était comment pour toi ?' : 'Juste un câlin.');
-        await imSay(pick(isFoxy ? FOXY_STORY : CUDDLE), 800, isFoxy ? 'explain' : 'cuddle');
+        await imSay(pick(isFoxy ? FOXY_STORY : CUDDLE), 800, isFoxy ? pickExpr('teach') : pickExpr('tender'));
         await imOfferHelp(m);
       }},
       { label:'😟 Je ne me sens pas bien', onClick: async () => {
@@ -1391,7 +1429,7 @@
       { soft:true, label:'🍼 Me changer maintenant', onClick: () => startChange(m.key==='reveil'||m.key==='soir'?'pilier':'check') },
       { soft:true, label: isFoxy ? '👍 Ça roule, merci' : '💛 Ça va, merci', onClick: async () => {
         imAddMe(isFoxy ? 'Ça roule, merci.' : 'Ça va, merci.');
-        await imSay(pick(isFoxy ? FOXY_OKAY : OKAY), 700, 'wave');
+        await imSay(pick(isFoxy ? FOXY_OKAY : OKAY), 700, pickExpr('fun'));
         imSetActions([
           { soft:true, label:'💭 Finalement, j\'ai une question', onClick: () => imOfferHelp(m) },
           { soft:true, label:'📋 Revenir en mode reporting', onClick: () => setVoiceMode('report') }
@@ -1504,6 +1542,9 @@
       const next = voiceMode === 'report' ? 'care' : voiceMode === 'care' ? 'foxy' : 'report';
       setVoiceMode(next);
     });
+    // appui sur la scène RPG = avancer le dialogue (façon jeu vidéo)
+    const stage = document.getElementById('rpgStage');
+    if (stage) stage.addEventListener('click', () => { if (rpgAdvance) rpgAdvance(); });
   });
 
   const skinColors = { verte: 'var(--green)', surveiller: 'var(--amber)', traiter: 'var(--coral)' };
