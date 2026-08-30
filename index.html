@@ -359,6 +359,11 @@
   .breach-summary { margin-top:12px; font-size:12.5px; font-weight:800; padding:10px 12px; border-radius:11px; }
   .breach-summary.none { background:#EDF5EE; color:#4c7a51; }
   .breach-summary.some { background:#FBEBE5; color:#a8543b; }
+
+  /* mode immersif : ambiance plus chaleureuse */
+  body.immersive .moment { border-color:#e6c9d6; background:linear-gradient(180deg,#FBF3F7,#F7EEF9); }
+  body.immersive .moment .eyebrow { color:#a05a86; }
+  body.immersive .head .icon::after { content:' 🧸'; }
 </style>
 
 <div class="wrap">
@@ -367,7 +372,10 @@
     <div class="icon">🍼</div>
     <h1>Journal de suivi</h1>
     <p>Immersion 24/7 · 2 min matin & soir</p>
-    <div style="margin-top:10px"><button class="settings-toggle-btn" id="openSettings">⚙️ Réglages</button></div>
+    <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+      <button class="settings-toggle-btn" id="openSettings">⚙️ Réglages</button>
+      <button class="settings-toggle-btn" id="toggleVoice">🧸 Mode immersif</button>
+    </div>
   </div>
 
   <div id="storeWarn" style="display:none; background:#FBEBE5; border:1.5px solid var(--coral); color:#a8543b; border-radius:13px; padding:11px 13px; font-size:12.5px; font-weight:700; margin-bottom:15px; line-height:1.45;"></div>
@@ -482,7 +490,7 @@
 
   <div class="card" id="wearCard">
     <h2>Durée de port</h2>
-    <div class="sub">Temps entre deux changes, calculé sur tes changes enregistrés dans l'appli.</div>
+    <div class="sub">Temps entre deux changes enregistrés. Fourchette saine en journée : 2h à 5h — ni trop fréquent (anomalie), ni trop long (risque peau).</div>
     <div class="wear-kpis">
       <div class="wear-kpi"><div class="num" id="wearAvg">—</div><div class="lab">Moyenne jour</div></div>
       <div class="wear-kpi"><div class="num" id="wearNight">—</div><div class="lab">Nuit (moy.)</div></div>
@@ -669,10 +677,39 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '4.1';
+  const APP_VERSION = '4.3';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
+  });
+
+  /* ---- Mode immersif (voix caregiver) ---- */
+  // false = reporting factuel ; true = caregiver doux et cadrant, tutoiement sans surnom.
+  let immersive = false;
+  async function loadVoice() {
+    try { const r = await window.storage.get('pref:voice'); if (r && r.value) immersive = JSON.parse(r.value); } catch(e) {}
+    applyVoiceChrome();
+  }
+  async function setVoice(v) {
+    immersive = v;
+    try { await window.storage.set('pref:voice', JSON.stringify(v)); } catch(e) {}
+    applyVoiceChrome();
+    // re-render les zones textuelles
+    try { await renderMoment(); } catch(e) {}
+    try { await renderBreaches(); } catch(e) {}
+  }
+  // v(reporting, immersif) : renvoie la bonne version selon le mode
+  function v(reporting, immersif) { return immersive ? immersif : reporting; }
+  function applyVoiceChrome() {
+    const btn = document.getElementById('toggleVoice');
+    if (btn) btn.textContent = immersive ? '📋 Mode reporting' : '🧸 Mode immersif';
+    const sub = document.querySelector('.head p');
+    if (sub) sub.textContent = immersive ? 'On prend soin de toi, un pas après l\'autre' : 'Immersion 24/7 · 2 min matin & soir';
+    document.body && document.body.classList && document.body.classList.toggle('immersive', immersive);
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    const t = document.getElementById('toggleVoice');
+    if (t) t.addEventListener('click', () => setVoice(!immersive));
   });
 
   const skinColors = { verte: 'var(--green)', surveiller: 'var(--amber)', traiter: 'var(--coral)' };
@@ -949,8 +986,17 @@
     recent.forEach(x => {
       const pct = Math.min(100, x.hours / 12 * 100);
       let cls = 'ok';
-      if (x.isNight) { cls = x.hours > 11 ? 'long' : 'ok'; }
-      else { cls = x.hours > 5 ? 'long' : (x.hours > 3.5 ? 'mid' : 'ok'); }
+      if (x.isNight) {
+        // nuit : long normal ; anormal seulement si très court (<5h) ou excessif (>12h)
+        if (x.hours < 5 || x.hours > 12) cls = 'long';
+        else cls = 'ok';
+      } else {
+        // jour : fourchette saine 2h–5h. Trop court = anomalie, trop long = risque peau.
+        if (x.hours < 2) cls = 'long';        // trop fréquent (anomalie)
+        else if (x.hours > 6) cls = 'long';   // trop long (risque peau)
+        else if (x.hours > 5) cls = 'mid';    // un peu long
+        else cls = 'ok';                      // sain
+      }
       const label = x.start.toLocaleDateString('fr-FR',{day:'numeric',month:'short'}) + ' ' +
                     String(x.start.getHours()).padStart(2,'0')+'h'+String(x.start.getMinutes()).padStart(2,'0');
       const row = document.createElement('div');
@@ -961,12 +1007,16 @@
       listEl.appendChild(row);
     });
 
-    // note contextuelle
-    const longDay = dayInts.filter(x => x.hours > 5).length;
-    if (longDay > 0) {
-      noteEl.innerHTML = '⚠️ '+longDay+' port(s) de jour au-delà de 5h : sur la durée, ça augmente le risque peau. Vise des changes plus rapprochés en journée.';
+    // note contextuelle : signale les DEUX dérives
+    const tooShort = dayInts.filter(x => x.hours < 2).length;
+    const tooLong = dayInts.filter(x => x.hours > 6).length;
+    const msgs = [];
+    if (tooShort > 0) msgs.push('🔁 <b>'+tooShort+' change'+(tooShort>1?'s':'')+' trop rapproché'+(tooShort>1?'s':'')+'</b> (< 2h en journée) : changer trop souvent va à l\'encontre de l\'habituation au port. Vérifie que ce n\'est pas de l\'inconfort ou une erreur de saisie.');
+    if (tooLong > 0) msgs.push('⏱️ <b>'+tooLong+' port'+(tooLong>1?'s':'')+' trop long'+(tooLong>1?'s':'')+'</b> (> 6h en journée) : sur la durée, ça augmente le risque peau.');
+    if (msgs.length) {
+      noteEl.innerHTML = msgs.join('<br><br>');
     } else {
-      noteEl.innerHTML = 'Rythme de changes sain. Rappel : ce suivi ne compte que les changes faits via le flux guidé de l\'appli.';
+      noteEl.innerHTML = '✅ Rythme de port sain : ni trop fréquent, ni trop long. C\'est exactement l\'équilibre recherché. Rappel : seuls les changes faits via l\'appli sont comptés.';
     }
   }
 
@@ -1563,52 +1613,67 @@
   const MOMENTS = {
     reveil: {
       key: 'reveil', eyebrow: 'Réveil · 7h-9h', title: 'Le point du matin',
+      titi: 'Bonjour, bien dormi ?',
       q: 'Réveil. Comment a tenu la couche de nuit ?',
+      qi: 'Coucou, tu es réveillé ! On regarde ensemble comment ta couche a tenu cette nuit ?',
       opts: [
         { label: '☀️ Nuit au sec', cls:'g', result:'reveil_sec' },
         { label: '💧 Bien mouillée', cls:'a', result:'reveil_mouille' },
         { label: '⚠️ Fuite pendant la nuit', cls:'c', result:'reveil_fuite' }
       ],
-      after: 'Le bilan peau se fera ce soir, au change de nuit. Prépare le change de 9h.'
+      after: 'Le bilan peau se fera ce soir, au change de nuit. Prépare le change de 9h.',
+      afteri: 'Très bien. On fera ton grand change à 9h, je m\'occupe de toi. Prends ton temps pour émerger.'
     },
     matin: {
       key: 'matin', eyebrow: 'Matinée · 9h-13h', title: 'Check de matinée',
+      titi: 'On fait un petit point ?',
       q: 'Matinée. État de la couche, et as-tu bu ton 1er biberon ?',
+      qi: 'Dis-moi, ta couche est comment ? Et est-ce que tu as bien bu ton premier biberon ?',
       opts: [
         { label: '✅ Couche OK, biberon bu', cls:'g', result:'matin_ok' },
         { label: '💧 Couche à changer bientôt', cls:'a', result:'matin_change' },
         { label: '🍼 Pas encore hydraté', cls:'a', result:'matin_soif' }
       ],
-      after: 'Pense au biberon si ce n\'est pas fait. Prochaine fenêtre : l\'après-midi.'
+      after: 'Pense au biberon si ce n\'est pas fait. Prochaine fenêtre : l\'après-midi.',
+      afteri: 'C\'est bien. N\'oublie pas de boire, je veux que tu restes bien hydraté pour moi.'
     },
     aprem: {
       key: 'aprem', eyebrow: 'Après-midi · 13h-19h', title: 'Check d\'après-midi',
+      titi: 'Comment tu te sens ?',
       q: 'Après-midi. Couche, sieste, hydratation : où en es-tu ?',
+      qi: 'On vérifie ensemble ? Ta couche, ta sieste, et est-ce que tu bois assez ?',
       opts: [
         { label: '✅ Tout roule', cls:'g', result:'aprem_ok' },
         { label: '😴 Sieste faite, check au réveil', cls:'g', result:'aprem_sieste' },
         { label: '💧 Couche à changer', cls:'a', result:'aprem_change' }
       ],
-      after: 'Garde le rythme d\'hydratation. Le bilan du soir arrive après 19h.'
+      after: 'Garde le rythme d\'hydratation. Le bilan du soir arrive après 19h.',
+      afteri: 'Tu t\'en sors très bien. Continue à boire, et ce soir on fera ton bilan tranquillement ensemble.'
     },
     soir: {
       key: 'soir', eyebrow: 'Soirée · 19h-23h', title: 'Bilan du soir',
+      titi: 'C\'est l\'heure de prendre soin de toi',
       q: 'Soirée, le vrai pilier. Prêt pour le change de nuit et le bilan du jour ?',
+      qi: 'La journée touche à sa fin. On va faire ton change de nuit et regarder ta peau ensemble, d\'accord ?',
       opts: [
         { label: '📝 Faire le bilan complet du jour', cls:'', result:'soir_bilan', openForm:true },
         { label: '🌙 Change de nuit fait, tout OK', cls:'g', result:'soir_ok' },
         { label: '⚠️ Peau à surveiller ce soir', cls:'a', result:'soir_souci', openForm:true }
       ],
-      after: 'C\'est le moment d\'alléger l\'hydratation et de bien crémer pour la nuit.'
+      after: 'C\'est le moment d\'alléger l\'hydratation et de bien crémer pour la nuit.',
+      afteri: 'Voilà. On allège l\'eau maintenant, et je te mets une bonne couche de crème pour que tu passes une nuit au sec et bien au chaud.'
     },
     nuit: {
       key: 'nuit', eyebrow: 'Nuit · 23h-7h', title: 'Mode nuit',
+      titi: 'Il est tard, mon grand',
       q: 'Il est tard. Debout pour un change nocturne, ou juste un coup d\'œil ?',
+      qi: 'Tu devrais dormir. Tu as besoin d\'un change, ou tu veux juste que je vérifie que tout va bien ?',
       opts: [
         { label: '🌙 Tout va bien, je retourne dormir', cls:'g', result:'nuit_ok' },
         { label: '💧 Change nocturne effectué', cls:'a', result:'nuit_change' }
       ],
-      after: 'Repose-toi. Le point du matin t\'attendra au réveil.'
+      after: 'Repose-toi. Le point du matin t\'attendra au réveil.',
+      afteri: 'Rendors-toi bien. Je veille sur toi, tout va bien. À demain matin.'
     }
   };
 
@@ -1820,7 +1885,7 @@
     const now = new Date();
     const m = currentMoment(now);
     document.getElementById('momentEyebrow').textContent = m.eyebrow;
-    document.getElementById('momentTitle').textContent = m.title;
+    document.getElementById('momentTitle').textContent = v(m.title, m.titi || m.title);
 
     // La saisie complète (peau + bilan) n'est proposée que le soir.
     const formCard = document.getElementById('formCard');
@@ -1837,8 +1902,8 @@
 
     if (done[m.key]) {
       // déjà répondu pour ce moment aujourd'hui
-      qEl.textContent = m.q;
-      acts.innerHTML = '<div class="done"><div class="big">✓</div><p>Point du moment déjà fait.</p><p style="color:var(--muted);font-weight:600">'+m.after+'</p></div>';
+      qEl.textContent = v(m.q, m.qi || m.q);
+      acts.innerHTML = '<div class="done"><div class="big">'+(immersive?'💛':'✓')+'</div><p>'+v('Point du moment déjà fait.', 'C\'est fait, bravo.')+'</p><p style="color:var(--muted);font-weight:600">'+v(m.after, m.afteri || m.after)+'</p></div>';
       // mais on garde l'accès au change guidé
       if (['reveil','matin','aprem','soir'].includes(m.key)) {
         const cb = document.createElement('button');
@@ -1850,7 +1915,7 @@
       return;
     }
 
-    qEl.textContent = m.q;
+    qEl.textContent = v(m.q, m.qi || m.q);
     acts.innerHTML = '';
     m.opts.forEach(opt => {
       const b = document.createElement('button');
@@ -2148,6 +2213,7 @@
     document.getElementById('dateInput').value = todayStr();
     await loadAutoPref();
     await loadNotifPrefs();
+    await loadVoice();
     scheduleNotifications();
     await renderCheckStat();
     await renderMoment();
