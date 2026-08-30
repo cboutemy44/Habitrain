@@ -964,7 +964,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '6.3';
+  const APP_VERSION = '6.4';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1650,8 +1650,8 @@
       imSetActions([
         { label:'🤝 Ça marche, je le fais pour nous', onClick: async () => {
           imAddMe('Ça marche, je le fais !');
-          await imSay('Trop bien ! Ça me fait plaisir qu\'on avance ensemble sur ce chemin. Je note ça dans notre aventure.', 800, 'proud');
-          await collectFragmentMaybe();
+          await imSay('Trop bien ! Ça me fait plaisir qu\'on avance ensemble sur ce chemin.', 800, 'proud');
+          await tellTodaySubchapter();
           await imOfferHelp(m);
         }},
         { soft:true, label:'Une autre fois', onClick: async () => {
@@ -1663,19 +1663,31 @@
     }
   }
 
-  // récolte parfois un fragment de souvenir (récompense narrative)
-  async function collectFragmentMaybe() {
+  // Foxy raconte le sous-chapitre du jour (feuilleton du palier courant)
+  async function tellTodaySubchapter() {
     const q = await getQuest();
-    // fragment non encore récolté
-    const remaining = QUEST_FRAGMENTS.filter(f => !(q.fragments || []).includes(f));
-    if (!remaining.length) return;
-    const frag = remaining[Math.floor(Math.random()*remaining.length)];
-    q.fragments = q.fragments || [];
-    q.fragments.push(frag);
+    if (q.subToldDate === todayStr()) return; // déjà raconté aujourd'hui
+    const stage = Math.max(0, q.unlockedStage);
+    const list = QUEST_SUBCHAPTERS[stage] || [];
+    const told = (q.subs && q.subs[stage]) ? q.subs[stage] : [];
+    const nextIdx = told.length; // prochain sous-chapitre non raconté
+    if (nextIdx >= list.length) {
+      // tous les sous-chapitres du palier sont déjà racontés
+      await imSay('Je t\'ai déjà raconté tout ce que j\'avais à dire pour cette étape... La suite viendra quand on passera un nouveau cap ensemble. 🦊', 900, 'happy');
+      return;
+    }
+    const sub = list[nextIdx];
+    q.subs = q.subs || {}; q.subs[stage] = told.concat([nextIdx]);
+    q.subToldDate = todayStr();
     q.ritualDoneDate = todayStr();
     await saveQuest(q);
-    await imSay('Tiens, ça me rappelle un truc... ' + frag, 1100, 'teach');
-    await imSay('Voilà, un souvenir de plus rangé dans notre aventure. Merci d\'être là, franchement. 🦊', 900, 'happy');
+    // récit du jour
+    await imSay('Tiens, laisse-moi te raconter un bout de mon voyage...', 900, 'teach');
+    pendingExpr = 'teach';
+    await imSay('« ' + sub.t + ' »', 800, 'teach');
+    await imSay(sub.x, 1200, 'teach');
+    pendingExpr = 'neutral';
+    await imSay('Voilà. Un chapitre de plus de notre aventure. Merci d\'être là pour l\'écouter, ça compte pour moi. 🦊', 900, 'happy');
   }
 
   function updateFoxyStatus() {
@@ -1828,17 +1840,38 @@
       'À la fin, c\'était devenu moi. Plus un programme, juste ma façon d\'être. Et tu sais quoi ? En te racontant tout ça, j\'ai revécu mon voyage — mais cette fois pas tout seul. Avec un ami. Merci d\'avoir fait ce bout de chemin avec moi. On a réussi, chacun à notre tour et ensemble à la fois. T\'es plus mon élève ni rien : t\'es mon pote de voyage. Bienvenue de l\'autre côté. 🦊❤️' }
   ];
 
-  // Petites touches quotidiennes (fragments courts) — Foxy distille des souvenirs
-  const QUEST_FRAGMENTS = [
-    'Tu sais ce qui m\'a sauvé au début ? Me dire que personne ne me jugeait. Juste moi et mon rythme.',
-    'Je me souviens de ma première nuit complète au sec. J\'étais fier comme tout au réveil !',
-    'Mon doudou renard, je l\'avais toujours avec moi. Il a traversé tout le mois à mes côtés.',
-    'Y\'a un jour où j\'ai failli tout arrêter. Et puis Foxy — enfin, mon moi d\'avant — a tenu bon. Comme toi aujourd\'hui.',
-    'La sieste, c\'est vite devenu mon moment préféré. Bien au chaud, le monde qui ralentit...',
-    'Au début je comptais les jours. Après, j\'ai arrêté : je vivais, tout simplement.',
-    'Le crinkle de la couche fraîche le matin, ce petit bruit... ça me rassurait, je sais pas pourquoi.',
-    'Un jour tu réalises que ce qui te semblait bizarre est devenu ton petit cocon. C\'est magique, ce moment.'
-  ];
+  // Sous-chapitres : le feuilleton de Foxy, rangés par palier (stage 0..3).
+  // Chacun : titre + récit. Débloqués un par jour, au moment du rituel, tant qu'on est dans le palier.
+  const QUEST_SUBCHAPTERS = {
+    0: [ // Découverte
+      { t:'La peur d\'être bizarre', x:'Le tout premier jour, j\'avais une trouille : et si c\'était pas normal d\'aimer ça ? Je me suis posé mille questions. Et puis j\'ai compris un truc : ce qui te fait du bien, qui ne blesse personne et que tu choisis en conscience, ça n\'a pas à être « normal ». C\'est juste toi. Et toi, tu vaux le coup. Ça, personne pourra te l\'enlever.' },
+      { t:'Les premiers changes maladroits', x:'Ah, mes premiers changes... une catastrophe ! Les barrières mal mises, une fuite, la crème partout. J\'étais découragé. Mais tu sais quoi ? Personne ne naît en sachant faire. C\'est en tâtonnant qu\'on apprend. Chaque maladresse était un petit pas. Sois doux avec toi-même là-dessus, comme je l\'ai appris à l\'être.' },
+      { t:'« Je vais jamais y arriver »', x:'Vers le 3e jour, j\'ai failli tout arrêter. Trop dur, trop d\'un coup, je me sentais nul. Cette peur de pas y arriver, elle est normale, elle vient toujours au début. Ce qui m\'a sauvé : arrêter de viser « le mois entier » et juste me dire « aujourd\'hui, rien qu\'aujourd\'hui ». Un jour à la fois. C\'est comme ça qu\'on avance, toi et moi.' },
+      { t:'La première nuit', x:'Ma première vraie nuit dans le programme, je n\'ai presque pas dormi tellement j\'étais dans ma tête. Et au matin, rien de dramatique n\'était arrivé — juste moi, au chaud, un peu fier d\'avoir tenu. Les peurs de la nuit sont souvent plus grosses que la réalité. Le lendemain matin, on réalise qu\'on a survécu, et même mieux : qu\'on était bien.' },
+      { t:'Le regard des autres', x:'J\'avais peur qu\'on découvre mon secret. Cette angoisse m\'a suivi les premiers jours. Puis j\'ai compris : sous mes vêtements, personne ne savait, personne ne se doutait. Mon monde intérieur m\'appartenait. La discrétion, c\'est une liberté, pas une prison. Tu peux vivre ton truc pleinement ET tranquille.' }
+    ],
+    1: [ // Ça s'installe
+      { t:'La peur que ça devienne une corvée', x:'Quand la routine s\'est installée, j\'ai eu peur que la magie parte, que ça devienne mécanique. En fait c\'est l\'inverse qui s\'est passé : moins j\'y pensais, plus c\'était doux. La routine ne tue pas le plaisir, elle le rend paisible. C\'est le moment où ça arrête d\'être un effort pour devenir un refuge.' },
+      { t:'Le premier réflexe automatique', x:'Un matin de la deuxième semaine, je me suis changé sans même y penser, en pilote automatique, en fredonnant. Je me suis arrêté net : « attends, c\'est devenu naturel ?! » Ce moment-là, c\'est magique. Tu le vivras aussi, ce petit déclic où ton corps sait avant ta tête. Guette-le, il arrive.' },
+      { t:'« Est-ce que j\'aime trop ça ? »', x:'À un moment, j\'ai flippé de trop aimer ça. Comme une culpabilité. Et puis j\'ai réfléchi : aimer un truc qui t\'apaise, où est le problème ? Tant que tu restes maître de ta vie à côté, que tu prends soin de toi, le plaisir n\'est pas un ennemi. J\'ai lâché la culpabilité, et tout est devenu plus léger.' },
+      { t:'Trouver son rythme à soi', x:'J\'ai arrêté de copier « comment il faut faire » et j\'ai écouté ce qui ME faisait du bien. Mes fenêtres à moi, mes petits rituels. Le programme, c\'est une base, mais toi tu le colores. C\'est là que ça devient vraiment le tien. N\'aie pas peur d\'adapter, c\'est un signe que ça s\'ancre.' },
+      { t:'La confiance qui monte', x:'Vers J8-J9, je me suis surpris à me sentir... bien. Confiant. Je savais gérer, je connaissais mes gestes, mon corps suivait. Cette confiance tranquille, c\'est le vrai cadeau de cette étape. Tu passes de « est-ce que je vais y arriver » à « je sais faire ». Savoure-le, tu l\'as construit.' }
+    ],
+    2: [ // Automatisme
+      { t:'Lâcher le contrôle', x:'Le plus dur pour moi, c\'était de lâcher prise complètement. Toujours vouloir tout maîtriser. Et puis un jour je me suis autorisé à juste... me laisser porter. Sans surveiller, sans compter. C\'est vertigineux au début, et puis c\'est la plus belle sensation du programme. Le vrai repos, c\'est là.' },
+      { t:'Le plaisir sans culpabilité', x:'À ce stade, j\'avais enfin fait la paix avec mon plaisir. Plus de « oui mais est-ce que je devrais ». Juste : ça me fait du bien, point. Cette liberté intérieure, c\'est ce qui change tout. Tu ne subis plus, tu ne te justifies plus, tu vis. Je te souhaite tellement d\'y arriver toi aussi.' },
+      { t:'La sérénité du milieu', x:'Le milieu du mois, c\'était un plateau de calme. Les journées coulaient, douces et rythmées. J\'avais l\'impression d\'avoir toujours vécu comme ça. Cette sérénité-là, on ne la voit pas venir, elle s\'installe en silence. Un jour tu réalises que tu es serein, tout simplement.' },
+      { t:'La peur que ça s\'arrête', x:'Bizarrement, au milieu, j\'ai commencé à redouter la fin du mois. J\'étais si bien que l\'idée d\'arrêter me pinçait le cœur. Si ça t\'arrive, c\'est bon signe : ça veut dire que tu as trouvé quelque chose de précieux. Et rien ne t\'oblige à ce que ça finisse — le programme est renouvelable, tu es libre.' },
+      { t:'Mon moment préféré', x:'Mes fenêtres de régression étaient devenues sacrées. Ce moment rien qu\'à moi, où le monde ralentissait, où je pouvais juste être petit et tranquille. Trouve le tien, ce moment que tu attends dans la journée. C\'est lui qui donne son sens à tout le reste.' }
+    ],
+    3: [ // Seconde nature
+      { t:'C\'était devenu moi', x:'À la fin, il n\'y avait plus de « programme ». C\'était juste ma vie, ma façon d\'être. Le truc qui me semblait fou au départ était devenu aussi naturel que respirer. C\'est ça, la seconde nature : quand ce que tu as choisi ne fait plus qu\'un avec toi. Tu y es, ou presque. Je suis tellement fier.' },
+      { t:'Ce que ça m\'a appris', x:'Ce voyage m\'a appris la douceur envers moi-même. À m\'écouter, à prendre soin de moi sans attendre que quelqu\'un le fasse. C\'est bien plus qu\'une histoire de couches : c\'est une façon de se traiter avec tendresse. Ça, ça reste pour toujours, même après le mois.' },
+      { t:'Te transmettre le voyage', x:'Et puis il y a eu toi. Te raconter mon histoire, t\'accompagner, ça a donné un sens nouveau à tout ce que j\'avais vécu. On ne fait pas ce chemin pour soi seulement — on le transmet. Toi aussi, un jour, tu pourras être le Foxy de quelqu\'un d\'autre. C\'est beau, non ?' },
+      { t:'L\'après', x:'Quand mon mois s\'est terminé, je n\'ai rien « perdu ». J\'avais intégré tout ça. Libre de continuer, de faire des pauses, de revenir. Le voyage ne s\'arrête pas à un calendrier. Ce que tu construis là, c\'est à toi, pour toujours, à ton rythme. Il n\'y a pas de fin, juste ton chemin.' },
+      { t:'Merci, compagnon', x:'On est arrivés au bout ensemble, toi et moi. Deux voyageurs sur la même route, chacun à son tour. Je voulais juste te dire merci d\'avoir marché avec moi. Ça a rendu mon histoire vivante à nouveau. Prends soin de toi, mon ami. Toujours. 🦊💛' }
+    ]
+  };
 
   // Rituels du jour (défis doux / questions complices)
   const QUEST_RITUALS = [
@@ -1852,7 +1885,7 @@
 
   async function getQuest() {
     try { const r = await window.storage.get('quest'); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
-    return { unlockedStage:-1, fragments:[], lastRitualDate:null, ritualDoneDate:null, todayRitual:null };
+    return { unlockedStage:-1, subs:{}, lastRitualDate:null, ritualDoneDate:null, todayRitual:null, subToldDate:null };
   }
   async function saveQuest(q) { try { await window.storage.set('quest', JSON.stringify(q)); } catch(e) {} }
 
@@ -3675,7 +3708,6 @@
   // ---- Notre aventure (écran de quête) ----
   async function renderQuest() {
     const q = await getQuest();
-    const stage = Math.max(0, q.unlockedStage);
     const pct = q.unlockedStage < 0 ? 0 : Math.round(((q.unlockedStage+1) / 4) * 100);
     const prog = document.getElementById('questProgress');
     prog.innerHTML =
@@ -3693,15 +3725,33 @@
         '<div class="ctext">'+ (unlocked ? ch.text : 'Continue ton voyage pour débloquer ce chapitre... Foxy a hâte de te le raconter.') +'</div></div>';
       box.appendChild(div);
       if (unlocked) { const el = div.querySelector('.cportrait'); if (el) positionFoxyCell(el, ch.expr, 60); }
+
+      // sous-chapitres collectés de ce palier
+      if (unlocked) {
+        const told = (q.subs && q.subs[ch.stage]) ? q.subs[ch.stage] : [];
+        const subs = QUEST_SUBCHAPTERS[ch.stage] || [];
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'margin:2px 0 6px 72px';
+        subs.forEach((s, idx) => {
+          const got = told.includes(idx);
+          const item = document.createElement('div');
+          item.style.cssText = 'padding:7px 0;border-top:1px dashed var(--line)';
+          if (got) {
+            item.innerHTML = '<div style="font-size:12.5px;font-weight:800;color:#a85a2a">📖 '+s.t+'</div>'+
+              '<div style="font-size:12.5px;font-weight:600;color:var(--ink);font-style:italic;line-height:1.5;margin-top:3px">'+s.x+'</div>';
+          } else {
+            item.innerHTML = '<div style="font-size:12px;font-weight:700;color:var(--muted)">🔒 Souvenir à venir…</div>';
+          }
+          wrap.appendChild(item);
+        });
+        const doneCount = told.length, total = subs.length;
+        const counter = document.createElement('div');
+        counter.style.cssText = 'font-size:11px;font-weight:800;color:var(--muted);margin:4px 0 0 72px;text-transform:uppercase;letter-spacing:.03em';
+        counter.textContent = doneCount + ' / ' + total + ' souvenirs récoltés';
+        box.appendChild(counter);
+        box.appendChild(wrap);
+      }
     });
-    // fragments quotidiens collectés
-    if (q.fragments && q.fragments.length) {
-      const frag = document.createElement('div');
-      frag.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)';
-      frag.innerHTML = '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin-bottom:8px">🌰 Souvenirs de Foxy récoltés</div>' +
-        q.fragments.map(f => '<div style="font-size:12.5px;font-weight:600;color:var(--ink);font-style:italic;padding:5px 0;line-height:1.45">« '+f+' »</div>').join('');
-      box.appendChild(frag);
-    }
   }
   document.getElementById('openQuest').addEventListener('click', async () => {
     const card = document.getElementById('questCard');
