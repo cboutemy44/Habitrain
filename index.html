@@ -364,6 +364,55 @@
   body.immersive .moment { border-color:#e6c9d6; background:linear-gradient(180deg,#FBF3F7,#F7EEF9); }
   body.immersive .moment .eyebrow { color:#a05a86; }
   body.immersive .head .icon::after { content:' 🧸'; }
+
+  /* ===== Mode immersif : conversation plein cadre ===== */
+  body.immersive { background: linear-gradient(180deg,#F5EEF6,#EEF0FA) !important; }
+  /* on masque tout le reporting */
+  body.immersive .card:not(#imChat):not(#settingsCard) { display:none !important; }
+  body.immersive #verBadge { opacity:0.5; }
+
+  #imChat { display:none; }
+  body.immersive #imChat {
+    display:flex; flex-direction:column;
+    border:1.5px solid #e0d0ea; border-radius:22px; background:#fff;
+    overflow:hidden; box-shadow:0 6px 26px rgba(90,60,110,0.10);
+    min-height:70vh;
+  }
+  .im-head {
+    display:flex; align-items:center; gap:12px; padding:16px 18px;
+    background:linear-gradient(180deg,#F3ECF9,#F7F1FB); border-bottom:1px solid #ece0f4;
+  }
+  .im-avatar {
+    width:46px; height:46px; border-radius:50%; flex:none;
+    background:linear-gradient(135deg,#b79ad6,#8f6fc0); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:24px;
+    box-shadow:0 2px 8px rgba(140,100,180,0.3);
+  }
+  .im-head .who { font-family:'Fraunces',serif; font-weight:600; font-size:16px; color:#5a3d6b; }
+  .im-head .status { font-size:11.5px; font-weight:700; color:#a07cc0; margin-top:1px; }
+  .im-thread {
+    flex:1; padding:18px; display:flex; flex-direction:column; gap:12px;
+    overflow-y:auto;
+  }
+  .im-msg { max-width:82%; font-size:14.5px; line-height:1.5; padding:12px 15px; border-radius:18px; font-weight:600; animation:imPop .25s ease-out; }
+  @keyframes imPop { from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;} }
+  .im-msg.care { align-self:flex-start; background:#F1EAF8; color:#4a3358; border-bottom-left-radius:5px; }
+  .im-msg.me { align-self:flex-end; background:linear-gradient(135deg,#8f6fc0,#7a5aa8); color:#fff; border-bottom-right-radius:5px; font-weight:700; }
+  .im-typing { align-self:flex-start; background:#F1EAF8; padding:13px 16px; border-radius:18px; border-bottom-left-radius:5px; display:flex; gap:4px; }
+  .im-typing span { width:7px; height:7px; border-radius:50%; background:#b79ad6; animation:imBlink 1.2s infinite; }
+  .im-typing span:nth-child(2){ animation-delay:.2s; } .im-typing span:nth-child(3){ animation-delay:.4s; }
+  @keyframes imBlink { 0%,60%,100%{opacity:.3;} 30%{opacity:1;} }
+  .im-actions { padding:14px 16px; border-top:1px solid #ece0f4; display:flex; flex-direction:column; gap:9px; background:#FCFAFE; }
+  .im-actions button {
+    font-family:inherit; font-size:14.5px; font-weight:700; padding:13px; border-radius:14px; cursor:pointer;
+    border:1.5px solid #e0d0ea; background:#fff; color:#4a3358; text-align:left; transition:all .12s;
+  }
+  .im-actions button:hover { border-color:#8f6fc0; background:#F7F1FB; }
+  .im-actions button.soft { background:#F1EAF8; }
+  .im-safety {
+    margin:0 16px 14px; font-size:11.5px; font-weight:700; color:#8a6a30;
+    background:#FBF3E0; border:1px solid #ecd9a8; border-radius:10px; padding:9px 11px; line-height:1.4;
+  }
 </style>
 
 <div class="wrap">
@@ -395,6 +444,16 @@
     <div id="setGroups"></div>
 
     <div class="set-note" id="setNote">Rappel : une appli web ne garantit pas les notifications quand elle est complètement fermée. Pour les rappels critiques, garde tes alarmes système.</div>
+  </div>
+
+  <div class="card" id="imChat">
+    <div class="im-head">
+      <div class="im-avatar">🧸</div>
+      <div><div class="who">Ton caregiver</div><div class="status" id="imStatus">Présent · veille sur toi</div></div>
+    </div>
+    <div class="im-thread" id="imThread"></div>
+    <div class="im-safety" id="imSafety" style="display:none"></div>
+    <div class="im-actions" id="imActions"></div>
   </div>
 
   <div class="card" id="dashCard">
@@ -677,7 +736,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '4.3';
+  const APP_VERSION = '4.4';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -689,17 +748,134 @@
   async function loadVoice() {
     try { const r = await window.storage.get('pref:voice'); if (r && r.value) immersive = JSON.parse(r.value); } catch(e) {}
     applyVoiceChrome();
+    if (immersive) { try { await imRunMoment(); } catch(e) {} }
   }
   async function setVoice(v) {
     immersive = v;
     try { await window.storage.set('pref:voice', JSON.stringify(v)); } catch(e) {}
     applyVoiceChrome();
-    // re-render les zones textuelles
-    try { await renderMoment(); } catch(e) {}
-    try { await renderBreaches(); } catch(e) {}
+    if (immersive) {
+      try { await imRunMoment(); } catch(e) {}
+    } else {
+      // retour reporting : re-render les zones classiques
+      try { await renderMoment(); } catch(e) {}
+      try { await renderBreaches(); } catch(e) {}
+    }
   }
   // v(reporting, immersif) : renvoie la bonne version selon le mode
   function v(reporting, immersif) { return immersive ? immersif : reporting; }
+
+  /* ===== Moteur de conversation immersive ===== */
+  const imThread = () => document.getElementById('imThread');
+  const imActions = () => document.getElementById('imActions');
+
+  function imClear() { imThread().innerHTML = ''; imActions().innerHTML = ''; document.getElementById('imSafety').style.display='none'; }
+  function imScroll() { const t = imThread(); t.scrollTop = t.scrollHeight; }
+
+  function imAddMe(text) {
+    const d = document.createElement('div'); d.className = 'im-msg me'; d.textContent = text;
+    imThread().appendChild(d); imScroll();
+  }
+  // ajoute un message caregiver avec effet "en train d'écrire"
+  function imSay(text, delay) {
+    return new Promise(resolve => {
+      const typing = document.createElement('div');
+      typing.className = 'im-typing'; typing.innerHTML = '<span></span><span></span><span></span>';
+      imThread().appendChild(typing); imScroll();
+      setTimeout(() => {
+        typing.remove();
+        const d = document.createElement('div'); d.className = 'im-msg care'; d.innerHTML = text;
+        imThread().appendChild(d); imScroll();
+        resolve();
+      }, delay || 800);
+    });
+  }
+  async function imSaySeq(lines) { for (const l of lines) { await imSay(l); } }
+
+  function imSetActions(buttons) {
+    const box = imActions(); box.innerHTML = '';
+    buttons.forEach(b => {
+      const btn = document.createElement('button');
+      if (b.soft) btn.className = 'soft';
+      btn.textContent = b.label;
+      btn.addEventListener('click', () => b.onClick());
+      box.appendChild(btn);
+    });
+  }
+  function imSafety(text) {
+    const s = document.getElementById('imSafety');
+    if (!text) { s.style.display='none'; return; }
+    s.style.display=''; s.innerHTML = '⚠️ ' + text;
+  }
+
+  // Réactions du caregiver selon la réponse (résultat)
+  const CARE_REACT = {
+    reveil_sec: 'Oh, tu es resté bien au sec toute la nuit ? C\'est très bien ça.',
+    reveil_mouille: 'Une bonne couche mouillée, c\'est parfait, c\'est exactement ce qu\'on veut la nuit.',
+    reveil_fuite: 'Une petite fuite ? Ce n\'est rien du tout, on ajustera mieux ce soir. Ne t\'inquiète pas.',
+    matin_ok: 'Tu es sage. Couche vérifiée et bien hydraté, je suis fier de toi.',
+    matin_change: 'D\'accord, on va s\'occuper de te changer alors. Viens.',
+    matin_soif: 'Il faut boire, c\'est important. Prends ton biberon pour moi, d\'accord ?',
+    aprem_ok: 'Tout roule, c\'est parfait. Continue comme ça.',
+    aprem_sieste: 'Tu as bien dormi ? Une petite sieste, ça fait du bien. On vérifie ta couche ?',
+    aprem_change: 'Ta couche a bien travaillé, on va la changer. Allonge-toi.',
+    soir_ok: 'Ta nuit est prête, tu es tout propre et au sec. Bravo pour cette journée.',
+    soir_souci: 'Montre-moi ta peau... on va bien crémer pour que ça aille mieux. Je m\'occupe de toi.',
+    nuit_ok: 'Chut... tout va bien. Rendors-toi, je veille.',
+    nuit_change: 'Voilà, une couche toute fraîche. Rendors-toi bien maintenant.'
+  };
+
+  // Construit la conversation du moment courant
+  async function imRunMoment() {
+    imClear();
+    const now = new Date();
+    const m = currentMoment(now);
+    const done = await getMoments(todayStr());
+    document.getElementById('imStatus').textContent = m.eyebrow + ' · veille sur toi';
+
+    // salutation + question
+    const opener = m.titi ? m.titi : m.title;
+    await imSay(opener, 500);
+    if (done[m.key]) {
+      await imSay(v(m.q, m.qi || m.q), 700);
+      await imSay('On a déjà fait notre petit point tout à l\'heure. ' + (m.afteri || m.after), 800);
+      buildMomentReplies(m, true);
+      return;
+    }
+    await imSay(v(m.q, m.qi || m.q), 900);
+    buildMomentReplies(m, false);
+  }
+
+  function buildMomentReplies(m, alreadyDone) {
+    const buttons = [];
+    if (!alreadyDone) {
+      m.opts.forEach(opt => {
+        buttons.push({ label: opt.label, onClick: async () => {
+          imAddMe(opt.label.replace(/^[^\wÀ-ÿ]+/, '').trim());
+          await saveMoment(m.key, opt.result);
+          const react = CARE_REACT[opt.result] || 'C\'est noté, merci de me le dire.';
+          await imSay(react, 700);
+          if (opt.openForm) { await imSay('On va faire ton bilan du soir ensemble, je te montre.', 700); toggleFormImmersive(); }
+          buildMomentReplies(m, true);
+        }});
+      });
+    }
+    // actions douces toujours dispo
+    if (['reveil','matin','aprem','soir'].includes(m.key)) {
+      buttons.push({ soft:true, label:'🍼 Me changer maintenant', onClick: () => startChange(m.key==='reveil'||m.key==='soir'?'pilier':'check') });
+    }
+    buttons.push({ soft:true, label:'📋 Revenir en mode reporting', onClick: () => setVoice(false) });
+    imSetActions(buttons);
+  }
+
+  function toggleFormImmersive() {
+    // en immersif, le formulaire de bilan reste accessible : on repasse un instant en reporting visuel du form
+    const formCard = document.getElementById('formCard');
+    formCard.style.display = '';
+    formCard.style.cssText += ';display:block !important';
+    toggleForm(true);
+    formCard.scrollIntoView({behavior:'smooth', block:'start'});
+  }
   function applyVoiceChrome() {
     const btn = document.getElementById('toggleVoice');
     if (btn) btn.textContent = immersive ? '📋 Mode reporting' : '🧸 Mode immersif';
