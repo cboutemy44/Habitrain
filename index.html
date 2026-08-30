@@ -7,7 +7,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Gochi+Hand&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -135,6 +135,55 @@
   .entry .note { font-size: 12.5px; color: var(--ink); margin-top: 4px; font-style: italic; }
   .empty-msg { color: var(--muted); font-size: 13px; text-align: center; padding: 8px 0; font-weight: 600; }
   .mini { font-size: 11.5px; color: var(--muted); font-weight: 700; }
+
+  /* ===== Reporting = tableau d'enfant avec gommettes ===== */
+  body.report {
+    background:
+      radial-gradient(circle at 20% 30%, rgba(255,255,255,.5) 0 2px, transparent 2px),
+      radial-gradient(circle at 70% 60%, rgba(255,255,255,.4) 0 2px, transparent 2px),
+      linear-gradient(135deg,#e9d9c2,#e3cba9) !important;
+    background-size: 22px 22px, 30px 30px, 100% 100% !important;
+  }
+  body.report .head h1 { font-family:'Gochi Hand',cursive; font-size:30px; color:#5a4326; }
+  body.report .head p { color:#7a6042; }
+  body.report .head .icon::after { content:' 🦊'; }
+
+  /* chaque carte = feuille de papier épinglée, légèrement de travers */
+  body.report .card:not(#imChat):not(#settingsCard):not(#debugCard) {
+    background:#fffdf8;
+    border:1px solid #efe4d2;
+    border-radius:8px;
+    box-shadow:0 4px 14px rgba(90,60,30,0.14), inset 0 0 0 6px #fffdf8, inset 0 0 0 7px #f4ead8;
+    position:relative;
+    transform:rotate(-0.5deg);
+  }
+  body.report .card:nth-of-type(even):not(#imChat):not(#settingsCard):not(#debugCard) { transform:rotate(0.6deg); }
+  /* washi tape en haut de chaque carte */
+  body.report .card:not(#imChat):not(#settingsCard):not(#debugCard)::before {
+    content:''; position:absolute; top:-11px; left:50%; transform:translateX(-50%) rotate(-2deg);
+    width:74px; height:22px; border-radius:3px;
+    background:repeating-linear-gradient(45deg,#f4b8c4 0 7px,#f7c9d3 7px 14px);
+    opacity:.85; box-shadow:0 1px 3px rgba(0,0,0,.12);
+  }
+  body.report .card:nth-of-type(3n)::before { background:repeating-linear-gradient(45deg,#a8d5b5 0 7px,#c0e2c9 7px 14px); }
+  body.report .card:nth-of-type(3n+1)::before { background:repeating-linear-gradient(45deg,#b9c8ee 0 7px,#d0dbf5 7px 14px); }
+  body.report .card h2 { font-family:'Gochi Hand',cursive; font-size:21px; color:#5a4326; letter-spacing:.3px; }
+  /* gommette colorée devant chaque titre */
+  body.report .card h2::before {
+    content:''; display:inline-block; width:14px; height:14px; border-radius:50%;
+    margin-right:8px; vertical-align:middle;
+    background:radial-gradient(circle at 35% 30%, #fff6, transparent 50%), var(--gommette,#e8896b);
+    box-shadow:0 1px 2px rgba(0,0,0,.2);
+  }
+  body.report .card:nth-of-type(2n) h2 { --gommette:#6fae7a; }
+  body.report .card:nth-of-type(3n) h2 { --gommette:#e0ae56; }
+  body.report .card:nth-of-type(4n) h2 { --gommette:#6e77bc; }
+  body.report .card:nth-of-type(5n) h2 { --gommette:#c86b8f; }
+  /* les pastilles KPI et cellules peau ressemblent à des gommettes brillantes */
+  body.report .cell, body.report .kpi, body.report .wear-kpi {
+    box-shadow:0 2px 5px rgba(90,60,30,.12), inset 0 2px 4px rgba(255,255,255,.5);
+  }
+  body.report .cell { border-radius:50%; }
 
   /* surprise check */
   .checkrow { display: flex; gap: 10px; align-items: stretch; }
@@ -458,7 +507,7 @@
     <p>Immersion 24/7 · 2 min matin & soir</p>
     <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
       <button class="settings-toggle-btn" id="openSettings">⚙️ Réglages</button>
-      <button class="settings-toggle-btn" id="toggleVoice">🧸 Caregiver</button>
+      <button class="settings-toggle-btn" id="toggleVoice">🦊 Mode Foxy</button>
       <button class="settings-toggle-btn" id="openDebug">🐞 Debug</button>
     </div>
   </div>
@@ -491,7 +540,7 @@
     <div class="set-cat"><h4>Mode voix</h4>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="settings-toggle-btn" data-vm="report">📋 Reporting</button>
-        <button class="settings-toggle-btn" data-vm="care">🧸 Caregiver</button>
+        
         <button class="settings-toggle-btn" data-vm="foxy">🦊 Foxy</button>
       </div>
     </div>
@@ -796,7 +845,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '5.1';
+  const APP_VERSION = '5.2';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -805,8 +854,7 @@
   /* ---- Modes de voix : reporting / caregiver / foxy ---- */
   // mode: 'report' | 'care' | 'foxy'
   let voiceMode = 'report';
-  const immersiveModes = ['care','foxy'];
-  // compat : `immersive` reste un booléen dérivé
+  const immersiveModes = ['foxy']; // caregiver retiré : on ne garde que Foxy
   let immersive = false;
 
   async function loadVoice() {
@@ -1530,19 +1578,14 @@
   function applyVoiceChrome() {
     const btn = document.getElementById('toggleVoice');
     if (btn) {
-      // libellé = le prochain mode dans le cycle
-      const nextLabel = voiceMode === 'report' ? '🧸 Caregiver'
-        : voiceMode === 'care' ? '🦊 Foxy'
-        : '📋 Reporting';
-      btn.textContent = nextLabel;
+      btn.textContent = voiceMode === 'foxy' ? '📋 Reporting' : '🦊 Mode Foxy';
     }
     const sub = document.querySelector('.head p');
-    if (sub) sub.textContent = voiceMode === 'care' ? 'On prend soin de toi, un pas après l\'autre'
-      : voiceMode === 'foxy' ? 'T\'inquiète, on est passés par là ensemble'
-      : 'Immersion 24/7 · 2 min matin & soir';
+    if (sub) sub.textContent = voiceMode === 'foxy' ? 'T\'inquiète, on est passés par là ensemble'
+      : 'Immersion 24/7 · mon tableau de suivi';
     document.body.classList.toggle('immersive', immersive);
     document.body.classList.toggle('foxy', voiceMode === 'foxy');
-    // applique le persona à l'en-tête du chat
+    document.body.classList.toggle('report', voiceMode === 'report');
     if (immersive) {
       const p = persona();
       const av = document.querySelector('#imChat .im-avatar');
@@ -1558,10 +1601,8 @@
   document.addEventListener('DOMContentLoaded', () => {
     const t = document.getElementById('toggleVoice');
     if (t) t.addEventListener('click', () => {
-      const next = voiceMode === 'report' ? 'care' : voiceMode === 'care' ? 'foxy' : 'report';
-      setVoiceMode(next);
+      setVoiceMode(voiceMode === 'foxy' ? 'report' : 'foxy');
     });
-    // appui sur la scène RPG = avancer le dialogue (façon jeu vidéo)
     const stage = document.getElementById('rpgStage');
     if (stage) stage.addEventListener('click', () => { if (rpgAdvance) rpgAdvance(); });
   });
@@ -2124,9 +2165,10 @@
   const CHECK_TYPES = [
     {
       id: 'couche_place',
-      icon: '🔍',
-      title: 'Vérif surprise !',
+      icon: '🦊',
+      title: 'Foxy débarque !',
       question: 'La couche est-elle bien en place et bien ajustée aux cuisses ?',
+      qFoxy: 'Eh, petit contrôle surprise ! Ta couche est bien en place, bien ajustée aux cuisses ?',
       options: [
         { label: 'Oui, bien en place', cls: 'ok', result: 'ok' },
         { label: "J'ai dû la réajuster", cls: 'adj', result: 'adj' },
@@ -2146,9 +2188,10 @@
     },
     {
       id: 'couche_etat',
-      icon: '💧',
-      title: 'Vérif surprise !',
+      icon: '🦊',
+      title: 'Foxy débarque !',
       question: 'Dans quel état est ta couche, là, maintenant ?',
+      qFoxy: 'Alors, ta couche, elle en est où là maintenant ?',
       options: [
         { label: 'Sèche', cls: 'ok', result: 'sec' },
         { label: 'Mouillée, ça va', cls: 'adj', result: 'mouille' },
@@ -2168,9 +2211,10 @@
     },
     {
       id: 'tetine',
-      icon: '🍭',
-      title: 'Vérif surprise !',
+      icon: '🦊',
+      title: 'Foxy débarque !',
       question: 'Ta tétine, tu l\'as sur toi / à portée ?',
+      qFoxy: 'Et ta tétine, tu l\'as sur toi ou pas loin ?',
       options: [
         { label: 'Oui, en bouche', cls: 'ok', result: 'tet_ok' },
         { label: 'À portée, je la prends', cls: 'adj', result: 'tet_prise' },
@@ -2224,7 +2268,7 @@
     currentType = type;
     document.getElementById('checkIcon').textContent = type.icon;
     document.getElementById('checkTitle').textContent = type.title;
-    document.getElementById('checkQuestion').innerHTML = type.question;
+    document.getElementById('checkQuestion').innerHTML = type.qFoxy || type.question;
     const acts = document.getElementById('checkActs');
     acts.innerHTML = '';
     type.options.forEach(opt => {
@@ -2304,12 +2348,12 @@
 
     if (slot.ctx === 'pilier') {
       // change imposé : direct au flux guidé
-      document.getElementById('dueText').textContent = 'C\'est l\'heure du change imposé. On le fait ensemble, étape par étape.';
-      addBtn(acts, 'ok', '🍼 Faire le change guidé', () => startChange('pilier'));
+      document.getElementById('dueText').textContent = 'C\'est l\'heure de ton change, viens on s\'en occupe étape par étape !';
+      addBtn(acts, 'ok', '🦊 Faire le change avec Foxy', () => startChange('pilier'));
       addBtn(acts, 'adj', 'Plus tard', () => { activeSlotKey = null; closeCheck(); });
     } else {
       // check : on reporte d'abord l'état de la couche
-      document.getElementById('dueText').textContent = 'C\'est l\'heure du check. Dans quel état est ta couche ?';
+      document.getElementById('dueText').textContent = 'Petit check ! Ta couche, elle est comment ?';
       addBtn(acts, 'g', '☀️ Sèche — je laisse', async () => {
         await saveCheck('etat_sec', 'check_'+slot.key);
         markSlotDone(slot.key);
@@ -3050,17 +3094,10 @@
   }
   function showLocalNotif(title, body, itemId) {
     if (notifPermState() !== 'granted') return;
-    // en mode Foxy, ton et emoji adaptés
-    let icon = 'icon-192.png';
-    let prefix = '🍼 ';
-    let finalBody = body;
-    if (voiceMode === 'foxy') {
-      prefix = '🦊 ';
-      icon = foxyOutfit ? foxyOutfit.sheet : 'icon-192.png';
-      if (itemId && FOXY_NOTIF[itemId]) finalBody = FOXY_NOTIF[itemId];
-    } else if (voiceMode === 'care') {
-      prefix = '🧸 ';
-    }
+    // Foxy partout : ton pote t'envoie le rappel
+    const prefix = '🦊 ';
+    const icon = (typeof foxyOutfit !== 'undefined' && foxyOutfit) ? foxyOutfit.sheet : 'icon-192.png';
+    let finalBody = (itemId && FOXY_NOTIF[itemId]) ? FOXY_NOTIF[itemId] : body;
     try {
       if (navigator.serviceWorker && navigator.serviceWorker.ready) {
         navigator.serviceWorker.ready.then(reg => reg.showNotification(prefix+title, { body: finalBody, icon, badge:'icon-192.png', tag:title }));
