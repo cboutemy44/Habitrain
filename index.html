@@ -795,12 +795,9 @@
 
   <div class="modal" id="modalPose" style="display:none">
     <div class="big foxy-portrait" id="poseIcon"></div>
-    <h3>Pose de la couche fraîche</h3>
-    <p id="poseIntro">Suis les étapes dans l'ordre.</p>
-    <ol class="fixsteps" id="poseSteps"></ol>
-    <div class="acts">
-      <button class="ok" id="poseDone">🐾 Couche fraîche posée</button>
-    </div>
+    <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#a85a2a;margin-bottom:3px" id="poseStepNum">Étape</div>
+    <p id="poseLine" style="font-size:15px;font-weight:600;color:#5a3418;min-height:48px;margin-bottom:16px"></p>
+    <div class="acts" id="poseActs"></div>
   </div>
 </div>
 
@@ -858,7 +855,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '5.3';
+  const APP_VERSION = '5.6';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -985,6 +982,76 @@
   function refreshHeadFoxy() {
     const el = document.getElementById('headFoxy');
     if (el) positionFoxyCell(el, 'happy', 56);
+  }
+
+  // ---- Sheet "scènes de change" (ordre propre, indépendant des expressions) ----
+  const CHANGE_CELLS = { start:0, remove:1, wipe:3, skin:9, cream:4, fresh:6, barriers:7, clean:14 };
+  function positionChangeCell(el, idx, sizePx) {
+    if (!el) return;
+    const col = idx % 4, row = Math.floor(idx / 4);
+    el.style.backgroundImage = "url('foxy-changescene.png')";
+    el.style.backgroundSize = (sizePx*4) + 'px ' + (sizePx*4) + 'px';
+    el.style.backgroundRepeat = 'no-repeat';
+    el.style.backgroundPosition = (-(col*sizePx)) + 'px ' + (-(row*sizePx)) + 'px';
+  }
+
+  // Déroulé conversationnel du change guidé (blocs qui s'enchaînent)
+  const CHANGE_STEPS = [
+    { cell:'start',    t:'Installe-toi bien sur ton tapis de change, on va faire ça tranquille tous les deux.' },
+    { cell:'remove',   t:'On retire la couche : roule-la vers l\'intérieur et mets-la de côté.' },
+    { cell:'wipe',     t:'Essuie bien, du plus propre vers le moins propre. Voilà, tout doux.' },
+    { cell:'skin',     t:'Petit coup d\'œil à ta peau : pas de rougeur ? Si ça tire, on met plus de crème.' },
+    { cell:'cream',    t:'Une bonne couche de crème barrière sur les zones sensibles. Ça protège pour la journée.' },
+    { cell:'fresh',    t:'Couche fraîche dessous, bien centrée. On y est presque !' },
+    { cell:'barriers', t:'Ajuste bien les barrières aux cuisses — c\'est LE secret anti-fuite, crois-moi.' },
+    { cell:'clean',    t:'Et voilà, tout propre ! Ça brille. Franchement, bien joué mec.' }
+  ];
+
+  // typewriter simple pour la ligne de pose
+  let poseTypeTimer = null;
+  function typeLine(el, text, done) {
+    if (!el) { if (done) done(); return; }
+    if (poseTypeTimer) clearInterval(poseTypeTimer);
+    el.textContent = ''; let i = 0;
+    poseTypeTimer = setInterval(() => {
+      el.textContent = text.slice(0, ++i);
+      if (i >= text.length) { clearInterval(poseTypeTimer); poseTypeTimer = null; if (done) done(); }
+    }, 18);
+  }
+  function poseType(text, done) { typeLine(document.getElementById('poseLine'), text, done); }
+
+  function runChangeStep(i) {
+    const step = CHANGE_STEPS[i];
+    const last = i === CHANGE_STEPS.length - 1;
+    positionChangeCell(document.getElementById('poseIcon'), CHANGE_CELLS[step.cell], 76);
+    document.getElementById('poseStepNum').textContent = 'Étape ' + (i+1) + ' / ' + CHANGE_STEPS.length;
+    const acts = document.getElementById('poseActs');
+    acts.innerHTML = '';
+    poseType(step.t, () => {
+      const b = document.createElement('button');
+      b.className = 'ok';
+      b.textContent = last ? '🐾 Couche fraîche posée !' : 'Fait ! On continue';
+      b.addEventListener('click', async () => {
+        if (last) { await finishChange(); }
+        else { runChangeStep(i+1); }
+      });
+      acts.appendChild(b);
+    });
+  }
+
+  async function finishChange() {
+    await saveCheck('change_fait', 'change_'+(changeCtx||'check'));
+    if (activeSlotKey) {
+      try {
+        const r = await window.storage.get('slotdone:'+todayStr());
+        const done = (r && r.value) ? JSON.parse(r.value) : {};
+        done[activeSlotKey] = true;
+        await window.storage.set('slotdone:'+todayStr(), JSON.stringify(done));
+      } catch(e) {}
+      activeSlotKey = null;
+    }
+    closeCheck();
+    try { await renderCheckStat(); } catch(e) {}
   }
   // fabrique un dataURL d'une cellule (pour l'icône de notification)
   function foxyCellDataURL(expr, size) {
@@ -2315,25 +2382,57 @@
     document.getElementById('checkStat').innerHTML = txt;
   }
 
+  // Feedback de Foxy selon la réponse à une vérif
+  const CHECK_FB = {
+    ok:       { t:'Nickel, bien en place ! Continue comme ça, t\'es carré.', expr:'proud', next:'close' },
+    adj:      { t:'Ah, t\'as dû la réajuster ? Pense à bien sortir les barrières aux cuisses, ça évite ça la prochaine fois.', expr:'pensive', next:'close' },
+    miss:     { t:'Eh ! T\'as pas ta couche là ?! On corrige ça direct, viens, je te guide.', expr:'surprised', next:'change' },
+    sec:      { t:'Encore sèche ! Parfait, ta couche gère bien.', expr:'happy', next:'close' },
+    mouille:  { t:'Bien mouillée, c\'est normal ça. On la garde encore un peu, tranquille.', expr:'happy', next:'close' },
+    sature:   { t:'Oh là, saturée ! Faut changer tout de suite mec, on y va ensemble.', expr:'surprised', next:'change' },
+    tet_ok:   { t:'Ta tétine est là, parfait ! T\'es à fond dedans.', expr:'joy', next:'close' },
+    tet_prise:{ t:'Reprends-la, voilà. C\'est mieux comme ça, non ?', expr:'happy', next:'close' },
+    tet_miss: { t:'Oh, ta tétine a disparu ? Va vite la retrouver, je t\'attends !', expr:'concern', next:'close' }
+  };
+
   function buildCheck(type) {
     currentType = type;
     const ic = document.getElementById('checkIcon');
-    ic.textContent = '';
-    ic.classList.add('foxy-portrait');
+    ic.textContent = ''; ic.classList.add('foxy-portrait');
     positionFoxyCell(ic, 'pensive', 76);
     document.getElementById('checkTitle').textContent = type.title;
-    document.getElementById('checkQuestion').innerHTML = type.qFoxy || type.question;
     const acts = document.getElementById('checkActs');
     acts.innerHTML = '';
-    type.options.forEach(opt => {
-      const b = document.createElement('button');
-      b.className = opt.cls;
-      b.textContent = opt.label;
-      b.addEventListener('click', async () => {
-        await saveCheck(opt.result, type.id);
-        if (opt.fix) { showFix(opt.fix); }
-        else { closeCheck(); }
+    // Foxy pose la question, puis les réponses apparaissent
+    typeLine(document.getElementById('checkQuestion'), type.qFoxy || type.question, () => {
+      type.options.forEach(opt => {
+        const b = document.createElement('button');
+        b.className = opt.cls;
+        b.textContent = opt.label;
+        b.addEventListener('click', () => onCheckAnswer(type, opt));
+        acts.appendChild(b);
       });
+    });
+  }
+
+  async function onCheckAnswer(type, opt) {
+    await saveCheck(opt.result, type.id);
+    const fb = CHECK_FB[opt.result] || { t:'Ok, noté !', expr:'neutral', next:'close' };
+    positionFoxyCell(document.getElementById('checkIcon'), fb.expr, 76);
+    const acts = document.getElementById('checkActs');
+    acts.innerHTML = '';
+    // Foxy réagit, puis propose la suite
+    typeLine(document.getElementById('checkQuestion'), fb.t, () => {
+      const b = document.createElement('button');
+      if (fb.next === 'change') {
+        b.className = 'miss';
+        b.textContent = '🦊 On change maintenant';
+        b.addEventListener('click', () => startChange('check', true));
+      } else {
+        b.className = 'ok';
+        b.textContent = '👍 Ok Foxy';
+        b.addEventListener('click', () => closeCheck());
+      }
       acts.appendChild(b);
     });
   }
@@ -2365,6 +2464,7 @@
   }
   function closeCheck() {
     document.getElementById('overlay').classList.remove('show');
+    if (poseTypeTimer) { clearInterval(poseTypeTimer); poseTypeTimer = null; }
   }
 
   /* ---- Flux de change guidé : état couche → guide de pose → fait ---- */
@@ -2413,12 +2513,12 @@
       addBtn(acts, 'g', '☀️ Sèche — je laisse', async () => {
         await saveCheck('etat_sec', 'check_'+slot.key);
         markSlotDone(slot.key);
-        closeCheck(); try { await renderCheckStat(); } catch(e){}
+        foxyDueFeedback('Encore sèche, nickel ! Ta couche gère. À tout à l\'heure.');
       });
       addBtn(acts, 'a', '💧 Mouillée — je laisse encore', async () => {
         await saveCheck('etat_mouille', 'check_'+slot.key);
         markSlotDone(slot.key);
-        closeCheck(); try { await renderCheckStat(); } catch(e){}
+        foxyDueFeedback('Bien mouillée, c\'est normal. On la garde encore un peu, tranquille.');
       });
       addBtn(acts, 'a', '🔄 Mouillée — je change', async () => {
         await saveCheck('etat_mouille', 'check_'+slot.key);
@@ -2440,6 +2540,18 @@
     container.appendChild(b);
   }
 
+  // Foxy réagit sur un check planifié (couche laissée) puis on ferme
+  function foxyDueFeedback(text) {
+    positionFoxyCell(document.getElementById('dueIcon'), 'happy', 76);
+    document.getElementById('dueText').textContent = text;
+    const acts = document.getElementById('dueActs');
+    acts.innerHTML = '';
+    const b = document.createElement('button');
+    b.className = 'ok'; b.textContent = '👍 Ok Foxy';
+    b.addEventListener('click', async () => { closeCheck(); try { await renderCheckStat(); } catch(e){} });
+    acts.appendChild(b);
+  }
+
   async function markSlotDone(key) {
     try {
       const r = await window.storage.get('slotdone:'+todayStr());
@@ -2457,7 +2569,7 @@
 
   function startChange(ctx, skipState) {
     changeCtx = ctx || 'check';
-    positionFoxyCell(document.getElementById('chIcon'), 'pensive', 76);
+    positionChangeCell(document.getElementById('chIcon'), CHANGE_CELLS.start, 76);
     // Si l'état a déjà été déclaré (au check), on va directement au guide de pose.
     if (skipState) {
       document.getElementById('modalCheck').style.display = 'none';
@@ -2494,33 +2606,10 @@
   }
 
   function showPose() {
-    positionFoxyCell(document.getElementById('poseIcon'), 'happy', 76);
-    const ol = document.getElementById('poseSteps');
-    ol.innerHTML = '';
-    POSE_STEPS.forEach(s => {
-      const li = document.createElement('li');
-      li.innerHTML = s;
-      ol.appendChild(li);
-    });
     document.getElementById('modalChange').style.display = 'none';
     document.getElementById('modalPose').style.display = '';
+    runChangeStep(0);
   }
-
-  document.getElementById('poseDone').addEventListener('click', async () => {
-    await saveCheck('change_fait', 'change_'+(changeCtx||'check'));
-    // si ce change répondait à un créneau imposé, on le marque fait pour la journée
-    if (activeSlotKey) {
-      try {
-        const r = await window.storage.get('slotdone:'+todayStr());
-        const done = (r && r.value) ? JSON.parse(r.value) : {};
-        done[activeSlotKey] = true;
-        await window.storage.set('slotdone:'+todayStr(), JSON.stringify(done));
-      } catch(e) {}
-      activeSlotKey = null;
-    }
-    closeCheck();
-    try { await renderCheckStat(); } catch(e) {}
-  });
 
   async function loadAutoPref() {
     try {
