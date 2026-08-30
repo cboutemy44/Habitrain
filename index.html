@@ -149,6 +149,17 @@
   .empty-msg { color: var(--muted); font-size: 13px; text-align: center; padding: 8px 0; font-weight: 600; }
   .mini { font-size: 11.5px; color: var(--muted); font-weight: 700; }
 
+  /* barre d'onglets du reporting */
+  .tabbar { display:flex; gap:7px; margin-bottom:16px; }
+  body.foxy .tabbar, body.immersive .tabbar { display:none; }
+  .tab {
+    flex:1; font-family:'Gochi Hand',cursive; font-size:16px; font-weight:400;
+    padding:10px 6px; border-radius:12px; cursor:pointer;
+    border:1.5px solid #e0d3bd; background:#fffdf8; color:#8a7355;
+    box-shadow:0 2px 6px rgba(90,60,30,.08);
+  }
+  .tab.active { background:#c86b3a; color:#fff; border-color:#c86b3a; box-shadow:0 3px 10px rgba(200,107,58,.3); }
+
   /* ===== Reporting = tableau d'enfant avec gommettes ===== */
   body.report {
     background:
@@ -162,7 +173,7 @@
 
 
   /* chaque carte = feuille de papier épinglée, légèrement de travers */
-  body.report .card:not(#imChat):not(#settingsCard):not(#debugCard) {
+  body.report .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard) {
     background:#fffdf8;
     border:1px solid #efe4d2;
     border-radius:8px;
@@ -170,9 +181,9 @@
     position:relative;
     transform:rotate(-0.5deg);
   }
-  body.report .card:nth-of-type(even):not(#imChat):not(#settingsCard):not(#debugCard) { transform:rotate(0.6deg); }
+  body.report .card:nth-of-type(even):not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard) { transform:rotate(0.6deg); }
   /* washi tape en haut de chaque carte */
-  body.report .card:not(#imChat):not(#settingsCard):not(#debugCard)::before {
+  body.report .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard)::before {
     content:''; position:absolute; top:-11px; left:50%; transform:translateX(-50%) rotate(-2deg);
     width:74px; height:22px; border-radius:3px;
     background:repeating-linear-gradient(45deg,#f4b8c4 0 7px,#f7c9d3 7px 14px);
@@ -469,7 +480,7 @@
   /* ===== Mode immersif : conversation plein cadre ===== */
   body.immersive { background: linear-gradient(180deg,#F5EEF6,#EEF0FA) !important; }
   /* on masque tout le reporting */
-  body.immersive .card:not(#imChat):not(#settingsCard) { display:none !important; }
+  body.immersive .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard) { display:none !important; }
   body.immersive #verBadge { opacity:0.5; }
 
   #imChat { display:none; }
@@ -566,6 +577,12 @@
 
   <div id="storeWarn" style="display:none; background:#FBEBE5; border:1.5px solid var(--coral); color:#a8543b; border-radius:13px; padding:11px 13px; font-size:12.5px; font-weight:700; margin-bottom:15px; line-height:1.45;"></div>
 
+  <div class="tabbar" id="tabbar">
+    <button class="tab" data-tabname="maintenant">🍼 Maintenant</button>
+    <button class="tab" data-tabname="suivi">📊 Suivi</button>
+    <button class="tab" data-tabname="cadre">📋 Cadre</button>
+  </div>
+
   <div class="card" id="settingsCard" style="display:none">
     <div class="collapse-head open" style="cursor:default">
       <h2 style="margin:0">Réglages · Notifications</h2>
@@ -617,7 +634,7 @@
     <div class="im-actions" id="imActions"></div>
   </div>
 
-  <div class="card" id="sinceCard">
+  <div class="card tabcard" id="sinceCard" data-tab="maintenant">
     <h2>Ta couche du moment</h2>
     <div class="since-card">
       <div class="since-portrait" id="sincePortrait"></div>
@@ -628,13 +645,28 @@
     </div>
   </div>
 
-  <div class="card" id="timelineCard">
-    <h2>Ton emploi du temps</h2>
+  <div class="card tabcard" id="timelineCard" data-tab="cadre">
+    <h2>🗓️ Ton emploi du temps</h2>
     <div class="sub">Ta journée en frise. Les moments passés sont grisés, les 🔑 piliers (changes obligatoires) ressortent.</div>
     <div class="timeline" id="timeline"></div>
   </div>
 
-  <div class="card" id="dashCard">
+  <div class="card tabcard" id="rulesCard" data-tab="cadre">
+    <h2>📋 Les règles du programme</h2>
+    <div class="sub">Le cadre que tu suis, consultable à tout moment.</div>
+    <div style="font-size:13px;font-weight:600;line-height:1.6;color:var(--ink)">
+      🍼 <b>Couche 24/7</b> — portée en permanence, jour et nuit. Elle ne s'ouvre qu'aux changes et checks prévus.<br>
+      💧 <b>Mictions dans la couche</b> — toutes. Les selles se font aux WC sur les 2 fenêtres (change matin 9h, change soir 22h30).<br>
+      🔑 <b>3 changes piliers obligatoires</b> — 9h (matin), 16h (sortie de sieste), 22h30 (nuit) : toilette, vérif peau, crème, couche fraîche.<br>
+      ✓ <b>Checks respectés</b> — 11h30, 13h30, 19h30 : on tâte, on change si mouillé. Jamais sautés.<br>
+      🍭 <b>Tétine</b> — sur les temps de repos et de régression. Toujours libre de tomber, surtout à l'endormissement.<br>
+      👕 <b>Tenue ABDL en continu</b> — pas de retour adulte vestimentaire pendant le mois.<br>
+      🚫 <b>Sommeil toujours libre</b> — aucune contention verrouillée pendant sieste ou nuit.<br>
+      🔒 <b>Contention verrouillée</b> — uniquement avec superviseur présent, éveillé, aux clés.
+    </div>
+  </div>
+
+  <div class="card tabcard" id="dashCard" data-tab="suivi">
     <h2>Habituation aux couches</h2>
     <div class="sub">Ta progression sur le mois : régularité et baisse des situations à corriger, à parts égales.</div>
     <div class="dash-status none" id="dashStatus">
@@ -659,7 +691,7 @@
     <div class="apprec" id="dashApprec">Le tableau de bord s'activera dès tes premières entrées.</div>
   </div>
 
-  <div class="card outfit-card" id="outfitCard" style="display:none">
+  <div class="card outfit-card tabcard" id="outfitCard" data-tab="maintenant" style="display:none">
     <h2>Tenue du jour</h2>
     <div class="sub">Tirée au sort une fois par jour : une tenue de jour et une tenue de nuit. Les équipements de restriction ne sont pas inclus ici.</div>
     <button class="sup-btn" id="outfitDraw" style="background:#5c9463">🎲 Tirer la tenue du jour</button>
@@ -668,7 +700,7 @@
     <div class="outfit-note" id="outfitOnce" style="display:none;font-style:italic">🔒 Un seul tirage par jour — la tenue est fixée.</div>
   </div>
 
-  <div class="card moment" id="momentCard">
+  <div class="card moment tabcard" id="momentCard" data-tab="maintenant">
     <div class="eyebrow" id="momentEyebrow">Moment</div>
     <h2 id="momentTitle">Point du moment</h2>
     <div class="guide" id="guide"></div>
@@ -677,7 +709,7 @@
     <div class="acts" id="momentActs"></div>
   </div>
 
-  <div class="card sup-card" id="supCard" style="display:none">
+  <div class="card sup-card tabcard" id="supCard" data-tab="maintenant" style="display:none">
     <h2>Mode supervisé</h2>
     <div class="sub">Jour avec superviseur : tire au sort l'équipement du jour (2 à 5 pièces). Un seul tirage par jour.</div>
 
@@ -704,7 +736,7 @@
     </div>
   </div>
 
-  <div class="card breach-card" id="breachCard">
+  <div class="card breach-card tabcard" id="breachCard" data-tab="suivi">
     <h2>Entorses du jour</h2>
     <div class="sub">Coche les écarts au cadre, puis enregistre. Valables pour la journée, ils pèsent sur ta note d'habituation.</div>
     <div id="breachList"></div>
@@ -713,7 +745,7 @@
     <div class="breach-summary none" id="breachSummary">Aucune entorse enregistrée aujourd'hui. 👍</div>
   </div>
 
-  <div class="card">
+  <div class="card tabcard" id="skinCard" data-tab="suivi">
     <h2>Peau sur 30 jours</h2>
     <div class="sub">La ligne à surveiller. Une dérive se voit ici avant de faire mal.</div>
     <div class="strip" id="strip"></div>
@@ -725,7 +757,7 @@
     </div>
   </div>
 
-  <div class="card" id="wearCard">
+  <div class="card tabcard" id="wearCard" data-tab="suivi">
     <h2>Durée de port</h2>
     <div class="sub">Temps entre deux changes enregistrés. Fourchette saine en journée : 2h à 5h — ni trop fréquent (anomalie), ni trop long (risque peau).</div>
     <div class="wear-kpis">
@@ -751,7 +783,7 @@
     <div class="nextin" id="nextIn"></div>
   </div>
 
-  <div class="card" id="formCard" style="display:none">
+  <div class="card tabcard" id="formCard" data-tab="suivi" style="display:none">
     <div class="collapse-head" id="formHead">
       <h2 style="margin:0">Bilan complet du soir</h2>
       <span class="chev">▼</span>
@@ -810,7 +842,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card tabcard" id="histCard" data-tab="suivi">
     <h2>Historique</h2>
     <div class="sub" id="histSub">Rapports du soir et détail des checks, le plus récent en haut.</div>
     <div id="history"></div>
@@ -911,7 +943,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '5.9';
+  const APP_VERSION = '6.1';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -935,7 +967,7 @@
     try { await window.storage.set('pref:voicemode', JSON.stringify(mode)); } catch(e) {}
     applyVoiceChrome();
     if (immersive) { try { await imRunMoment(); } catch(e) {} }
-    else { try { await renderMoment(); } catch(e) {} try { await renderBreaches(); } catch(e) {} }
+    else { try { await renderMoment(); } catch(e) {} try { await renderBreaches(); } catch(e) {} try { await showTab(currentTab); } catch(e) {} }
   }
   // ancienne API conservée
   async function setVoice(on) { await setVoiceMode(on ? 'care' : 'report'); }
@@ -3433,6 +3465,29 @@
       box.appendChild(b);
     });
   }
+  // ---- Onglets du reporting : Maintenant / Suivi / Cadre ----
+  let currentTab = 'maintenant';
+  async function showTab(name) {
+    currentTab = name;
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tabname === name));
+    document.querySelectorAll('.tabcard').forEach(card => {
+      card.style.display = (card.dataset.tab === name) ? '' : 'none';
+    });
+    // re-run les cartes auto-gérées pour qu'elles se cachent si besoin
+    if (name === 'maintenant') {
+      try { await renderOutfitCard(); } catch(e) {}
+      try { await renderSupMode(); } catch(e) {}
+      try { await renderMoment(); } catch(e) {}
+    } else if (name === 'suivi') {
+      try { await renderMoment(); } catch(e) {} // gère l'affichage du bilan du soir
+    } else if (name === 'cadre') {
+      renderTimeline();
+    }
+  }
+  document.querySelectorAll('.tab').forEach(b => {
+    b.addEventListener('click', () => showTab(b.dataset.tabname));
+  });
+
   document.getElementById('openDebug').addEventListener('click', async () => {
     const card = document.getElementById('debugCard');
     const show = card.style.display === 'none';
@@ -3467,6 +3522,7 @@
       if (r && r.value) loadInto(JSON.parse(r.value));
     } catch(e) {}
     await refresh();
+    if (voiceMode === 'report') { await showTab('maintenant'); }
 
     // --- Rappel de change automatique aux heures imposées ---
     // Créneaux du planning (minute depuis minuit) + type + libellé.
