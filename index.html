@@ -988,7 +988,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '6.7';
+  const APP_VERSION = '6.8';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1225,9 +1225,9 @@
     imThread().appendChild(d); imScroll();
   }
 
-  // dit un message ; en mode Foxy → boîte RPG avec typewriter + expression
-  function imSay(text, delay, expr) {
-    if (voiceMode === 'foxy') return rpgSay(text, expr);
+  // dit un message ; en mode Foxy → boîte RPG. waitTap=true → attend un appui (narration).
+  function imSay(text, delay, expr, waitTap) {
+    if (voiceMode === 'foxy') return rpgSay(text, expr, waitTap);
     return new Promise(resolve => {
       const typing = document.createElement('div');
       typing.className = 'im-typing'; typing.innerHTML = '<span></span><span></span><span></span>';
@@ -1241,9 +1241,11 @@
     });
   }
 
-  // effet machine à écrire dans la boîte RPG, avance à l'appui (comme un jeu vidéo)
+  // effet machine à écrire dans la boîte RPG
+  // waitTap=true : attend un appui pour continuer (narration). Sinon : avance seul après le texte.
   let rpgAdvance = null;
-  function rpgSay(text, expr) {
+  let currentM = null; // moment courant, pour restaurer les boutons après un message libre
+  function rpgSay(text, expr, waitTap) {
     return new Promise(resolve => {
       setFoxyPortrait(expr || pendingExpr || 'neutral');
       const rt = document.getElementById('rpgText');
@@ -1252,20 +1254,27 @@
       rn.style.visibility = 'hidden';
       rt.textContent = '';
       const plain = text.replace(/<[^>]+>/g,'');
-      let i = 0, typing = true;
+      let i = 0, typing = true, resolved = false;
       const speed = 20;
+      const finishTyping = () => { clearInterval(timer); rt.textContent = plain; typing = false; rn.style.visibility = waitTap ? 'visible' : 'hidden'; };
       const timer = setInterval(() => {
         rt.textContent = plain.slice(0, ++i);
-        if (i >= plain.length) { clearInterval(timer); typing = false; rn.style.visibility = 'visible'; }
+        if (i >= plain.length) {
+          finishTyping();
+          if (!waitTap) { // avance toute seule après une courte pause
+            setTimeout(() => { if (!resolved) { resolved = true; if (rpgAdvance === myAdvance) rpgAdvance = null; resolve(); } }, 550);
+          }
+        }
       }, speed);
-      // un appui : termine le texte s'il s'écrit, sinon avance
-      rpgAdvance = () => {
-        if (typing) { clearInterval(timer); rt.textContent = plain; typing = false; rn.style.visibility = 'visible'; }
-        else { rpgAdvance = null; resolve(); }
+      // l'appui : complète le texte, puis (si waitTap) avance
+      const myAdvance = () => {
+        if (typing) { finishTyping(); if (!waitTap && !resolved) { resolved = true; if (rpgAdvance === myAdvance) rpgAdvance = null; resolve(); } }
+        else if (waitTap && !resolved) { resolved = true; if (rpgAdvance === myAdvance) rpgAdvance = null; resolve(); }
       };
+      rpgAdvance = myAdvance;
     });
   }
-  async function imSaySeq(lines) { for (const l of lines) { await imSay(l); } }
+  async function imSaySeq(lines) { for (const l of lines) { await imSay(l, 0, null, true); } }
 
   function imSetActions(buttons) {
     const box = imActions(); box.innerHTML = '';
@@ -1617,6 +1626,7 @@
     if (voiceMode === 'foxy') { await loadFoxyOutfit(); updateFoxyStatus(); }
     const now = new Date();
     const m = currentMoment(now);
+    currentM = m;
     const done = await getMoments(todayStr());
     const p = persona();
     const outfitTxt = voiceMode === 'foxy' ? (' · en ' + foxyOutfit.name) : '';
@@ -2075,22 +2085,27 @@
     const intent = detectIntent(text);
     if (!intent) {
       await imSay(pick(FOXY_FALLBACK), 700, 'pensive');
+      if (currentM) await imOfferHelp(currentM);
       return;
     }
     if (intent.action === 'change') {
       await imSay(pick(intent.rep), 700, intent.expr);
+      if (currentM) await imOfferHelp(currentM);
       return;
     }
     if (intent.action === 'nextstep') {
       await imSay(nextStepText(), 800, 'explain');
+      if (currentM) await imOfferHelp(currentM);
       return;
     }
     if (intent.action === 'story') {
       await imSay('Avec plaisir, laisse-moi te raconter...', 700, 'teach');
       await tellTodaySubchapter();
+      if (currentM) await imOfferHelp(currentM);
       return;
     }
     await imSay(pick(intent.rep), 800, intent.expr);
+    if (currentM) await imOfferHelp(currentM); // les boutons reviennent toujours
   }
   // câblage du champ "Parler à Foxy"
   document.addEventListener('DOMContentLoaded', () => {
