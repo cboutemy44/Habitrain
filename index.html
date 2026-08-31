@@ -233,6 +233,13 @@
   .since-time { font-family:'Fraunces',serif; font-weight:600; font-size:26px; line-height:1.1; color:var(--ink); }
   .since-time.ok { color:#4c7a51; } .since-time.mid { color:#9a742a; } .since-time.long { color:#a8543b; }
   .since-say { font-size:13.5px; font-weight:700; color:#5a3418; margin-top:5px; line-height:1.4; }
+  .since-next { font-size:12px; font-weight:800; color:var(--blue-deep); margin-top:7px; padding-top:7px; border-top:1px dashed var(--line); }
+  .since-next .lbl { color:var(--muted); font-weight:700; }
+  .since-state { margin:4px 0 2px; }
+  .since-state .pill {
+    display:inline-block; font-size:12px; font-weight:800; padding:3px 11px; border-radius:20px; color:#fff;
+  }
+  .since-state .pill.sec { background:#c8a86b; } .since-state .pill.mouille { background:#6fae7a; } .since-state .pill.sature { background:#d68168; }
   .since-none { font-size:13px; font-weight:600; color:var(--muted); }
 
   /* frise chronologique de la journée */
@@ -566,7 +573,7 @@
 
   /* ===== Scène de dialogue RPG (mode Foxy) ===== */
   #rpgStage { display:none; }
-  body.foxy #rpgStage { display:flex; gap:12px; align-items:flex-end; padding:16px; }
+  body.foxy #rpgStage { display:flex; gap:12px; align-items:flex-start; padding:16px; }
   body.foxy .im-thread, body.foxy #imChat .im-head { display:none; }
   .rpg-portrait {
     width:132px; height:132px; flex:none; border-radius:16px;
@@ -574,6 +581,7 @@
     background-size:528px 528px; /* 132 * 4 */
     border:2.5px solid #e0a060; box-shadow:0 4px 14px rgba(200,120,60,0.25);
     background-color:#FDF3EA;
+    position:sticky; top:16px; align-self:flex-start;
   }
   .rpg-box {
     flex:1; min-height:132px; background:#fff; border:2.5px solid #e0a060; border-radius:16px;
@@ -685,7 +693,9 @@
       <div class="since-portrait" id="sincePortrait"></div>
       <div class="since-body">
         <div class="since-time" id="sinceTime">—</div>
+        <div class="since-state" id="sinceState"></div>
         <div class="since-say" id="sinceSay"></div>
+        <div class="since-next" id="sinceNext"></div>
       </div>
     </div>
   </div>
@@ -988,7 +998,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '6.8';
+  const APP_VERSION = '7.0';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1227,7 +1237,8 @@
 
   // dit un message ; en mode Foxy → boîte RPG. waitTap=true → attend un appui (narration).
   function imSay(text, delay, expr, waitTap) {
-    if (voiceMode === 'foxy') return rpgSay(text, expr, waitTap);
+    // en mode Foxy, on attend l'appui par défaut (sauf si waitTap explicitement false)
+    if (voiceMode === 'foxy') return rpgSay(text, expr, waitTap === undefined ? true : waitTap);
     return new Promise(resolve => {
       const typing = document.createElement('div');
       typing.className = 'im-typing'; typing.innerHTML = '<span></span><span></span><span></span>';
@@ -2412,13 +2423,18 @@
     const portrait = document.getElementById('sincePortrait');
     const timeEl = document.getElementById('sinceTime');
     const sayEl = document.getElementById('sinceSay');
+    const nextEl = document.getElementById('sinceNext');
+    const stateEl = document.getElementById('sinceState');
     if (!timeEl) return;
     const last = await lastChangeTime();
+    // statut couche = dernier état rapporté (après le dernier change)
+    if (stateEl) stateEl.innerHTML = await renderDiaperState(last);
     if (!last) {
       positionFoxyCell(portrait, 'pensive', 88);
       timeEl.className = 'since-time';
       timeEl.textContent = '—';
       sayEl.textContent = 'Pas encore de change enregistré via l\'appli. Fais ton premier change guidé et je compte le temps pour toi !';
+      if (nextEl) nextEl.innerHTML = renderNextChange();
       return;
     }
     const now = new Date();
@@ -2430,6 +2446,48 @@
     timeEl.className = 'since-time ' + c.cls;
     timeEl.textContent = (h > 0 ? h + 'h' + (min < 10 ? '0'+min : min) : min + ' min');
     sayEl.textContent = c.say;
+    if (nextEl) nextEl.innerHTML = renderNextChange();
+  }
+
+  // statut de couche = dernier état rapporté (etat_*/sec/mouille/sature), postérieur au dernier change
+  async function renderDiaperState(lastChange) {
+    const stateResults = { etat_sec:'sec', etat_mouille:'mouille', etat_sature:'sature', sec:'sec', mouille:'mouille', sature:'sature' };
+    let latest = null, latestT = null;
+    for (let i = 0; i < 2; i++) {
+      const d = new Date(); d.setDate(d.getDate()-i);
+      const list = await getChecks(d.toISOString().slice(0,10));
+      list.forEach(c => {
+        if (c.t && stateResults[c.result]) {
+          const t = new Date(c.t);
+          if (!latestT || t > latestT) { latestT = t; latest = stateResults[c.result]; }
+        }
+      });
+    }
+    // si un change a eu lieu APRÈS le dernier état rapporté → couche fraîche = sèche
+    if (lastChange && (!latestT || lastChange >= latestT)) latest = 'sec';
+    if (!latest) return '<span class="lbl" style="font-size:11.5px;font-weight:700;color:var(--muted)">Statut inconnu — fais un check</span>';
+    const LABEL = { sec:'☀️ Couche sèche', mouille:'💧 Couche mouillée', sature:'🌊 Couche saturée' };
+    return '<span class="lbl" style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em">Statut&nbsp;: </span><span class="pill '+latest+'">'+LABEL[latest]+'</span>';
+  }
+
+  // temps restant avant le prochain change obligatoire (piliers 9h, 16h, 22h30)
+  function renderNextChange() {
+    const PILIERS = [
+      { m: 9*60,      label:'change du matin' },
+      { m: 16*60,     label:'change de sortie de sieste' },
+      { m: 22*60+30,  label:'change de nuit' }
+    ];
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    let next = PILIERS.find(p => p.m > nowMin);
+    let dayLabel = "aujourd'hui";
+    if (!next) { next = PILIERS[0]; dayLabel = 'demain'; } // prochain = matin de demain
+    let diff = next.m - nowMin;
+    if (dayLabel === 'demain') diff = (24*60 - nowMin) + next.m;
+    const hh = Math.floor(diff/60), mm = diff%60;
+    const rem = (hh > 0 ? hh + 'h' + (mm<10?'0'+mm:mm) : mm + ' min');
+    const at = Math.floor(next.m/60) + 'h' + (next.m%60 ? String(next.m%60).padStart(2,'0') : '');
+    return '<span class="lbl">🔑 Prochain change dans</span> ' + rem + ' <span class="lbl">(' + next.label + ' à ' + at + ' ' + dayLabel + ')</span>';
   }
   // met à jour le compteur régulièrement
   setInterval(() => { renderSince(); renderTimeline(); maybeRedirectBilan(); }, 60000);
