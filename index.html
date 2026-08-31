@@ -538,9 +538,24 @@
     margin:0 16px 14px; font-size:11.5px; font-weight:700; color:#8a6a30;
     background:#FBF3E0; border:1px solid #ecd9a8; border-radius:10px; padding:9px 11px; line-height:1.4;
   }
+  .im-talk { display:flex; gap:8px; padding:0 16px 16px; }
+  .im-talk input {
+    flex:1; font-family:inherit; font-size:14px; font-weight:600; color:var(--ink);
+    border:1.5px solid #e0d0ea; border-radius:14px; padding:11px 14px; background:#fff;
+  }
+  .im-talk input:focus { outline:none; border-color:#8f6fc0; }
+  .im-talk button {
+    flex:none; width:46px; border:none; border-radius:14px; cursor:pointer;
+    background:#8f6fc0; color:#fff; font-size:17px; font-weight:800;
+  }
+  body.foxy .im-talk input:focus { border-color:#d9743a; }
+  body.foxy .im-talk button { background:#d9743a; }
   /* thème Foxy : tons chauds renard */
   body.foxy { background:linear-gradient(180deg,#FDF1E6,#FBEADB) !important; }
   body.foxy #imChat { border-color:#f0d0b0; }
+  body.foxy #foxyTalk { display:flex !important; }
+  body.foxy #foxyTalk #foxyInput { border-color:#f0d0b0; }
+  body.foxy #foxyTalk #foxySend { background:#d9743a; }
   body.foxy .im-msg.care { background:#FCEBDD; color:#7a4420; }
   body.foxy .im-msg.me { background:linear-gradient(135deg,#e08840,#c8703a); }
   body.foxy .im-typing { background:#FCEBDD; }
@@ -650,9 +665,18 @@
         <div class="rpg-next" id="rpgNext" style="visibility:hidden">▼</div>
       </div>
     </div>
+    <div id="foxyTalk" style="display:none; padding:0 16px 12px; gap:8px;">
+      <input id="foxyInput" type="text" placeholder="Parle à Foxy…" autocomplete="off"
+        style="flex:1; font-family:inherit; font-size:14px; padding:11px 13px; border:1.5px solid #e0d0ea; border-radius:12px; background:#fff; color:#4a3358;">
+      <button id="foxySend" style="flex:none; font-family:inherit; font-size:14px; font-weight:800; padding:0 16px; border:none; border-radius:12px; background:#8f6fc0; color:#fff; cursor:pointer;">Envoyer</button>
+    </div>
     <div class="im-thread" id="imThread"></div>
     <div class="im-safety" id="imSafety" style="display:none"></div>
     <div class="im-actions" id="imActions"></div>
+    <div class="im-talk" id="imTalk">
+      <input type="text" id="imTalkInput" placeholder="Parler à Foxy…" autocomplete="off">
+      <button id="imTalkSend">➤</button>
+    </div>
   </div>
 
   <div class="card tabcard" id="sinceCard" data-tab="maintenant">
@@ -964,7 +988,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '6.4';
+  const APP_VERSION = '6.7';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1264,28 +1288,24 @@
   const REACT_POOLS = {
     care: {
       reveil_sec: [
-        'Oh, tu es resté bien au sec toute la nuit ? C\'est très bien ça.',
-        'Une nuit toute sèche, bravo. Tu commences la journée du bon pied.',
-        'Sec au réveil, c\'est parfait. Tu as bien dormi en plus ?',
-        'Très bien. Ta couche a tenu, tu es tout propre pour commencer la journée.',
-        'C\'est une belle nuit ça. Je suis content pour toi.',
-        'Au sec, parfait. Bois un peu d\'eau maintenant pour relancer la journée.',
-        'Tu vois comme tu gères bien la nuit ? Continue comme ça.',
-        'Nickel, rien à signaler. On se prépare pour le petit-déjeuner ?',
-        'Bien au sec, c\'est exactement ce qu\'on veut. Bonne matinée qui commence.',
-        'Voilà une nuit réussie. Tu peux être fier de toi ce matin.'
+        'Encore au sec ce matin ? C\'est que tu t\'es retenu cette nuit, sans le vouloir. L\'idée, c\'est justement d\'apprendre à ne plus le faire. Doucement, ça viendra.',
+        'Sèche au réveil... ton corps garde encore le contrôle la nuit. C\'est normal au début. On cherche à relâcher ça, pas à rester propre. Sois patient avec toi.',
+        'Tu es resté sec ? Le réflexe de retenue est encore là. Pas de souci — c\'est justement ce qu\'on apprend à lâcher. La nuit, laisse-toi aller, tu es en sécurité.',
+        'Encore sec ce matin. Ce n\'est pas un échec, mais rappelle-toi : le but n\'est pas de te retenir, c\'est de te laisser aller en confiance. On y arrivera.',
+        'Sèche cette nuit... c\'est que tu te retiens encore un peu. C\'est le plus dur à lâcher, la nuit. Prends ton temps, il n\'y a rien à réussir, juste à relâcher.',
+        'Au sec au réveil ? Ton corps s\'accroche encore au contrôle. C\'est humain et c\'est le début. L\'habituation, c\'est apprendre à ne plus y penser. Doucement.'
       ],
       reveil_mouille: [
-        'Une bonne couche mouillée, c\'est parfait, c\'est exactement ce qu\'on veut la nuit.',
-        'Bien mouillée, très bien. Ta couche a fait son travail cette nuit.',
-        'C\'est parfait ça. On va te changer tranquillement au petit-déjeuner.',
-        'Une nuit bien remplie, c\'est normal et c\'est très bien. Tu es à l\'aise ?',
-        'Voilà, c\'est exactement le but. Tu as bien lâché prise cette nuit.',
-        'Parfait. Garde-la encore un peu, on fera ton grand change à 9h.',
-        'Bien mouillée au réveil, c\'est signe que tu es à fond dedans. Bravo.',
-        'C\'est très bien mon grand. La nuit a bien fonctionné.',
-        'Rien d\'inquiétant, au contraire. Ta couche a bien absorbé.',
-        'Une belle nuit de sommeil et une couche bien pleine, tout va bien.'
+        'Une bonne couche mouillée, c\'est parfait — c\'est exactement ce qu\'on veut ! Tu t\'es laissé aller cette nuit, c\'est ça le vrai progrès.',
+        'Bien mouillée, très bien ! Ça veut dire que tu as relâché le contrôle en dormant. C\'est le signe que l\'habituation s\'installe.',
+        'C\'est parfait ça ! Une couche pleine le matin, c\'est ton corps qui a enfin lâché prise. On te changera tranquillement.',
+        'Une nuit bien remplie, c\'est exactement le but ! Tu ne t\'es pas retenu, tu t\'es laissé aller. Je suis content pour toi.',
+        'Voilà, c\'est exactement ça. Tu as bien lâché prise cette nuit — c\'est le cœur de l\'habituation.',
+        'Parfait. Garde-la encore un peu, on fera ton grand change à 9h. Belle nuit de lâcher-prise !',
+        'Bien mouillée au réveil, c\'est signe que tu es vraiment dans le truc, que tu te laisses aller. Bravo.',
+        'C\'est très bien, mon grand. Tu as arrêté de te retenir cette nuit, c\'est le progrès qu\'on cherche.',
+        'Au contraire, c\'est excellent : ta couche a bien absorbé parce que tu as relâché le contrôle. C\'est ça, l\'habituation.',
+        'Une belle nuit de sommeil et une couche bien pleine — tu t\'es abandonné à la nuit. Tout va bien, c\'est parfait.'
       ],
       reveil_fuite: [
         'Une petite fuite ? Ce n\'est rien du tout, on ajustera mieux ce soir.',
@@ -1422,28 +1442,24 @@
     },
     foxy: {
       reveil_sec: [
-        'Au sec toute la nuit ? Bien joué ! Moi ça m\'a pris une semaine avant d\'y arriver.',
-        'Nickel, nuit sèche ! Tu démarres fort la journée, respect.',
-        'Ah la nuit sèche, le luxe ! Profite, t\'as bien géré.',
-        'Sec au réveil, t\'es un pro déjà. Allez, debout, la journée t\'attend !',
-        'Bien joué mec, moi les premiers jours c\'était jamais sec. T\'es sur la bonne voie.',
-        'Nuit tranquille alors ! Bois un coup d\'eau et c\'est parti pour la journée.',
-        'Sec, propre, frais — t\'as tout bon ce matin. Continue comme ça !',
-        'Ha, t\'as tenu toute la nuit ! Tu vois quand je te disais que ça rentre tout seul.',
-        'Impec, nuit sèche. T\'es carré, franchement.',
-        'Belle nuit ! Rien de mieux pour bien commencer. Allez, on attaque !'
+        'Encore sèche au réveil ? Hmm, c\'est que tu t\'es retenu cette nuit. C\'est pas grave, mais l\'idée c\'est de te laisser aller, tu sais. Ça viendra en douceur.',
+        'Sèche ce matin... T\'as dû te retenir sans t\'en rendre compte. On cherche pas la propreté ici — au contraire, on apprend à lâcher prise. Ça s\'apprend, t\'inquiète.',
+        'Ah, encore au sec. C\'est normal au début, le corps résiste. Mais le but c\'est justement de ne plus se retenir. Laisse-toi aller, y\'a que toi et moi.',
+        'Sèche la nuit, ça veut dire que le réflexe de retenue est encore là. Pas de souci, c\'est le début. On va apprendre à relâcher tout ça ensemble, tranquille.',
+        'Tu vois, moi au début aussi je me retenais la nuit sans faire exprès. C\'est le plus dur à lâcher. Mais quand tu y arrives, quelle libération ! Ça va venir.',
+        'Encore sèche... ton corps s\'accroche encore un peu au contrôle. C\'est humain. L\'habituation, c\'est justement d\'arriver à ne plus y penser la nuit. On y va doucement.'
       ],
       reveil_mouille: [
-        'Bien mouillée, nickel — c\'est exactement ce qu\'on veut le matin. T\'es à fond dedans !',
-        'Ha, bonne couche pleine ! C\'est ça une nuit réussie, bravo.',
-        'Bien mouillée au réveil, c\'est le signe que t\'as bien lâché prise. Top.',
-        'Parfait ça ! Garde-la jusqu\'au petit-déj, tu connais la routine.',
-        'Ouais, une couche qui a bien bossé cette nuit ! C\'est tout bon.',
-        'Bien pleine, comme il faut. Moi j\'adore ce moment du matin, pas toi ?',
-        'C\'est ça le but ! T\'es en plein dedans, ça fait plaisir à voir.',
-        'Nickel, bien mouillée. On te changera tout à l\'heure, tranquille.',
-        'Ha, ça c\'est une vraie nuit d\'ABDL ! Bien joué mec.',
-        'Parfait, ta couche a fait le taf. Allez, bonne matinée !'
+        'Bien mouillée, nickel — c\'est exactement ce qu\'on veut le matin ! Ça veut dire que tu t\'es laissé aller cette nuit. Bravo, c\'est ÇA le progrès.',
+        'Ha, bonne couche pleine ! C\'est ça une nuit réussie — t\'as lâché prise sans y penser. J\'suis fier de toi, sérieux.',
+        'Bien mouillée au réveil, le signe que t\'es vraiment dans le truc ! T\'as arrêté de te retenir, c\'est le vrai cap de l\'habituation. Top !',
+        'Parfait ça ! Une couche bien pleine le matin, c\'est le corps qui a enfin lâché le contrôle. C\'est exactement là qu\'on veut aller. Bien joué !',
+        'Ouais ! Une couche qui a bien bossé cette nuit, ça veut dire que tu te laisses aller pour de vrai maintenant. C\'est beau à voir, franchement.',
+        'Bien pleine, comme il faut ! Tu sais que c\'est le meilleur signe, ça ? Ton corps a compris qu\'il pouvait relâcher. T\'es en plein dans le mille.',
+        'C\'est ça le but ! Mouillée le matin = tu t\'es abandonné à la nuit sans te retenir. C\'est exactement l\'habituation qu\'on cherche. Fier de toi !',
+        'Nickel, bien mouillée. C\'est le signe que ça rentre, que tu lâches prise. On te changera tout à l\'heure, tranquille. Belle nuit !',
+        'Ha, ça c\'est une vraie nuit d\'habituation ! T\'as laissé faire, sans contrôle. C\'est le progrès qu\'on veut. Bien joué mec !',
+        'Parfait, ta couche a fait le taf parce que TOI t\'as lâché prise. C\'est ça qu\'on célèbre le matin. Allez, bonne matinée, champion !'
       ],
       reveil_fuite: [
         'Ah, une fuite ! T\'inquiète, ça arrive à tout le monde au début.',
@@ -1587,7 +1603,7 @@
   }
   // humeur (set d'expressions) selon le résultat → variation à chaque fois
   const MOOD_FOR_RESULT = {
-    reveil_sec:'positive', reveil_mouille:'calm', reveil_fuite:'worried',
+    reveil_sec:'think', reveil_mouille:'positive', reveil_fuite:'worried',
     matin_ok:'positive', matin_change:'tender', matin_soif:'teach',
     aprem_ok:'fun', aprem_sieste:'sleepy', aprem_change:'tender',
     soir_ok:'positive', soir_souci:'worried', nuit_ok:'sleepy', nuit_change:'tender',
@@ -1847,7 +1863,7 @@
       { t:'La peur d\'être bizarre', x:'Le tout premier jour, j\'avais une trouille : et si c\'était pas normal d\'aimer ça ? Je me suis posé mille questions. Et puis j\'ai compris un truc : ce qui te fait du bien, qui ne blesse personne et que tu choisis en conscience, ça n\'a pas à être « normal ». C\'est juste toi. Et toi, tu vaux le coup. Ça, personne pourra te l\'enlever.' },
       { t:'Les premiers changes maladroits', x:'Ah, mes premiers changes... une catastrophe ! Les barrières mal mises, une fuite, la crème partout. J\'étais découragé. Mais tu sais quoi ? Personne ne naît en sachant faire. C\'est en tâtonnant qu\'on apprend. Chaque maladresse était un petit pas. Sois doux avec toi-même là-dessus, comme je l\'ai appris à l\'être.' },
       { t:'« Je vais jamais y arriver »', x:'Vers le 3e jour, j\'ai failli tout arrêter. Trop dur, trop d\'un coup, je me sentais nul. Cette peur de pas y arriver, elle est normale, elle vient toujours au début. Ce qui m\'a sauvé : arrêter de viser « le mois entier » et juste me dire « aujourd\'hui, rien qu\'aujourd\'hui ». Un jour à la fois. C\'est comme ça qu\'on avance, toi et moi.' },
-      { t:'La première nuit', x:'Ma première vraie nuit dans le programme, je n\'ai presque pas dormi tellement j\'étais dans ma tête. Et au matin, rien de dramatique n\'était arrivé — juste moi, au chaud, un peu fier d\'avoir tenu. Les peurs de la nuit sont souvent plus grosses que la réalité. Le lendemain matin, on réalise qu\'on a survécu, et même mieux : qu\'on était bien.' },
+      { t:'La première nuit', x:'Ma première vraie nuit dans le programme, je n\'ai presque pas dormi tellement j\'étais dans ma tête. Je me demandais si j\'allais oser me laisser aller. Et au matin, ma couche était bien mouillée — j\'avais relâché sans même m\'en rendre compte en dormant. Rien de dramatique, juste moi, au chaud, un peu ému d\'avoir enfin lâché prise. Les peurs de la nuit sont plus grosses que la réalité. Au réveil, on réalise qu\'on était bien.' },
       { t:'Le regard des autres', x:'J\'avais peur qu\'on découvre mon secret. Cette angoisse m\'a suivi les premiers jours. Puis j\'ai compris : sous mes vêtements, personne ne savait, personne ne se doutait. Mon monde intérieur m\'appartenait. La discrétion, c\'est une liberté, pas une prison. Tu peux vivre ton truc pleinement ET tranquille.' }
     ],
     1: [ // Ça s'installe
@@ -1952,6 +1968,138 @@
     return 'Il est tard. Tu devrais dormir, mon grand. Je veille sur toi toute la nuit.';
   }
 
+  /* ===== Compréhension langage naturel (hors-ligne, par intentions) ===== */
+  function normalize(s) {
+    return (s || '').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // enlève accents
+      .replace(/[^\w\s]/g, ' ');
+  }
+  // chaque intention : mots-clés + réponses variées + expression
+  const FOXY_INTENTS = [
+    { id:'peur', kw:['peur','angoiss','flippe','flipp','stress','inquiet','anxieux','trac','honte','bizarre','ose pas','ridicule'],
+      expr:'concern', rep:[
+        'Hey, viens là. La peur c\'est normal, j\'suis passé par là aussi. Tu sais quoi ? Ce qui te fait du bien et blesse personne, y\'a pas à en avoir honte. On avance à deux.',
+        'T\'inquiète, respire un coup. Moi aussi j\'ai flippé au début. Ça passe, et de l\'autre côté y\'a que du confort. Je te lâche pas.',
+        'C\'est courageux de le dire, tu sais. La peur veut juste te protéger. Mais t\'es en sécurité là, avec moi. On y va doucement, à ton rythme.'
+      ]},
+    { id:'triste', kw:['triste','pas bien','mal','deprim','cafard','pleure','seul','vide','pas le moral','moral'],
+      expr:'concern', rep:[
+        'Oh... viens là mon pote. 🫂 Dis-moi ce qui pèse. Et si c\'est trop lourd, pense aussi à en parler à quelqu\'un de confiance autour de toi — tu comptes plus que tout le reste.',
+        'Ça me touche que tu me le dises. T\'es pas seul, d\'accord ? Je suis là. On respire ensemble un instant, doucement.',
+        'Les jours gris ça arrive à tout le monde, même à moi pendant mon mois. Sois doux avec toi. Un câlin ? Je suis là, tout près.'
+      ]},
+    { id:'calin', kw:['calin','câlin','bisou','serre','besoin de toi','reconfort','réconfort','blottir','cocon'],
+      expr:'cuddle', rep:[
+        '*te serre fort dans ses bras* 🫂 Voilà... tout doux. T\'es bien là, contre moi.',
+        'Viens là, gros câlin rien que pour toi ! Ferme les yeux un instant, t\'es en sécurité.',
+        'Câlin de renard, le meilleur qui soit ! *te berce doucement* Je suis là, tranquille.'
+      ]},
+    { id:'fier', kw:['fier','reussi','réussi','content','trop bien','j\'ai tenu','gagne','gagné','heureux','super'],
+      expr:'proud', rep:[
+        'Ouiii ! J\'suis super fier de toi, sérieux ! T\'as assuré. On avance bien tous les deux.',
+        'Ça c\'est mon champion ! Profite de ce moment, tu l\'as mérité. J\'suis content pour toi.',
+        'Trop bien mec ! Ces petites victoires, c\'est elles qui construisent tout le voyage. Continue comme ça !'
+      ]},
+    { id:'fatigue', kw:['fatigue','fatigué','crevé','creve','epuise','épuisé','dormir','sommeil','marre','plus de force'],
+      expr:'sleepy', rep:[
+        'T\'as l\'air crevé... Accorde-toi une pause, une sieste dans ton cocon, ça répare tout. Je veille.',
+        'Repose-toi, y\'a pas de honte. Même les plus costauds ont besoin de souffler. Va t\'allonger, je reste là.',
+        'La fatigue, faut l\'écouter. Un moment au calme, bien au chaud, et ça repart. Prends soin de toi.'
+      ]},
+    { id:'change', kw:['change','changer','couche','mouille','mouillé','fuite','pleine','sature','saturé'],
+      expr:'pensive', rep:[
+        'Tu veux qu\'on fasse un change ? Dis-moi et je te guide, on fait ça peinard.',
+        'Si ta couche a bien bossé, on la change tranquille ! Utilise le bouton « me changer » et je suis avec toi étape par étape.'
+      ], action:'change'},
+    { id:'biberon', kw:['biberon','bibi','boire','soif','eau','hydrat','bu'],
+      expr:'happy', rep:[
+        'Bien joué si tu penses à boire ! L\'hydratation c\'est LE secret pour bien vivre ton mois. Encore un bibi pour moi ?',
+        'Ton biberon t\'attend ! Bois bien, tranquille. C\'est le petit geste qui change tout.'
+      ]},
+    { id:'sieste', kw:['sieste','repos','pieuter','pioncer','pause'],
+      expr:'sleepy', rep:[
+        'La sieste, mon moment préféré ! Installe-toi bien au chaud, je monte la garde pendant que tu récupères.',
+        'Une bonne sieste dans ton cocon ? Excellente idée. Ça fait un bien fou, crois-moi.'
+      ]},
+    { id:'quoi_faire', kw:['quoi faire','je fais quoi','maintenant','prochaine','apres','après','la suite','planning','emploi du temps'],
+      expr:'explain', rep:[], action:'nextstep'},
+    { id:'regles', kw:['regle','règle','autorise','interdit','le droit','contention','pilier','obligatoire','cadre'],
+      expr:'explain', rep:[
+        'Le cadre est simple : couche 24/7, 3 changes obligatoires (matin, sortie de sieste, soir), les checks entre, et la contention verrouillée seulement si ton superviseur est là. Tu retrouves tout dans l\'onglet Cadre !',
+        'Les règles, c\'est ton petit fil rouge. Le détail complet est dans l\'onglet « Cadre », mais l\'essentiel : couche tout le temps, 3 piliers, et sécurité d\'abord. Je veille à ce qu\'on reste dans les clous.'
+      ]},
+    { id:'histoire', kw:['histoire','raconte','voyage','ton mois','aventure','souvenir','vecu','vécu'],
+      expr:'teach', rep:[], action:'story'},
+    { id:'merci', kw:['merci','t\'es cool','tes cool','gentil','adorable','love','je t\'aime','jtaime'],
+      expr:'happy', rep:[
+        'Aww, ça me touche ! C\'est un plaisir de faire ce bout de chemin avec toi, franchement. 💛',
+        'Mais de rien mon pote ! On est une équipe, toi et moi. Ça me rend heureux d\'être là.',
+        'C\'est moi qui te remercie d\'être là. T\'accompagner, ça donne du sens à mon propre voyage. 🦊'
+      ]},
+    { id:'salut', kw:['salut','coucou','bonjour','hello','hey','yo','bonsoir','ca va','ça va','comment vas'],
+      expr:'wave', rep:[
+        'Coucou toi ! 🦊 Content de te voir. Ça roule de ton côté ?',
+        'Hey ! Toujours là pour toi. Comment tu te sens, là, maintenant ?',
+        'Salut mon compagnon de voyage ! Quoi de neuf ?'
+      ]},
+    { id:'jeu', kw:['jouer','jeu','joue','rigoler','rire','amuse','ennuie','ennui','rituel','defi','défi'],
+      expr:'joy', rep:[
+        'Envie de jouer ? J\'adore ça ! Si t\'as pas encore fait le rituel du jour, c\'est le moment parfait, demande-moi !',
+        'On s\'amuse ? Le rituel du jour t\'attend si tu l\'as pas fait ! Sinon, raconte-moi un truc de ta journée.'
+      ]}
+  ];
+
+  function detectIntent(text) {
+    const n = normalize(text);
+    let best = null, bestScore = 0;
+    FOXY_INTENTS.forEach(intent => {
+      let score = 0;
+      intent.kw.forEach(k => { if (n.includes(normalize(k))) score++; });
+      if (score > bestScore) { bestScore = score; best = intent; }
+    });
+    return bestScore > 0 ? best : null;
+  }
+
+  const FOXY_FALLBACK = [
+    'Hmm, j\'ai pas tout capté mon pote, mais je suis là ! Dis-le autrement, ou appuie sur un bouton ?',
+    'J\'avoue je saisis pas trop, mais c\'est pas grave. Raconte-moi autrement, ou choisis un truc ci-dessous.',
+    'Désolé, là tu m\'as perdu ! 😅 Mais je reste avec toi. Reformule, ou on continue avec les boutons ?',
+    'Pas sûr d\'avoir compris, mais j\'écoute toujours. Essaie d\'une autre façon, je suis tout ouïe !'
+  ];
+
+  async function foxyHandleInput(raw) {
+    const text = (raw || '').trim();
+    if (!text) return;
+    imAddMe(text);
+    const inp = document.getElementById('imTalkInput'); if (inp) inp.value = '';
+    const intent = detectIntent(text);
+    if (!intent) {
+      await imSay(pick(FOXY_FALLBACK), 700, 'pensive');
+      return;
+    }
+    if (intent.action === 'change') {
+      await imSay(pick(intent.rep), 700, intent.expr);
+      return;
+    }
+    if (intent.action === 'nextstep') {
+      await imSay(nextStepText(), 800, 'explain');
+      return;
+    }
+    if (intent.action === 'story') {
+      await imSay('Avec plaisir, laisse-moi te raconter...', 700, 'teach');
+      await tellTodaySubchapter();
+      return;
+    }
+    await imSay(pick(intent.rep), 800, intent.expr);
+  }
+  // câblage du champ "Parler à Foxy"
+  document.addEventListener('DOMContentLoaded', () => {
+    const send = document.getElementById('imTalkSend');
+    const inp = document.getElementById('imTalkInput');
+    if (send) send.addEventListener('click', () => foxyHandleInput(inp ? inp.value : ''));
+    if (inp) inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') foxyHandleInput(inp.value); });
+  });
+
   function toggleFormImmersive() {
     // en immersif, le formulaire de bilan reste accessible : on repasse un instant en reporting visuel du form
     const formCard = document.getElementById('formCard');
@@ -1990,6 +2138,10 @@
     });
     const stage = document.getElementById('rpgStage');
     if (stage) stage.addEventListener('click', () => { if (rpgAdvance) rpgAdvance(); });
+    const fsend = document.getElementById('foxySend');
+    const finput = document.getElementById('foxyInput');
+    if (fsend) fsend.addEventListener('click', () => foxyHandleInput(finput.value));
+    if (finput) finput.addEventListener('keydown', (e) => { if (e.key === 'Enter') foxyHandleInput(finput.value); });
   });
 
   const skinColors = { verte: 'var(--green)', surveiller: 'var(--amber)', traiter: 'var(--coral)' };
@@ -2639,8 +2791,8 @@
       question: 'Dans quel état est ta couche, là, maintenant ?',
       qFoxy: 'Alors, ta couche, elle en est où là maintenant ?',
       options: [
-        { label: 'Sèche', cls: 'ok', result: 'sec' },
-        { label: 'Mouillée, ça va', cls: 'adj', result: 'mouille' },
+        { label: 'Bien mouillée', cls: 'ok', result: 'mouille' },
+        { label: 'Encore sèche', cls: 'adj', result: 'sec' },
         { label: 'Saturée', cls: 'miss', result: 'sature', fix: {
           title: 'Change maintenant',
           intro: 'Couche saturée = peau au contact prolongé de l\'humidité. On change sans attendre — c\'est le point faible n°1 du mois.',
@@ -2715,8 +2867,8 @@
     ok:       { t:'Nickel, bien en place ! Continue comme ça, t\'es carré.', expr:'proud', next:'close' },
     adj:      { t:'Ah, t\'as dû la réajuster ? Pense à bien sortir les barrières aux cuisses, ça évite ça la prochaine fois.', expr:'pensive', next:'close' },
     miss:     { t:'Eh ! T\'as pas ta couche là ?! On corrige ça direct, viens, je te guide.', expr:'surprised', next:'change' },
-    sec:      { t:'Encore sèche ! Parfait, ta couche gère bien.', expr:'happy', next:'close' },
-    mouille:  { t:'Bien mouillée, c\'est normal ça. On la garde encore un peu, tranquille.', expr:'happy', next:'close' },
+    sec:      { t:'Encore sèche ? Tu te retiens peut-être un peu. Pas de stress, mais laisse-toi aller quand ça vient, hein — c\'est le but.', expr:'pensive', next:'close' },
+    mouille:  { t:'Bien mouillée, parfait ! Tu te laisses aller comme il faut. C\'est exactement ça qu\'on veut. On la garde encore un peu.', expr:'happy', next:'close' },
     sature:   { t:'Oh là, saturée ! Faut changer tout de suite mec, on y va ensemble.', expr:'surprised', next:'change' },
     tet_ok:   { t:'Ta tétine est là, parfait ! T\'es à fond dedans.', expr:'joy', next:'close' },
     tet_prise:{ t:'Reprends-la, voilà. C\'est mieux comme ça, non ?', expr:'happy', next:'close' },
@@ -2808,8 +2960,8 @@
   ];
 
   const CHANGE_STATE_OPTS = [
-    { label: '☀️ Encore sèche', cls:'g', result:'sec' },
-    { label: '💧 Mouillée, normale', cls:'a', result:'mouille' },
+    { label: '💧 Bien mouillée', cls:'g', result:'mouille' },
+    { label: '☀️ Encore sèche', cls:'a', result:'sec' },
     { label: '🌊 Bien saturée', cls:'c', result:'sature' }
   ];
 
@@ -2841,12 +2993,12 @@
       addBtn(acts, 'g', '☀️ Sèche — je laisse', async () => {
         await saveCheck('etat_sec', 'check_'+slot.key);
         markSlotDone(slot.key);
-        foxyDueFeedback('Encore sèche, nickel ! Ta couche gère. À tout à l\'heure.');
+        foxyDueFeedback('Encore sèche ? Tu te retiens un chouïa. Laisse-toi aller quand ça vient, c\'est comme ça qu\'on s\'habitue. À tout à l\'heure !');
       });
       addBtn(acts, 'a', '💧 Mouillée — je laisse encore', async () => {
         await saveCheck('etat_mouille', 'check_'+slot.key);
         markSlotDone(slot.key);
-        foxyDueFeedback('Bien mouillée, c\'est normal. On la garde encore un peu, tranquille.');
+        foxyDueFeedback('Bien mouillée, nickel ! Tu te laisses aller comme il faut, c\'est ça le progrès. On la garde encore un peu.');
       });
       addBtn(acts, 'a', '🔄 Mouillée — je change', async () => {
         await saveCheck('etat_mouille', 'check_'+slot.key);
@@ -2990,8 +3142,8 @@
       q: 'Réveil. Comment a tenu la couche de nuit ?',
       qi: 'Coucou, tu es réveillé ! On regarde ensemble comment ta couche a tenu cette nuit ?',
       opts: [
-        { label: '☀️ Nuit au sec', cls:'g', result:'reveil_sec' },
-        { label: '💧 Bien mouillée', cls:'a', result:'reveil_mouille' },
+        { label: '💧 Bien mouillée', cls:'g', result:'reveil_mouille' },
+        { label: '☀️ Encore au sec', cls:'a', result:'reveil_sec' },
         { label: '⚠️ Fuite pendant la nuit', cls:'c', result:'reveil_fuite' }
       ],
       after: 'Le bilan peau se fera ce soir, au change de nuit. Prépare le change de 9h.',
@@ -3034,7 +3186,7 @@
         { label: '⚠️ Peau à surveiller ce soir', cls:'a', result:'soir_souci', openForm:true }
       ],
       after: 'C\'est le moment d\'alléger l\'hydratation et de bien crémer pour la nuit.',
-      afteri: 'Voilà. On allège l\'eau maintenant, et je te mets une bonne couche de crème pour que tu passes une nuit au sec et bien au chaud.'
+      afteri: 'Voilà. On allège l\'eau maintenant, et je te mets une bonne couche de crème pour que tu passes une nuit bien au chaud et sereine, à te laisser aller.'
     },
     nuit: {
       key: 'nuit', eyebrow: 'Nuit · 23h-7h', title: 'Mode nuit',
