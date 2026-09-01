@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '7.6';
+  const APP_VERSION = '7.8';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1372,11 +1372,54 @@
   }
 
   // récompense : parfois un souvenir de Foxy à la fin d'un échange profond
+  // Confidences de Foxy — stock dédié aux discussions introspectives (indépendant du feuilleton)
+  const FOXY_CONFIDENCES = [
+    'Tu sais, avant, je n\'osais jamais m\'écouter. Ce voyage m\'a appris à le faire. C\'est un cadeau que je me suis fait.',
+    'Il y a eu un soir où j\'ai pleuré, tout seul dans mon terrier. Pas de tristesse — juste le soulagement d\'enfin m\'accepter.',
+    'Mon doudou, je lui parlais à voix basse les nuits difficiles. Ça peut paraître bête, mais ça m\'a tenu.',
+    'J\'ai compris un truc pendant mon mois : la force, c\'est pas de tout contrôler. C\'est d\'oser être doux avec soi.',
+    'Le regard des autres m\'a longtemps terrifié. Et un jour j\'ai réalisé que le seul regard qui comptait, c\'était le mien.',
+    'Il m\'arrive encore de repenser à mon mois avec tendresse. C\'est là que j\'ai appris à m\'aimer un peu, je crois.',
+    'Au début je croyais que je « faisais » quelque chose de spécial. En fait, je me contentais d\'être moi. Enfin.',
+    'La nuit où j\'ai arrêté de compter les jours, j\'ai su que j\'avais gagné. Je vivais, tout simplement.',
+    'Personne ne m\'a forcé, personne ne m\'a jugé. Juste moi, mon rythme, et beaucoup de douceur. C\'est ce que je te souhaite.',
+    'Tu veux savoir mon plus grand apprentissage ? Que mériter de la tendresse, ça ne se prouve pas. On y a droit, point.',
+    'Un jour j\'ai voulu boire tout mon biberon d\'un coup pour battre un record... j\'ai eu le hoquet pendant une heure ! 🤭',
+    'J\'ai déjà caché mon doudou dans le frigo pour « le rafraîchir » un jour de canicule. Ma tête quand je l\'ai retrouvé tout froid ! 😂',
+    'Une fois j\'ai décoré ma couche avec des autocollants étoiles avant de la mettre. Résultat : des étoiles collées partout sauf sur la couche !',
+    'Pendant une sieste, j\'ai fait semblant de dormir pour espionner... et je me suis endormi pour de vrai. Raté, l\'espionnage !',
+    'J\'ai essayé de faire des châteaux avec mes cubes en équilibre sur mon ventre, allongé. Ça s\'est écroulé sur mon museau à chaque fois. J\'ai adoré. 🦊',
+    'Un matin j\'ai mis ma grenouillère à l\'envers sans m\'en rendre compte et j\'ai passé la moitié de la journée comme ça. On s\'en fiche, j\'étais confortable !',
+    'J\'ai déjà fait la course à quatre pattes contre mon ombre. Spoiler : mon ombre a gagné. Match revanche prévu !',
+    'Mon jeu préféré c\'était de faire crisser ma couche exprès en gigotant. Le petit bruit me faisait rire à tous les coups. Essaie, tu verras ! 🤭',
+    'Une fois j\'ai empilé TOUS mes doudous pour dormir dessus comme un roi. Je suis tombé du tas au milieu de la nuit. Zéro regret. 😴',
+    'J\'ai voulu peindre un arc-en-ciel et j\'ai fini plus coloré que le dessin. Maman renarde a bien rigolé en me débarbouillant.',
+    'Des fois je parlais à mes cubes ABCD comme s\'ils étaient mes copains. Ils étaient d\'excellents auditeurs, très patients ! 🎲'
+  ];
+
   async function maybeIntroReward() {
-    if (Math.random() < 0.5) {
-      await imSay('Tiens, ça me rappelle un truc de mon propre voyage...', 900, 'teach');
-      await tellTodaySubchapter();
+    if (Math.random() >= 0.5) return;
+    const q = await getQuest();
+    q.confidences = q.confidences || [];
+    const remaining = FOXY_CONFIDENCES.filter(c => !q.confidences.includes(c));
+    if (!remaining.length) {
+      // stock épuisé : on retombe sur le feuilleton du jour si dispo
+      await imSay('Je t\'ai déjà confié pas mal de choses, tu sais tout de moi ou presque ! 🦊', 800, 'happy');
+      return;
     }
+    const conf = remaining[Math.floor(Math.random()*remaining.length)];
+    q.confidences.push(conf);
+    await saveQuest(q);
+    const intros = [
+      'Tiens... je vais te confier quelque chose.',
+      'Oh, ça me fait penser à un truc, écoute !',
+      'Je t\'ai jamais raconté celle-là, je crois...',
+      'Entre nous, faut que je te dise un truc.',
+      'Attends, faut absolument que je te raconte !'
+    ];
+    await imSay(intros[Math.floor(Math.random()*intros.length)], 900, 'joy');
+    await imSay('« ' + conf + ' »', 1100, 'happy');
+    await imSay('Voilà. Merci de m\'écouter, ça reste dans notre aventure. 🦊💛', 850, 'happy');
   }
 
   async function foxyHandleInput(raw) {
@@ -3309,6 +3352,16 @@
         box.appendChild(wrap);
       }
     });
+    // Confidences de Foxy (récoltées en discutant)
+    const conf = (q.confidences || []);
+    if (conf.length) {
+      const sec = document.createElement('div');
+      sec.style.cssText = 'margin-top:16px;padding-top:12px;border-top:2px dashed #e0d3bd';
+      sec.innerHTML = '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:15px;color:#5a4326;margin-bottom:8px">💛 Les confidences de Foxy</div>'+
+        '<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px">'+conf.length+' / '+FOXY_CONFIDENCES.length+' — récoltées en discutant avec lui</div>'+
+        conf.map(c => '<div style="font-size:12.5px;font-weight:600;color:var(--ink);font-style:italic;line-height:1.5;padding:6px 0;border-top:1px dashed var(--line)">« '+c+' »</div>').join('');
+      box.appendChild(sec);
+    }
   }
   document.getElementById('openQuest').addEventListener('click', async () => {
     const card = document.getElementById('questCard');
