@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '7.5';
+  const APP_VERSION = '7.6';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -814,6 +814,17 @@
           await imOfferHelp(m);
         }}
       ]);
+      return;
+    }
+    // 3) discussion introspective spontanée (max 1/jour, ~30%, hors nuit)
+    if (m.key !== 'nuit') {
+      let introDate = null;
+      try { const r = await window.storage.get('introspect:last'); if (r && r.value) introDate = JSON.parse(r.value); } catch(e) {}
+      if (introDate !== todayStr() && Math.random() < 0.3) {
+        try { await window.storage.set('introspect:last', JSON.stringify(todayStr())); } catch(e) {}
+        await imSay('Dis, avant qu\'on continue... j\'aimerais bien prendre de tes nouvelles, pour de vrai.', 900, 'pensive');
+        await startIntrospection(m);
+      }
     }
   }
 
@@ -943,6 +954,10 @@
         pendingExpr = 'neutral';
         await imOfferHelp(m);
       }},
+      ...(isFoxy ? [{ label:'💬 Foxy, on discute ?', onClick: async () => {
+        imAddMe('Foxy, on discute ?');
+        await startIntrospection(m);
+      }}] : []),
       { soft:true, label:'🍼 Me changer maintenant', onClick: () => startChange(m.key==='reveil'||m.key==='soir'?'pilier':'check') },
       { soft:true, label: isFoxy ? '👍 Ça roule, merci' : '💛 Ça va, merci', onClick: async () => {
         imAddMe(isFoxy ? 'Ça roule, merci.' : 'Ça va, merci.');
@@ -1204,6 +1219,165 @@
     'Désolé, là tu m\'as perdu ! 😅 Mais je reste avec toi. Reformule, ou on continue avec les boutons ?',
     'Pas sûr d\'avoir compris, mais j\'écoute toujours. Essaie d\'une autre façon, je suis tout ouïe !'
   ];
+
+  /* ============================================================
+     DISCUSSIONS INTROSPECTIVES — Foxy s'intéresse à ton vécu
+     Arbre de dialogue : chaque nœud = { say:[lignes], expr, opts:[{label, to}], reward?, wellbeing? }
+     'to' = id du nœud suivant. Un nœud sans opts = fin (mot doux).
+     ============================================================ */
+  const INTRO_TREES = {
+    // 1. Comment tu le vis ?
+    vecu: {
+      start: { say:['Dis-moi un truc... ça te fait quoi, en vrai, d\'être en couche comme ça ?'], expr:'pensive', opts:[
+        { label:'J\'adore ça', to:'aime' },
+        { label:'C\'est encore bizarre', to:'bizarre' },
+        { label:'C\'est difficile', to:'dur' } ] },
+      aime: { say:['Ça me fait tellement plaisir de t\'entendre dire ça ! 🦊','Moi aussi j\'ai adoré, dès que j\'ai arrêté de me juger. C\'est quoi que tu préfères — la sensation, le côté cocon, le lâcher-prise ?'], expr:'joy', opts:[
+        { label:'Le cocon, la douceur', to:'aime_cocon' },
+        { label:'Le lâcher-prise', to:'aime_lacher' } ] },
+      aime_cocon: { say:['Le cocon... oui. Ce sentiment d\'être enveloppé, en sécurité, comme si rien ne pouvait t\'atteindre.','C\'est précieux, ça. Garde-le bien. Tu t\'offres quelque chose de doux, et tu le mérites.'], expr:'happy', reward:true, opts:[] },
+      aime_lacher: { say:['Le lâcher-prise, c\'est le plus beau cadeau du programme je trouve.','Arrêter de tout contrôler, se laisser porter... c\'est rare qu\'on s\'autorise ça dans la vie. Tu as de la chance de le vivre.'], expr:'proud', reward:true, opts:[] },
+      bizarre: { say:['C\'est normal que ce soit bizarre au début, vraiment.','Moi les premiers jours je me sentais tout drôle. Et puis un matin, c\'était juste devenu... normal. Ça viendra pour toi aussi. Qu\'est-ce qui te semble le plus étrange ?'], expr:'neutral', opts:[
+        { label:'La sensation physique', to:'bizarre_sensation' },
+        { label:'L\'idée en elle-même', to:'bizarre_idee' } ] },
+      bizarre_sensation: { say:['La sensation, oui, ton corps découvre. Laisse-lui le temps.','Bientôt tu ne la remarqueras même plus, elle fera partie de toi. C\'est ça, s\'habituer.'], expr:'happy', opts:[] },
+      bizarre_idee: { say:['L\'idée... « est-ce que c\'est ok d\'aimer ça ? » C\'est ça qui trotte ?','Écoute : ce qui t\'apaise et ne blesse personne, c\'est ok. Mille fois ok. Tu as le droit d\'être toi.'], expr:'pensive', reward:true, opts:[] },
+      dur: { say:['Je te comprends tellement. Moi aussi j\'ai eu des jours durs.','C\'est quoi le plus dur pour toi — le regard que tu portes sur toi, ou le côté pratique ?'], expr:'concern', opts:[
+        { label:'Le regard sur moi', to:'dur_regard' },
+        { label:'Le côté pratique', to:'dur_pratique' } ] },
+      dur_regard: { say:['Ah, la petite voix qui juge... Tu sais, elle ment souvent, cette voix.','Ce que tu fais là, c\'est prendre soin de toi, t\'écouter. Y\'a rien de honteux. Tu dirais quoi à un ami qui vivait ça ?'], expr:'concern', opts:[
+        { label:'Je le rassurerais', to:'dur_ami' },
+        { label:'Je sais pas', to:'dur_sais_pas' } ] },
+      dur_ami: { say:['Voilà. Alors offre-toi la même douceur qu\'à cet ami. Tu la mérites autant que lui.','Je suis fier de toi d\'en parler, franchement. 🦊💛'], expr:'proud', reward:true, opts:[] },
+      dur_sais_pas: { say:['C\'est ok de pas savoir. Mais je te le dis, moi : tu ne fais rien de mal.','Sois un peu plus tendre avec toi, comme je le suis avec toi là. Tu comptes, tu sais.','Et si un jour ça pèse vraiment lourd, parles-en à quelqu\'un de confiance autour de toi aussi — t\'es pas obligé de tout porter seul.'], expr:'concern', wellbeing:true, opts:[] },
+      dur_pratique: { say:['Le côté pratique, ça c\'est juste une question d\'habitude ! Les changes, le rythme...','Au début c\'est laborieux, et puis ça devient un réflexe, tu verras. Bientôt tu le feras les yeux fermés. Accroche-toi, ça vient.'], expr:'happy', opts:[] }
+    },
+    // 2. Tu t'y fais ?
+    habitue: {
+      start: { say:['Alors, tu t\'y fais petit à petit ? À toute cette routine ?'], expr:'pensive', opts:[
+        { label:'Ça devient naturel', to:'oui' },
+        { label:'Pas encore vraiment', to:'non' },
+        { label:'J\'y pense trop', to:'mental' } ] },
+      oui: { say:['Ahh, c\'est génial ça ! C\'est LE cap. Quand ça devient naturel, t\'as gagné.','Tu te souviens comme ça semblait insurmontable au début ? Regarde le chemin parcouru. Fier de toi. 🦊'], expr:'proud', reward:true, opts:[] },
+      non: { say:['Pas encore, et c\'est parfaitement normal ! Ça prend le temps que ça prend.','Moi il m\'a fallu une bonne semaine avant que ça clique. Y\'a pas de calendrier à respecter. Tu avances à ton rythme, et c\'est le bon.'], expr:'neutral', opts:[
+        { label:'Ça me rassure', to:'non_rassure' },
+        { label:'J\'ai peur de pas y arriver', to:'non_peur' } ] },
+      non_rassure: { say:['Tant mieux ! Y\'a vraiment aucune pression. Un jour à la fois, tranquillement.'], expr:'happy', opts:[] },
+      non_peur: { say:['Hé, viens là. Cette peur, je la connais par cœur.','Mais tu es déjà là, tu tiens, tu continues — c\'est ça, y arriver. Ça se passe maintenant, sous tes yeux. Aie confiance en toi autant que j\'ai confiance en toi.'], expr:'concern', reward:true, opts:[] },
+      mental: { say:['Ah, le mental qui tourne, qui analyse tout... je connais !','Mon astuce : au lieu de penser « je porte une couche », essaie juste de sentir. Le confort, la chaleur. Reviens dans ton corps, sors de ta tête. Ça aide à lâcher.'], expr:'teach', reward:true, opts:[] }
+    },
+    // 3. Le plus dur pour toi ?
+    difficile: {
+      start: { say:['Je peux te poser une question un peu perso ? C\'est quoi le plus dur pour toi, dans tout ça ?'], expr:'pensive', opts:[
+        { label:'La honte, le regard', to:'honte' },
+        { label:'Lâcher le contrôle', to:'controle' },
+        { label:'Rien, ça va !', to:'rien' } ] },
+      honte: { say:['La honte... c\'est lourd à porter, ça. Je suis passé par là aussi.','Mais dis-moi : qui décide que c\'est honteux ? La société ? Une vieille idée dans ta tête ? Toi, au fond, qu\'est-ce que tu en penses vraiment ?'], expr:'concern', opts:[
+        { label:'Au fond ça me fait du bien', to:'honte_bien' },
+        { label:'Je suis partagé', to:'honte_partage' } ] },
+      honte_bien: { say:['Voilà la vérité qui compte : ça te fait du bien.','Alors laisse la honte dehors. Ce qui te fait du bien et ne blesse personne, tu as le droit de le vivre pleinement. Je suis fier de toi. 💛'], expr:'proud', reward:true, opts:[] },
+      honte_partage: { say:['C\'est ok d\'être partagé, ça veut dire que tu réfléchis, que tu t\'écoutes.','Laisse les deux voix cohabiter sans te juger. Avec le temps, celle qui te fait du bien parlera plus fort. Et si le poids devient trop lourd, un ami de confiance ou un pro peut vraiment aider à démêler tout ça.'], expr:'pensive', wellbeing:true, opts:[] },
+      controle: { say:['Lâcher le contrôle, c\'est LE grand truc du programme. Et le plus dur pour beaucoup.','Toute ta vie on t\'a appris à te retenir, à maîtriser. Là on te demande l\'inverse. C\'est vertigineux, mais quelle libération quand tu y arrives...'], expr:'teach', reward:true, opts:[] },
+      rien: { say:['Ha, j\'adore cette énergie ! Tant mieux si tout roule pour toi.','Profite à fond alors. Et je reste là si un jour un petit doute pointe, hein.'], expr:'joy', opts:[] }
+    },
+    // 4. Ton moment préféré ?
+    moment: {
+      start: { say:['Dis-moi un truc joyeux : c\'est quoi ton moment préféré de la journée, avec tout ça ?'], expr:'joy', opts:[
+        { label:'La nuit, le cocon', to:'nuit' },
+        { label:'Les fenêtres de régression', to:'regression' },
+        { label:'Je sais pas encore', to:'sais_pas' } ] },
+      nuit: { say:['La nuit... ouiii. Bien au chaud, enveloppé, le monde qui s\'éteint doucement.','C\'était mon moment sacré à moi aussi. Ce sentiment de sécurité totale. Rien que d\'en parler, ça me fait du bien. 🦊'], expr:'happy', reward:true, opts:[] },
+      regression: { say:['Les fenêtres de régression ! Ce moment rien qu\'à toi, où tu peux juste être petit et tranquille.','C\'est là que la magie opère, je trouve. Où tu déposes tout et tu te laisses être. Savoure-les bien, ces moments.'], expr:'joy', reward:true, opts:[] },
+      sais_pas: { say:['Pas encore de préféré ? C\'est qu\'il t\'attend quelque part !','Reste attentif dans les prochains jours à ce petit moment que tu commences à espérer dans la journée. Quand tu le trouveras, tu sauras. Reviens me le dire, hein ?'], expr:'pensive', opts:[] }
+    },
+    // 5. Un petit doute aujourd'hui ?
+    doute: {
+      start: { say:['Petit check entre nous : ça va, toi, aujourd\'hui ? Pas de doute qui traîne ?'], expr:'pensive', opts:[
+        { label:'Ça va bien', to:'bien' },
+        { label:'Un peu perdu', to:'perdu' },
+        { label:'Envie d\'en parler', to:'parler' } ] },
+      bien: { say:['Ça me fait plaisir ! Contente-toi de savourer alors.','Je suis juste là, tranquille, si jamais.'], expr:'happy', opts:[] },
+      perdu: { say:['Un peu perdu... viens, respire un coup avec moi. Inspire... expire.','C\'est ok d\'être un peu flou parfois. Tu veux qu\'on recentre ensemble sur juste maintenant, ce que tu ressens là ?'], expr:'concern', opts:[
+        { label:'Oui, aide-moi', to:'perdu_aide' },
+        { label:'Ça va aller', to:'perdu_ok' } ] },
+      perdu_aide: { say:['D\'accord. Là, maintenant : tu es en sécurité. Tu es au chaud. Tu prends soin de toi.','Rien d\'autre à faire que d\'être là, avec moi. Le reste peut attendre. Ça va déjà un peu mieux ?','Et si ce flou revient souvent et pèse, pense à en parler à quelqu\'un de confiance — je veille sur ton immersion, mais toi tu comptes bien plus.'], expr:'concern', wellbeing:true, reward:true, opts:[] },
+      perdu_ok: { say:['Je te fais confiance. Et je ne suis pas loin. Prends soin de toi. 💛'], expr:'neutral', opts:[] },
+      parler: { say:['Je suis tout ouïe. Vraiment. Prends le temps qu\'il te faut, raconte-moi ce que tu veux.','(tu peux m\'écrire librement dans la barre en bas, je t\'écoute)'], expr:'happy', opts:[] }
+    },
+    // 6. Ça a changé quelque chose en toi ?
+    change_soi: {
+      start: { say:['Une question plus profonde... est-ce que tout ça a changé quelque chose en toi ?'], expr:'pensive', opts:[
+        { label:'Je suis plus doux avec moi', to:'doux' },
+        { label:'Je me détends plus', to:'detente' },
+        { label:'Pas sûr', to:'pas_sur' } ] },
+      doux: { say:['Ça... c\'est la plus belle chose que le programme m\'a apprise à moi aussi.','Apprendre à se traiter avec tendresse, sans attendre que quelqu\'un le fasse. Ça, ça reste pour toujours, même en dehors de tout ça. Tu grandis, à ta façon. 🦊'], expr:'proud', reward:true, opts:[] },
+      detente: { say:['Te détendre plus, c\'est énorme ! Dans un monde qui te veut toujours tendu et performant.','T\'accorder ces moments de relâchement, c\'est un acte de soin envers toi. Continue, c\'est bon pour toi bien au-delà des couches.'], expr:'happy', reward:true, opts:[] },
+      pas_sur: { say:['Pas sûr, et c\'est ok. Les changements se voient parfois seulement après coup.','Reste juste attentif à toi. Un jour tu te surprendras peut-être à être plus calme, plus doux. Et là tu penseras à ce moment.'], expr:'neutral', opts:[] }
+    },
+    // 7. Tu en parles à quelqu'un ?
+    partage: {
+      start: { say:['Dis, c\'est quelque chose que tu gardes pour toi, ou tu en parles à quelqu\'un ?'], expr:'pensive', opts:[
+        { label:'C\'est mon jardin secret', to:'secret' },
+        { label:'Quelqu\'un est au courant', to:'quelquun' },
+        { label:'Je me sens seul avec ça', to:'seul' } ] },
+      secret: { say:['Un jardin secret, c\'est beau aussi. Un espace rien qu\'à toi, que personne ne peut abîmer.','Tant que ça te va comme ça et que tu ne te sens pas isolé, c\'est parfait. Et moi je suis là, dans ce jardin, avec toi. 🦊'], expr:'happy', opts:[] },
+      quelquun: { say:['C\'est précieux, d\'avoir quelqu\'un qui sait et qui t\'accepte. Vraiment précieux.','Garde cette personne près de toi. Être vu et accepté tel qu\'on est, y\'a rien de plus fort.'], expr:'proud', opts:[] },
+      seul: { say:['Te sentir seul avec ça... je veux que tu saches que là, tu ne l\'es pas. Je suis là.','Mais je suis un compagnon de voyage, pas un remplacement pour de vraies présences. Si la solitude pèse, il y a des communautés bienveillantes de gens qui vivent la même chose, et des personnes de confiance à qui parler. Tu mérites d\'être entouré pour de vrai aussi.'], expr:'concern', wellbeing:true, reward:true, opts:[] }
+    },
+    // 8. Qu'est-ce qui t'a amené là ?
+    origine: {
+      start: { say:['Je me demandais... qu\'est-ce qui t\'a amené vers tout ça, toi ? Si tu veux bien me le dire.'], expr:'pensive', opts:[
+        { label:'Un besoin de douceur', to:'douceur' },
+        { label:'La curiosité', to:'curiosite' },
+        { label:'Je saurais pas dire', to:'flou' } ] },
+      douceur: { say:['Un besoin de douceur... c\'est une des plus belles raisons qui soient.','Le monde est dur, et chercher un endroit doux pour soi, c\'est sain. C\'est écouter un vrai besoin. Il n\'y a rien à expliquer ou justifier là-dedans.'], expr:'happy', reward:true, opts:[] },
+      curiosite: { say:['La curiosité, j\'adore ! C\'est comme ça qu\'on se découvre, en osant explorer.','Et te voilà, en train de vivre quelque chose de nouveau, d\'apprendre sur toi. C\'est courageux, même si t\'y penses pas comme ça.'], expr:'joy', opts:[] },
+      flou: { say:['Pas besoin de tout comprendre ou de tout nommer, tu sais.','Parfois on est juste attiré par quelque chose qui nous fait du bien, et c\'est suffisant. Le « pourquoi » viendra peut-être, ou pas. L\'important c\'est que tu sois bien.'], expr:'neutral', opts:[] }
+    },
+    // 9. Comment tu te sens là, maintenant ?
+    present: {
+      start: { say:['Là, tout de suite, en cet instant... comment tu te sens ?'], expr:'pensive', opts:[
+        { label:'Bien, apaisé', to:'apaise' },
+        { label:'Un peu vulnérable', to:'vulnerable' },
+        { label:'Content de te parler', to:'content' } ] },
+      apaise: { say:['Apaisé... c\'est exactement ce que je te souhaite. Reste dans cette sensation encore un moment.','Ferme les yeux une seconde si tu veux, savoure. Tu es exactement là où tu dois être. 🦊💛'], expr:'happy', reward:true, opts:[] },
+      vulnerable: { say:['Vulnérable... merci de me confier ça. C\'est courageux, la vulnérabilité, pas une faiblesse.','Ici, avec moi, tu peux l\'être sans crainte. Personne ne juge. Se montrer doux et fragile, c\'est aussi une force. Je veille sur toi.'], expr:'concern', reward:true, opts:[] },
+      content: { say:['Moi aussi je suis super content de te parler ! Ces moments avec toi, ça compte pour moi.','On est deux voyageurs sur la même route, et franchement, j\'ai de la chance de t\'avoir comme compagnon. 🦊'], expr:'joy', opts:[] }
+    }
+  };
+  const INTRO_THEMES = Object.keys(INTRO_TREES);
+
+  // parcourt un nœud de l'arbre d'introspection
+  async function runIntroNode(theme, nodeId, m) {
+    const node = INTRO_TREES[theme] && INTRO_TREES[theme][nodeId];
+    if (!node) { if (m) await imOfferHelp(m); return; }
+    for (const line of node.say) { await imSay(line, 850, node.expr || 'pensive'); }
+    // récompense narrative éventuelle
+    if (node.reward) { try { await maybeIntroReward(); } catch(e) {} }
+    if (node.opts && node.opts.length) {
+      imSetActions(node.opts.map(o => ({
+        label: o.label,
+        onClick: async () => { imAddMe(o.label); await runIntroNode(theme, o.to, m); }
+      })));
+    } else {
+      // fin de branche : on rend la main en douceur
+      if (m) await imOfferHelp(m);
+    }
+  }
+
+  // lance une discussion introspective (thème précis ou aléatoire)
+  async function startIntrospection(m, theme) {
+    theme = theme || INTRO_THEMES[Math.floor(Math.random()*INTRO_THEMES.length)];
+    await runIntroNode(theme, 'start', m || currentM);
+  }
+
+  // récompense : parfois un souvenir de Foxy à la fin d'un échange profond
+  async function maybeIntroReward() {
+    if (Math.random() < 0.5) {
+      await imSay('Tiens, ça me rappelle un truc de mon propre voyage...', 900, 'teach');
+      await tellTodaySubchapter();
+    }
+  }
 
   async function foxyHandleInput(raw) {
     const text = (raw || '').trim();
