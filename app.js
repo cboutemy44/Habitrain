@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '7.1';
+  const APP_VERSION = '7.4';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -181,7 +181,7 @@
   }
 
   // ---- Sheet "scènes de change" (ordre propre, indépendant des expressions) ----
-  const CHANGE_CELLS = { start:0, remove:1, wipe:3, skin:9, cream:4, fresh:6, barriers:7, clean:14 };
+  const CHANGE_CELLS = { prep:0, remove:1, place:8, front:6, tabLow:7, tabHigh:6, tabRight:7, done:14 };
   function positionChangeCell(el, idx, sizePx) {
     if (!el) return;
     const col = idx % 4, row = Math.floor(idx / 4);
@@ -191,16 +191,16 @@
     el.style.backgroundPosition = (-(col*sizePx)) + 'px ' + (-(row*sizePx)) + 'px';
   }
 
-  // Déroulé conversationnel du change guidé (blocs qui s'enchaînent)
+  // Change guidé « Foxy se met sa couche » — guide des 4 languettes (8 étapes)
   const CHANGE_STEPS = [
-    { cell:'start',    t:'Installe-toi bien sur ton tapis de change, on va faire ça tranquille tous les deux.' },
-    { cell:'remove',   t:'On retire la couche : roule-la vers l\'intérieur et mets-la de côté.' },
-    { cell:'wipe',     t:'Essuie bien, du plus propre vers le moins propre. Voilà, tout doux.' },
-    { cell:'skin',     t:'Petit coup d\'œil à ta peau : pas de rougeur ? Si ça tire, on met plus de crème.' },
-    { cell:'cream',    t:'Une bonne couche de crème barrière sur les zones sensibles. Ça protège pour la journée.' },
-    { cell:'fresh',    t:'Couche fraîche dessous, bien centrée. On y est presque !' },
-    { cell:'barriers', t:'Ajuste bien les barrières aux cuisses — c\'est LE secret anti-fuite, crois-moi.' },
-    { cell:'clean',    t:'Et voilà, tout propre ! Ça brille. Franchement, bien joué mec.' }
+    { cell:'prep',    t:'D\'abord, déplie les 4 languettes en éventail. Vérifie qu\'aucune n\'est collée par accident — une languette mal dépliée, et la couche fait des plis.' },
+    { cell:'remove',  t:'Défais les languettes de l\'ancienne couche, retire-la et enlève ta grenouillère. Roule la couche usagée et jette-la à la poubelle.' },
+    { cell:'place',   t:'Allonge-toi sur le dos, soulève le bassin et glisse la couche fraîche sous tes fesses. Centre bien la partie arrière — si elle est trop basse, ça fuira derrière.' },
+    { cell:'front',   t:'Remonte le devant jusqu\'à ce que la ceinture soit juste sous le nombril. Assure-toi que les bords sont bien symétriques des deux côtés.' },
+    { cell:'tabLow',  t:'Languette inférieure gauche : tire-la vers le bas et vers l\'extérieur (environ 45°), puis colle-la fermement sur le devant. C\'est elle qui tient autour des cuisses.' },
+    { cell:'tabHigh', t:'Languette supérieure gauche : tire-la vers le haut et vers l\'extérieur (environ 30°). C\'est elle qui ajuste la taille. Laisse environ 2 doigts d\'espace entre les deux languettes.' },
+    { cell:'tabRight',t:'Maintenant l\'autre côté : d\'abord la languette basse, puis la haute. Vérifie que les deux côtés sont bien symétriques — si une languette est plus haute que l\'autre, la couche part de travers.' },
+    { cell:'done',    t:'Vérifie qu\'un doigt passe à la taille et que les élastiques épousent les cuisses sans serrer. Puis remets ta grenouillère propre. Et voilà... parfait ! 🦊✨' }
   ];
 
   // typewriter simple pour la ligne de pose
@@ -216,10 +216,19 @@
   }
   function poseType(text, done) { typeLine(document.getElementById('poseLine'), text, done); }
 
+  // affiche la vignette de l'étape depuis la planche guide-steps.png (4×2, cellule 320)
+  function positionGuideStep(el, stepIdx) {
+    if (!el) return;
+    const col = stepIdx % 4, row = Math.floor(stepIdx / 4);
+    el.style.backgroundImage = "url('guide-steps.png')";
+    el.style.backgroundSize = '400% 200%'; // 4 colonnes, 2 lignes
+    el.style.backgroundPosition = (col * (100/3)) + '% ' + (row * 100) + '%';
+  }
+
   function runChangeStep(i) {
     const step = CHANGE_STEPS[i];
     const last = i === CHANGE_STEPS.length - 1;
-    positionChangeCell(document.getElementById('poseIcon'), CHANGE_CELLS[step.cell], 76);
+    positionGuideStep(document.getElementById('poseGuide'), i);
     document.getElementById('poseStepNum').textContent = 'Étape ' + (i+1) + ' / ' + CHANGE_STEPS.length;
     const acts = document.getElementById('poseActs');
     acts.innerHTML = '';
@@ -697,20 +706,59 @@
     document.getElementById('imStatus').textContent = m.eyebrow + ' · ' + p.status + outfitTxt;
 
     // salutation + question selon le persona
+    // --- La nuit, Foxy dort : on le réveille en douceur ---
+    if (voiceMode === 'foxy' && m.key === 'nuit') {
+      await imSay('Zzz... Zzz... 😴', 500, 'sleep');
+      await imSay('Mmh... *se réveille doucement* ... Oh, coucou toi. Tu m\'as réveillé. Tout va bien ?', 900, 'relaxed');
+      await imSay('Il fait nuit, tu sais. Tu as besoin de quelque chose, ou juste envie de parler un peu avec moi ?', 900, 'pensive');
+      buildMomentReplies(m, done[m.key]);
+      runQuestBeat(m);
+      return;
+    }
+
     const opener = voiceMode === 'foxy' ? foxyOpener(m) : (m.titi ? m.titi : m.title);
     await imSay(opener, 500, pickExpr('fun'));
     if (done[m.key]) {
+      // point déjà fait → Foxy demande simplement l'état de la couche (rien de spécial)
+      if (voiceMode === 'foxy') {
+        await imSay('On a déjà fait notre point tout à l\'heure ! ' + foxyAfter(m), 800, pickExpr('positive'));
+        await imSay('Dis-moi juste, ta couche elle en est où là, maintenant ?', 800, 'pensive');
+        buildDiaperStateReplies(m);
+        runQuestBeat(m);
+        return;
+      }
       await imSay(foxyOrCare(m, 'q'), 700, pickExpr('think'));
-      await imSay(voiceMode === 'foxy'
-        ? 'Ah mais on a déjà fait le point tout à l\'heure ! ' + foxyAfter(m)
-        : 'On a déjà fait notre petit point tout à l\'heure. ' + (m.afteri || m.after), 800, pickExpr('positive'));
+      await imSay('On a déjà fait notre petit point tout à l\'heure. ' + (m.afteri || m.after), 800, pickExpr('positive'));
       buildMomentReplies(m, true);
-      if (voiceMode === 'foxy') runQuestBeat(m);
       return;
     }
     await imSay(foxyOrCare(m, 'q'), 900, pickExpr('think'));
     buildMomentReplies(m, false);
     if (voiceMode === 'foxy') runQuestBeat(m);
+  }
+
+  // Réponses rapides sur l'état de la couche (quand rien de spécial à faire)
+  function buildDiaperStateReplies(m) {
+    const acts = imActions(); acts.innerHTML = '';
+    const opts = [
+      { label:'💧 Bien mouillée', cls:'g', result:'etat_mouille',
+        rep:'Bien mouillée, nickel ! Tu te laisses aller comme il faut, c\'est ça le progrès. 👏' },
+      { label:'☀️ Encore sèche', cls:'a', result:'etat_sec',
+        rep:'Encore sèche ? Laisse-toi aller quand ça vient, hein. Pas de pression, ça viendra en douceur.' },
+      { label:'🌊 Saturée', cls:'c', result:'etat_sature',
+        rep:'Saturée ? Faut changer bientôt alors ! Dis-moi quand tu veux qu\'on s\'en occupe ensemble.' }
+    ];
+    opts.forEach(o => {
+      const b = document.createElement('button'); b.className = o.cls; b.textContent = o.label;
+      b.addEventListener('click', async () => {
+        imAddMe(o.label);
+        await saveCheck(o.result, 'chat_'+m.key);
+        await imSay(o.rep, 800, o.result==='etat_mouille'?'happy':(o.result==='etat_sature'?'surprised':'pensive'));
+        try { await renderSince(); } catch(e){}
+        await imOfferHelp(m);
+      });
+      acts.appendChild(b);
+    });
   }
 
   // Beat narratif : débloque un chapitre si palier franchi, propose le rituel du jour
@@ -1457,19 +1505,54 @@
     return latest;
   }
 
-  function sinceComment(hours, isNight) {
-    // renvoie {expr, cls, say}
+  function sinceComment(hours, isNight, ctx) {
     if (isNight) {
-      if (hours < 9) return { expr:'sleep', cls:'ok', say:'Couche de nuit, tout roule. Dors tranquille, je veille.' };
-      if (hours < 11) return { expr:'relaxed', cls:'ok', say:'Belle nuit ! Bientôt l\'heure du change du matin.' };
-      return { expr:'surprised', cls:'long', say:'Ça fait une longue nuit ! On change dès le réveil, hein.' };
+      return { expr:'sleep', cls:'ok', say:'Foxy dort à poings fermés... la couche de nuit fait son travail. Chut. 😴' };
     }
-    if (hours < 1)   return { expr:'happy',    cls:'ok',   say:'Couche toute fraîche ! Nickel, profite.' };
-    if (hours < 2.5) return { expr:'joy',      cls:'ok',   say:'Ça roule, ta couche est encore au top.' };
-    if (hours < 4)   return { expr:'neutral',  cls:'ok',   say:'Tranquille, on est dans le bon rythme.' };
-    if (hours < 5)   return { expr:'pensive',  cls:'mid',  say:'Commence à faire un moment... garde un œil dessus.' };
-    if (hours < 6)   return { expr:'concern',  cls:'mid',  say:'Ça fait un bail là. Pense à checker, un change serait pas mal.' };
-    return { expr:'surprised', cls:'long', say:'Oh là, ça fait trop longtemps ! On change maintenant, viens.' };
+    ctx = ctx || {};
+    // ===== ALERTES (toujours prioritaires) =====
+    // couche sèche depuis plus de 3h de port → travail du lâcher-prise
+    if (ctx.state === 'sec' && hours != null && hours >= 3) {
+      return { expr:'concern', cls:'long',
+        say:'Dis donc... ta couche est encore sèche après tout ce temps. Tu te retiens sans t\'en rendre compte. Rappelle-toi : ici on apprend à lâcher prise, pas à se contrôler. Détends-toi, laisse venir quand ça vient. Tu es en sécurité, je suis là. 🦊' };
+    }
+    // change obligatoire dépassé de 15 min et NON fait → inquiet
+    if (ctx.overdue) {
+      return { expr:'concern', cls:'long',
+        say:'Hé... l\'heure de ton change est passée et tu ne l\'as pas encore fait. Tout va bien ? Va vite t\'en occuper, je m\'inquiète un peu pour ta peau !' };
+    }
+    // ===== COMPORTEMENT NORMAL =====
+    // 1h30 ou moins avant le prochain change → excité
+    if (ctx.minToNext != null && ctx.minToNext <= 90) {
+      return { expr:'joy', cls:'mid',
+        say:'On approche de l\'heure du change, j\'ai hâte ! Prépare-toi, ça arrive bientôt. 🎉' };
+    }
+    // fourchette normale → content
+    return { expr:'happy', cls:'ok',
+        say:'Tout roule, on est dans le bon rythme ! Ta couche fait son job, profite bien.' };
+  }
+
+  // calcule le contexte des piliers : proximité du prochain + retard réel (non fait)
+  async function pillarContext() {
+    const PILIERS = [ { m:9*60, key:'c0900' }, { m:16*60, key:'c1600' }, { m:22*60+30, key:'c2230' } ];
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    const next = PILIERS.find(p => p.m > nowMin);
+    const prev = [...PILIERS].reverse().find(p => p.m <= nowMin);
+    const minToNext = next != null ? next.m - nowMin : (24*60 - nowMin) + PILIERS[0].m;
+    let overdue = false;
+    if (prev != null) {
+      const since = nowMin - prev.m;
+      if (since >= 15 && since <= 120) {
+        // le pilier est-il déjà fait aujourd'hui ?
+        try {
+          const r = await window.storage.get('slotdone:'+todayStr());
+          const done = (r && r.value) ? JSON.parse(r.value) : {};
+          overdue = !done[prev.key];
+        } catch(e) { overdue = true; }
+      }
+    }
+    return { minToNext, overdue };
   }
 
   async function renderSince() {
@@ -1493,8 +1576,10 @@
     const now = new Date();
     const hours = (now - last) / 3600000;
     const h = Math.floor(hours), min = Math.floor((hours - h) * 60);
-    const isNight = last.getHours() >= 21 || last.getHours() < 6 || now.getHours() >= 23 || now.getHours() < 7;
-    const c = sinceComment(hours, isNight);
+    const isNight = now.getHours() >= 23 || now.getHours() < 7;
+    const ctx = await pillarContext();
+    ctx.state = await currentDiaperState(last);
+    const c = sinceComment(hours, isNight, ctx);
     positionFoxyCell(portrait, c.expr, 88);
     timeEl.className = 'since-time ' + c.cls;
     timeEl.textContent = (h > 0 ? h + 'h' + (min < 10 ? '0'+min : min) : min + ' min');
@@ -1503,7 +1588,7 @@
   }
 
   // statut de couche = dernier état rapporté (etat_*/sec/mouille/sature), postérieur au dernier change
-  async function renderDiaperState(lastChange) {
+  async function currentDiaperState(lastChange) {
     const stateResults = { etat_sec:'sec', etat_mouille:'mouille', etat_sature:'sature', sec:'sec', mouille:'mouille', sature:'sature' };
     let latest = null, latestT = null;
     for (let i = 0; i < 2; i++) {
@@ -1516,8 +1601,12 @@
         }
       });
     }
-    // si un change a eu lieu APRÈS le dernier état rapporté → couche fraîche = sèche
     if (lastChange && (!latestT || lastChange >= latestT)) latest = 'sec';
+    return latest; // 'sec' | 'mouille' | 'sature' | null
+  }
+
+  async function renderDiaperState(lastChange) {
+    const latest = await currentDiaperState(lastChange);
     if (!latest) return '<span class="lbl" style="font-size:11.5px;font-weight:700;color:var(--muted)">Statut inconnu — fais un check</span>';
     const LABEL = { sec:'☀️ Couche sèche', mouille:'💧 Couche mouillée', sature:'🌊 Couche saturée' };
     return '<span class="lbl" style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em">Statut&nbsp;: </span><span class="pill '+latest+'">'+LABEL[latest]+'</span>';
@@ -2175,7 +2264,7 @@
 
   function startChange(ctx, skipState) {
     changeCtx = ctx || 'check';
-    positionChangeCell(document.getElementById('chIcon'), CHANGE_CELLS.start, 76);
+    positionChangeCell(document.getElementById('chIcon'), CHANGE_CELLS.prep, 76);
     // Si l'état a déjà été déclaré (au check), on va directement au guide de pose.
     if (skipState) {
       document.getElementById('modalCheck').style.display = 'none';

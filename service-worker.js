@@ -1,5 +1,5 @@
 // Service worker Habitrain — cache app-shell pour fonctionnement hors-ligne.
-const CACHE = 'habitrain-v7.1';
+const CACHE = 'habitrain-v7.4';
 const ASSETS = [
   './',
   './index.html',
@@ -12,7 +12,8 @@ const ASSETS = [
   './foxy-blue.png',
   './foxy-blue2.png',
   './foxy-diaper.png',
-  './foxy-changescene.png'
+  './foxy-changescene.png',
+  './guide-steps.png'
 ];
 
 self.addEventListener('install', (event) => {
