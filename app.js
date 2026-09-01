@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '7.4';
+  const APP_VERSION = '7.5';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -244,19 +244,35 @@
     });
   }
 
+  // pilier dont la fenêtre couvre l'heure actuelle (pour compter un change manuel)
+  function pillarSlotForNow() {
+    const PILIERS = [ { key:'c0900', m:9*60 }, { key:'c1600', m:16*60 }, { key:'c2230', m:22*60+30 } ];
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    // fenêtre : de 30 min avant à 2h après l'heure du pilier
+    return PILIERS.find(p => nowMin >= p.m - 30 && nowMin <= p.m + 120) || null;
+  }
+
+  async function markSlotDoneKey(key) {
+    if (!key) return;
+    try {
+      const r = await window.storage.get('slotdone:'+todayStr());
+      const done = (r && r.value) ? JSON.parse(r.value) : {};
+      done[key] = true;
+      await window.storage.set('slotdone:'+todayStr(), JSON.stringify(done));
+    } catch(e) {}
+  }
+
   async function finishChange() {
     await saveCheck('change_fait', 'change_'+(changeCtx||'check'));
-    if (activeSlotKey) {
-      try {
-        const r = await window.storage.get('slotdone:'+todayStr());
-        const done = (r && r.value) ? JSON.parse(r.value) : {};
-        done[activeSlotKey] = true;
-        await window.storage.set('slotdone:'+todayStr(), JSON.stringify(done));
-      } catch(e) {}
-      activeSlotKey = null;
-    }
+    // marque le créneau : celui du popup s'il existe, sinon le pilier dont on est dans la fenêtre (change manuel)
+    let slotKey = activeSlotKey;
+    if (!slotKey) { const p = pillarSlotForNow(); if (p) slotKey = p.key; }
+    await markSlotDoneKey(slotKey);
+    activeSlotKey = null;
     closeCheck();
     try { await renderCheckStat(); } catch(e) {}
+    try { await renderSince(); } catch(e) {}
   }
   // fabrique un dataURL d'une cellule (pour l'icône de notification)
   function foxyCellDataURL(expr, size) {
@@ -2201,7 +2217,7 @@
       // change imposé : direct au flux guidé
       document.getElementById('dueText').textContent = 'C\'est l\'heure de ton change, viens on s\'en occupe étape par étape !';
       addBtn(acts, 'ok', '🦊 Faire le change avec Foxy', () => startChange('pilier'));
-      addBtn(acts, 'adj', 'Plus tard', () => { activeSlotKey = null; closeCheck(); });
+      addBtn(acts, 'adj', 'Plus tard', () => { dueSnooze[slot.key] = Date.now() + 10*60000; activeSlotKey = null; closeCheck(); });
     } else {
       // check : on reporte d'abord l'état de la couche
       document.getElementById('dueText').textContent = 'Petit check ! Ta couche, elle est comment ?';
@@ -2223,7 +2239,7 @@
         await saveCheck('etat_sature', 'check_'+slot.key);
         startChange('check', true);
       });
-      addBtn(acts, 'adj', 'Plus tard', () => { activeSlotKey = null; closeCheck(); });
+      addBtn(acts, 'adj', 'Plus tard', () => { dueSnooze[slot.key] = Date.now() + 10*60000; activeSlotKey = null; closeCheck(); });
     }
   }
 
@@ -3129,6 +3145,45 @@
   document.querySelectorAll('#debugCard [data-vm]').forEach(btn => {
     btn.addEventListener('click', () => setVoiceMode(btn.dataset.vm));
   });
+  // forcer un pilier maintenant (ouvre le change guidé du pilier)
+  document.querySelectorAll('#debugCard [data-force]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const labels = { c0900:'Change du matin', c1600:'Change de sortie de sieste', c2230:'Change de nuit' };
+      popChangeDue({ key: btn.dataset.force, m:0, ctx:'pilier', label: labels[btn.dataset.force] });
+    });
+  });
+  // nettoyage des tests du jour
+  function dbgFlash(msg) {
+    const f = document.getElementById('dbgFlash'); if (!f) return;
+    f.textContent = msg; setTimeout(() => f.textContent = '', 1800);
+  }
+  document.getElementById('dbgClearChanges').addEventListener('click', async () => {
+    const date = todayStr();
+    try {
+      // retire les change_fait du jour + réinitialise les piliers faits
+      const r = await window.storage.get('check:'+date);
+      let list = (r && r.value) ? JSON.parse(r.value) : [];
+      list = list.filter(c => c.result !== 'change_fait');
+      await window.storage.set('check:'+date, JSON.stringify(list));
+      await window.storage.delete('slotdone:'+date);
+      dueSnooze = {};
+    } catch(e) {}
+    dbgFlash('🗑️ Changes du jour effacés');
+    try { await refresh(); } catch(e) {}
+  });
+  document.getElementById('dbgClearChecks').addEventListener('click', async () => {
+    const date = todayStr();
+    try {
+      // retire tous les états/checks/alertes du jour (garde les change_fait)
+      const r = await window.storage.get('check:'+date);
+      let list = (r && r.value) ? JSON.parse(r.value) : [];
+      list = list.filter(c => c.result === 'change_fait');
+      await window.storage.set('check:'+date, JSON.stringify(list));
+      dueSnooze = {};
+    } catch(e) {}
+    dbgFlash('🗑️ Checks/alertes du jour effacés');
+    try { await refresh(); } catch(e) {}
+  });
 
   // init
   (async function() {
@@ -3193,7 +3248,41 @@
       // sinon, éventuellement une vérif surprise (si activée dans les réglages)
       setTimeout(() => popCheck(), 700);
     }
+    // vérif périodique du change dû (persiste tant que non fait, avec snooze)
+    setInterval(checkDueChangePeriodic, 60000);
   })();
+
+  // Rappel de change persistant : re-propose tant que le pilier n'est pas fait
+  let dueSnooze = {}; // key -> timestamp jusqu'auquel on ne re-propose pas
+  async function checkDueChangePeriodic() {
+    if (document.getElementById('overlay').classList.contains('show')) return; // déjà une modale ouverte
+    const CHANGE_SLOTS = [
+      { key:'c0900', m:9*60,     ctx:'pilier', label:'Change du matin' },
+      { key:'c1130', m:11*60+30, ctx:'check',  label:'Check + 1er biberon' },
+      { key:'c1330', m:13*60+30, ctx:'check',  label:'Check du déjeuner' },
+      { key:'c1600', m:16*60,    ctx:'pilier', label:'Change de sortie de sieste' },
+      { key:'c1930', m:19*60+30, ctx:'check',  label:'Check du dîner' },
+      { key:'c2230', m:22*60+30, ctx:'pilier', label:'Change de nuit' }
+    ];
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    // un pilier reste "dû" de son heure jusqu'à +2h (les checks : fenêtre courte de 45 min)
+    let due = null;
+    for (const s of CHANGE_SLOTS) {
+      const window = (s.ctx === 'pilier') ? 120 : 45;
+      if (nowMin >= s.m && nowMin <= s.m + window) { due = s; break; }
+    }
+    if (!due) return;
+    // déjà fait ?
+    try {
+      const r = await window.storage.get('slotdone:'+todayStr());
+      const done = (r && r.value) ? JSON.parse(r.value) : {};
+      if (done[due.key]) return;
+    } catch(e) {}
+    // snoozé (Plus tard récent) ?
+    if (dueSnooze[due.key] && Date.now() < dueSnooze[due.key]) return;
+    popChangeDue(due);
+  }
 
   // Enregistrement du service worker (mode hors-ligne / installable)
   if ('serviceWorker' in navigator) {

@@ -62,6 +62,20 @@
         <button class="settings-toggle-btn" data-vm="foxy">🦊 Foxy</button>
       </div>
     </div>
+    <div class="set-cat"><h4>Forcer un pilier maintenant</h4>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="settings-toggle-btn" data-force="c0900">🔑 Matin (9h)</button>
+        <button class="settings-toggle-btn" data-force="c1600">🔑 Sieste (16h)</button>
+        <button class="settings-toggle-btn" data-force="c2230">🔑 Nuit (22h30)</button>
+      </div>
+    </div>
+    <div class="set-cat"><h4>Nettoyage des tests (aujourd'hui)</h4>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="settings-toggle-btn" id="dbgClearChanges">🗑️ Effacer changes du jour</button>
+        <button class="settings-toggle-btn" id="dbgClearChecks">🗑️ Effacer checks/alertes du jour</button>
+      </div>
+      <div class="saved-flash" id="dbgFlash"></div>
+    </div>
     <div class="set-note">Ces réglages sont là pour tester le rendu. La tenue reste celle choisie jusqu'à ce que tu en tires une autre ou changes de jour.</div>
   </div>
 
