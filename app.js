@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '8.5';
+  const APP_VERSION = '8.7';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -264,8 +264,25 @@
   }
 
   async function finishChange() {
-    await saveCheck('change_fait', 'change_'+(changeCtx||'check'));
-    // marque le créneau : celui du popup s'il existe, sinon le pilier dont on est dans la fenêtre (change manuel)
+    // ce change requiert-il une preuve par scan ?
+    let needScan = false;
+    try {
+      const QR = window.HabitrainQR;
+      if (QR) {
+        const isPilier = (changeCtx === 'pilier') || !!pillarSlotForNow();
+        needScan = await QR.actionRequiresScan(isPilier ? 'change_pilier' : 'change_tous');
+      }
+    } catch(e) {}
+    if (needScan) {
+      // propose le scan ; secours = valider sans preuve
+      const proceed = (proof) => { finalizeChange(proof); };
+      showProofPrompt('change', proceed);
+      return;
+    }
+    await finalizeChange(true /* pas de scan requis = considéré validé */);
+  }
+  async function finalizeChange(proof) {
+    await saveCheck(proof ? 'change_fait' : 'change_fait_sanspreuve', 'change_'+(changeCtx||'check'));
     let slotKey = activeSlotKey;
     if (!slotKey) { const p = pillarSlotForNow(); if (p) slotKey = p.key; }
     await markSlotDoneKey(slotKey);
@@ -273,6 +290,30 @@
     closeCheck();
     try { await renderCheckStat(); } catch(e) {}
     try { await renderSince(); } catch(e) {}
+  }
+  // petite invite : scanner pour valider, ou valider sans preuve
+  function showProofPrompt(kind, done) {
+    const QR = window.HabitrainQR;
+    const expected = kind === 'change' ? 'change_pilier' : kind;
+    // on réutilise la popup Foxy pour l'invite
+    foxyPopShow('Scanne ton QR pour valider — c\'est ta preuve que tu l\'as bien fait ! 🦊', 'joy', [
+      { label:'📷 Scanner', onClick:() => {
+        foxyPopHide();
+        QR.startScan(null, (k) => {
+          // accepte le QR de change (pilier ou tous)
+          if (k === 'change_pilier' || k === 'change_tous') { done(true); }
+          else { foxyPopShow('Hmm, c\'est pas le bon QR ça ! Réessaie ou valide sans preuve.', 'pensive', proofButtons(kind, done)); }
+        });
+      }},
+      { soft:true, label:'Valider sans preuve', onClick:() => { foxyPopHide(); done(false); } }
+    ]);
+  }
+  function proofButtons(kind, done) {
+    const QR = window.HabitrainQR;
+    return [
+      { label:'📷 Rescanner', onClick:() => { foxyPopHide(); QR.startScan(null, (k) => { if (k) done(true); else done(false); }); } },
+      { soft:true, label:'Valider sans preuve', onClick:() => { foxyPopHide(); done(false); } }
+    ];
   }
   // fabrique un dataURL d'une cellule (pour l'icône de notification)
   function foxyCellDataURL(expr, size) {
@@ -1750,7 +1791,7 @@
       const d = new Date(); d.setDate(d.getDate()-i);
       const list = await getChecks(d.toISOString().slice(0,10));
       list.forEach(c => {
-        if (c.result === 'change_fait' && c.t) {
+        if ((c.result === 'change_fait' || c.result === 'change_fait_sanspreuve') && c.t) {
           const t = new Date(c.t);
           if (!latest || t > latest) latest = t;
         }
@@ -1897,7 +1938,7 @@
     for (const d of days) {
       const list = await getChecks(d);
       list.forEach(c => {
-        if (c.result === 'change_fait' && c.t) changes.push(new Date(c.t));
+        if ((c.result === 'change_fait' || c.result === 'change_fait_sanspreuve') && c.t) changes.push(new Date(c.t));
       });
     }
     changes.sort((a,b) => a - b);
@@ -2845,8 +2886,7 @@
     return {
       nuit: pickOne(WARDROBE.nuit),
       jour: pickOne(WARDROBE.jour),
-      sieste: pickOne(WARDROBE.sieste),
-      cache: Math.random() < 0.5   // cache-couche Safari : parfois oui, parfois non
+      sieste: pickOne(WARDROBE.sieste)
     };
   }
 
@@ -2875,13 +2915,10 @@
       row.innerHTML = '<div class="ic">'+c.ic+'</div><div class="body"><div class="moment">'+c.moment+(c.active?' · maintenant':'')+'</div><div class="wear">'+c.wear+'</div></div>';
       list.appendChild(row);
     });
-    // note cache-couche + sieste
+    // note sieste
     const note = document.getElementById('outfitNote');
     note.style.display = '';
-    note.innerHTML = (o.cache
-      ? '🩲 <b>Cache-couche Rearz Safari</b> aujourd\'hui, par-dessus la couche en journée.'
-      : '🩲 Pas de cache-couche aujourd\'hui.')
-      + ' &nbsp;·&nbsp; 😴 Sieste : tu peux repasser en tenue de nuit pour le confort.';
+    note.innerHTML = '😴 Sieste : tu peux repasser en tenue de nuit pour le confort.';
     document.getElementById('outfitOnce').style.display = '';
   }
 
@@ -3419,6 +3456,78 @@
     card.style.display = show ? '' : 'none';
     if (show) card.scrollIntoView({behavior:'smooth', block:'start'});
   });
+
+  // ==== Menu QR codes ====
+  const QR = window.HabitrainQR;
+  document.getElementById('openQr').addEventListener('click', async () => {
+    const card = document.getElementById('qrCard');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) { await renderQrConfig(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
+  async function renderQrConfig() {
+    if (!QR) return;
+    const prefs = await QR.getQrPrefs();
+    // toggles des actions
+    const box = document.getElementById('qrActions'); box.innerHTML = '';
+    QR.QR_ACTIONS.forEach(a => {
+      const on = !!prefs.enabled[a.id];
+      const row = document.createElement('div'); row.className = 'set-row';
+      row.innerHTML = '<div class="info"><div class="n">'+a.label+'</div></div>';
+      const sw = document.createElement('div'); sw.className = 'switch'+(on?' on':''); sw.innerHTML='<div class="knob"></div>';
+      sw.addEventListener('click', async () => {
+        const p = await QR.getQrPrefs(); p.enabled[a.id] = !p.enabled[a.id];
+        if (!p.enabled[a.id]) delete p.enabled[a.id];
+        await QR.saveQrPrefs(p); renderQrConfig();
+      });
+      row.appendChild(sw); box.appendChild(row);
+    });
+    // switch unlock
+    const us = document.getElementById('qrUnlockSwitch');
+    us.classList.toggle('on', !!prefs.unlock);
+    us.onclick = async () => { const p = await QR.getQrPrefs(); p.unlock = !p.unlock; await QR.saveQrPrefs(p); renderQrConfig(); };
+    // génération
+    const gl = document.getElementById('qrGenList'); gl.innerHTML = '';
+    const toGen = QR.QR_ACTIONS.concat([{ id:'unlock', label:'Bracelet de déverrouillage' }]);
+    for (const item of toGen) {
+      const wrap = document.createElement('div'); wrap.className = 'qrgen-item';
+      const cv = document.createElement('canvas');
+      const txt = await QR.payloadFor(item.id);
+      QR.drawQR(cv, txt, 140);
+      const lbl = document.createElement('div'); lbl.innerHTML = '<div class="n">'+item.label+'</div>';
+      wrap.appendChild(cv); wrap.appendChild(lbl);
+      gl.appendChild(wrap);
+    }
+  }
+  // annulation du scan
+  document.getElementById('qrScanCancel').addEventListener('click', () => { if (QR) QR.stopScan(); });
+
+  // ==== Verrouillage par bracelet ====
+  async function checkQrLock() {
+    if (!QR) return;
+    const prefs = await QR.getQrPrefs();
+    if (!prefs.unlock) return; // pas activé
+    // déjà déverrouillé cette session ?
+    if (sessionUnlocked) return;
+    showQrLock();
+  }
+  let sessionUnlocked = false;
+  function showQrLock() {
+    const lock = document.getElementById('qrLock');
+    lock.style.display = 'flex';
+    document.getElementById('qrUnlockBtn').onclick = () => {
+      QR.startScan('unlock', (kind) => {
+        if (kind === 'unlock') { sessionUnlocked = true; lock.style.display = 'none'; }
+      });
+    };
+    // secours discret : 3 tapes sur le titre
+    let taps = [];
+    const title = document.getElementById('qrLockTitle');
+    title.onclick = () => {
+      const now = Date.now(); taps.push(now); taps = taps.filter(x => now - x < 1200);
+      if (taps.length >= 3) { taps = []; sessionUnlocked = true; lock.style.display = 'none'; }
+    };
+  }
   function saveFlash(msg, ok) {
     const f = document.getElementById('saveFlash'); if (!f) return;
     f.style.color = ok === false ? 'var(--coral)' : 'var(--green)';
@@ -3559,7 +3668,7 @@
       // retire les change_fait du jour + réinitialise les piliers faits
       const r = await window.storage.get('check:'+date);
       let list = (r && r.value) ? JSON.parse(r.value) : [];
-      list = list.filter(c => c.result !== 'change_fait');
+      list = list.filter(c => c.result !== 'change_fait' && c.result !== 'change_fait_sanspreuve');
       await window.storage.set('check:'+date, JSON.stringify(list));
       await window.storage.delete('slotdone:'+date);
       dueSnooze = {};
@@ -3573,7 +3682,7 @@
       // retire tous les états/checks/alertes du jour (garde les change_fait)
       const r = await window.storage.get('check:'+date);
       let list = (r && r.value) ? JSON.parse(r.value) : [];
-      list = list.filter(c => c.result === 'change_fait');
+      list = list.filter(c => c.result === 'change_fait' || c.result === 'change_fait_sanspreuve');
       await window.storage.set('check:'+date, JSON.stringify(list));
       dueSnooze = {};
     } catch(e) {}
@@ -3595,6 +3704,7 @@
     refreshHeadFoxy();
     await loadVoice();
     await loadPause();
+    try { await checkQrLock(); } catch(e) {}
     scheduleNotifications();
     await renderCheckStat();
     await renderMoment();

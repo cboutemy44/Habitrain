@@ -138,7 +138,35 @@
   .empty-msg { color: var(--muted); font-size: 13px; text-align: center; padding: 8px 0; font-weight: 600; }
   .mini { font-size: 11.5px; color: var(--muted); font-weight: 700; }
 
-  /* ===== Popup Foxy (pause / reprise) ===== */
+  /* ===== Scanner QR & verrouillage ===== */
+  #qrScanOverlay {
+    position:fixed; inset:0; z-index:10001; background:#000;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+  }
+  #qrVideo { width:100%; height:100%; object-fit:cover; position:absolute; inset:0; }
+  #qrScanOverlay .qr-frame {
+    position:relative; z-index:2; width:230px; height:230px; border:3px solid #fff;
+    border-radius:20px; box-shadow:0 0 0 2000px rgba(0,0,0,.45);
+  }
+  #qrScanHint { position:relative; z-index:2; color:#fff; font-weight:800; margin-top:22px; font-size:15px; text-align:center; padding:0 24px; }
+  #qrScanCancel {
+    position:relative; z-index:2; margin-top:20px; font-family:inherit; font-size:14.5px; font-weight:800;
+    padding:12px 24px; border:none; border-radius:13px; background:#fff; color:#1c1c1e; cursor:pointer;
+  }
+  #qrLock {
+    position:fixed; inset:0; z-index:9998; background:#f7f7f8;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .qrlock-inner { text-align:center; padding:24px; }
+  .qrlock-title { font-size:30px; font-weight:800; color:#1c1c1e; user-select:none; }
+  .qrlock-sub { font-size:14px; color:#8a8a8e; margin:4px 0 24px; }
+  #qrUnlockBtn { font-family:inherit; font-size:15px; font-weight:800; padding:14px 22px; border:none; border-radius:14px; background:#d9743a; color:#fff; cursor:pointer; }
+  /* génération QR */
+  .qrgen-item { display:flex; align-items:center; gap:12px; padding:10px 0; border-top:1px solid var(--line); }
+  .qrgen-item:first-child { border-top:none; }
+  .qrgen-item canvas { border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .qrgen-item .n { font-size:13.5px; font-weight:800; color:var(--ink); }
+
   .foxypop-overlay {
     position:fixed; inset:0; z-index:10000; background:rgba(60,40,30,.5);
     display:flex; align-items:center; justify-content:center; padding:22px; backdrop-filter:blur(3px);
@@ -526,7 +554,7 @@
   /* ===== Mode immersif : conversation plein cadre ===== */
   body.immersive { background: linear-gradient(180deg,#F5EEF6,#EEF0FA) !important; }
   /* on masque tout le reporting */
-  body.immersive .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard):not(#questCard):not(#saveCard) { display:none !important; }
+  body.immersive .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard):not(#questCard):not(#saveCard):not(#qrCard) { display:none !important; }
   body.immersive #verBadge { opacity:0.5; }
 
   #imChat { display:none; }

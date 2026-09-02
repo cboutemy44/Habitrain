@@ -1,10 +1,13 @@
 // Service worker Habitrain — cache app-shell pour fonctionnement hors-ligne.
-const CACHE = 'habitrain-v8.5';
+const CACHE = 'habitrain-v8.7';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
   './app.js',
+  './jsQR.js',
+  './qrcode-gen.js',
+  './qr.js',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',

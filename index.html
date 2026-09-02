@@ -21,8 +21,25 @@
       <button class="settings-toggle-btn" id="toggleVoice">🦊 Mode Foxy</button>
       <button class="settings-toggle-btn" id="openQuest">🗺️ Notre aventure</button>
       <button class="settings-toggle-btn" id="openSave">💾 Sauvegarde</button>
+      <button class="settings-toggle-btn" id="openQr">📷 QR codes</button>
       <button class="settings-toggle-btn" id="openDebug">🐞 Debug</button>
       <button class="settings-toggle-btn" id="pauseBtn">⏸️ Pause</button>
+    </div>
+  </div>
+
+  <div id="qrScanOverlay" style="display:none">
+    <video id="qrVideo"></video>
+    <canvas id="qrScanCanvas" style="display:none"></canvas>
+    <div class="qr-frame"></div>
+    <div id="qrScanHint">Vise le QR code...</div>
+    <button id="qrScanCancel">Annuler</button>
+  </div>
+
+  <div id="qrLock" style="display:none">
+    <div class="qrlock-inner">
+      <div class="qrlock-title" id="qrLockTitle">Notes</div>
+      <div class="qrlock-sub">Verrouillé</div>
+      <button id="qrUnlockBtn">📷 Scanner pour déverrouiller</button>
     </div>
   </div>
 
@@ -72,6 +89,25 @@
     <div id="setGroups"></div>
 
     <div class="set-note" id="setNote">Rappel : une appli web ne garantit pas les notifications quand elle est complètement fermée. Pour les rappels critiques, garde tes alarmes système.</div>
+  </div>
+
+  <div class="card" id="qrCard" style="display:none">
+    <h2>📷 QR codes</h2>
+    <div class="sub">Valide certaines actions en scannant un QR physique (preuve que tu l'as vraiment faite). Colle-les aux bons endroits.</div>
+    <div class="set-cat"><h4>Actions à valider par scan</h4>
+      <div id="qrActions"></div>
+    </div>
+    <div class="set-cat"><h4>Verrouillage par bracelet</h4>
+      <div class="set-row">
+        <div class="info"><div class="n">Déverrouiller par QR</div><div class="d">Scan du bracelet à l'ouverture. Secours : 3 tapes sur le titre.</div></div>
+        <div class="switch" id="qrUnlockSwitch"><div class="knob"></div></div>
+      </div>
+    </div>
+    <div class="set-cat"><h4>Générer mes QR codes</h4>
+      <div class="sub">Génère, puis prends une photo ou une capture d'écran pour les imprimer/afficher.</div>
+      <div id="qrGenList"></div>
+    </div>
+    <div class="set-note">🔒 Tes QR sont uniques à ton installation : personne ne peut les reproduire sans les tiens. Garde une capture de secours.</div>
   </div>
 
   <div class="card" id="saveCard" style="display:none">
@@ -409,4 +445,7 @@
   </div>
 </div>
 
+<script src="jsQR.js"></script>
+<script src="qrcode-gen.js"></script>
+<script src="qr.js"></script>
 <script src="app.js"></script>
