@@ -138,6 +138,28 @@
   .empty-msg { color: var(--muted); font-size: 13px; text-align: center; padding: 8px 0; font-weight: 600; }
   .mini { font-size: 11.5px; color: var(--muted); font-weight: 700; }
 
+  /* ===== Popup Foxy (pause / reprise) ===== */
+  .foxypop-overlay {
+    position:fixed; inset:0; z-index:10000; background:rgba(60,40,30,.5);
+    display:flex; align-items:center; justify-content:center; padding:22px; backdrop-filter:blur(3px);
+  }
+  .foxypop {
+    background:#fff; border-radius:22px; padding:24px 22px; max-width:360px; width:100%; text-align:center;
+    box-shadow:0 14px 44px rgba(120,70,30,.32); animation:pop .2s ease-out; border:2px solid #e0a060;
+  }
+  .foxypop-portrait {
+    width:120px; height:120px; margin:0 auto 12px; border-radius:20px;
+    background-repeat:no-repeat; background-color:#FDF3EA; border:2.5px solid #e0a060;
+    box-shadow:0 4px 14px rgba(200,120,60,.25);
+  }
+  .foxypop-text { font-size:15.5px; font-weight:700; color:#5a3418; line-height:1.5; margin-bottom:18px; min-height:24px; }
+  .foxypop-acts { display:flex; flex-direction:column; gap:9px; }
+  .foxypop-acts button {
+    font-family:inherit; font-size:14.5px; font-weight:800; padding:13px; border-radius:13px; cursor:pointer; border:none;
+    background:#d9743a; color:#fff;
+  }
+  .foxypop-acts button.soft { background:#FBEADB; color:#a8543b; border:1.5px solid #e0c0a0; }
+
   /* ===== Façade neutre du mode pause ===== */
   #pauseFacade { display:none; position:fixed; inset:0; z-index:9999; background:#f7f7f8; }
   body.paused #pauseFacade { display:block; }

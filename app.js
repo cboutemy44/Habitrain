@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '8.3';
+  const APP_VERSION = '8.4';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -3329,57 +3329,74 @@
     if (show) { await loadFoxyOutfit(); renderDebugOutfits(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
   });
 
+  // ==== Popup Foxy réutilisable (pause / reprise) ====
+  function foxyPopShow(text, expr, buttons) {
+    const ov = document.getElementById('foxyPop');
+    const portrait = document.getElementById('foxyPopPortrait');
+    const txt = document.getElementById('foxyPopText');
+    const acts = document.getElementById('foxyPopActs');
+    // portrait dans la tenue du jour, expression donnée
+    positionFoxyCell(portrait, expr || 'happy', 120);
+    txt.textContent = text;
+    acts.innerHTML = '';
+    (buttons || []).forEach(b => {
+      const btn = document.createElement('button');
+      if (b.soft) btn.className = 'soft';
+      btn.textContent = b.label;
+      btn.addEventListener('click', () => b.onClick());
+      acts.appendChild(btn);
+    });
+    ov.style.display = 'flex';
+  }
+  function foxyPopHide() { const ov = document.getElementById('foxyPop'); if (ov) ov.style.display = 'none'; }
+
   // ==== Mode pause (façade neutre, suspend tout, fige le suivi) ====
   let paused = false;
   async function loadPause() {
     try { const r = await window.storage.get('pref:paused'); if (r && r.value) paused = JSON.parse(r.value); } catch(e) {}
     document.body.classList.toggle('paused', paused);
   }
-  async function enterPause() {
+  async function doEnterPause() {
     paused = true;
     document.body.classList.add('paused');
     try { await window.storage.set('pref:paused', JSON.stringify(true)); } catch(e) {}
-    // ferme toute modale ouverte
     const ov = document.getElementById('overlay'); if (ov) ov.classList.remove('show');
-    // vide le champ note de la façade
     const n = document.querySelector('.facade-note'); if (n) n.value = '';
+  }
+  function enterPause() {
+    // Foxy dit au revoir dans une popup, puis on bascule sur la façade
+    try { foxyPopHide(); } catch(e) {}
+    try { loadFoxyOutfit(); } catch(e) {}
+    foxyPopShow('À très vite, mon compagnon ! Je t\'attends bien au chaud, reviens quand tu veux. 🦊💛', 'wave', [
+      { label:'À tout à l\'heure Foxy', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
+    ]);
   }
   async function exitPause() {
     paused = false;
     document.body.classList.remove('paused');
     try { await window.storage.set('pref:paused', JSON.stringify(false)); } catch(e) {}
     try { await refresh(); } catch(e) {}
-    // Foxy accueille le retour (uniquement en mode Foxy, hors nuit où il dort)
-    if (voiceMode === 'foxy') {
-      const now = new Date();
-      const isNight = now.getHours() >= 23 || now.getHours() < 7;
-      if (isNight) { try { await imRunMoment(); } catch(e) {} return; }
-      await foxyWelcomeBack();
-    }
-  }
-
-  async function foxyWelcomeBack() {
-    try {
-      imClear();
-      await imSay('Ohhh, te revoilà ! 🦊 Tu m\'as manqué, tu sais !', 700, 'joy');
-      await imSay('On a fait une petite pause, mais je t\'ai attendu bien sagement.', 900, 'happy');
-      await imSay('Dis-moi... tu es prêt à replonger et à reprendre là où on s\'était arrêtés, tous les deux ?', 950, 'pensive');
-      imSetActions([
-        { label:'🤗 Oui, on replonge !', onClick: async () => {
-          imAddMe('Oui, on replonge !');
-          await imSay('Yesss ! J\'étais sûr que tu reviendrais ! Allez, on repart pour l\'aventure, ensemble. 🦊💛', 900, 'joy');
-          await imSay('Content de t\'avoir retrouvé, vraiment. Bon, on reprend le fil...', 800, 'happy');
-          try { await imRunMoment(); } catch(e) {}
-        }},
-        { soft:true, label:'Pas tout de suite', onClick: async () => {
-          imAddMe('Pas tout de suite.');
-          await imSay('Oh... d\'accord. *un petit peu déçu* Mais je comprends, hein, pas de souci.', 850, 'concern');
-          await imSay('Je reste là, bien au chaud, et je t\'attends. Reviens quand tu veux qu\'on s\'amuse de nouveau tous les deux. À très vite, mon compagnon. 🦊💛', 1000, 'neutral');
-          // retour à la façade discrète, sans relancer le programme
-          setTimeout(() => { enterPause(); }, 1400);
-        }}
+    // Foxy accueille le retour dans une popup
+    const now = new Date();
+    const isNight = now.getHours() >= 23 || now.getHours() < 7;
+    if (isNight) {
+      foxyPopShow('Mmh... *se réveille doucement* Oh, te revoilà... Il est tard, mais je suis content que tu sois là. 😴🦊', 'sleep', [
+        { label:'Coucou Foxy', onClick: async () => { foxyPopHide(); if (voiceMode==='foxy') { try { await imRunMoment(); } catch(e){} } } }
       ]);
-    } catch(e) {}
+      return;
+    }
+    foxyPopShow('Ohhh, te revoilà ! 🦊 Tu m\'as manqué ! Tu es prêt à replonger et reprendre où on s\'était arrêtés ?', 'joy', [
+      { label:'🤗 Oui, on replonge !', onClick: async () => {
+        foxyPopHide();
+        if (voiceMode !== 'foxy') { await setVoiceMode('foxy'); }
+        else { try { await imRunMoment(); } catch(e){} }
+      }},
+      { soft:true, label:'Pas tout de suite', onClick: async () => {
+        foxyPopShow('Oh... d\'accord. *un peu déçu* Mais je comprends, hein. Je reste là et je t\'attends. Reviens quand tu veux qu\'on s\'amuse de nouveau. 🦊💛', 'concern', [
+          { label:'À très vite Foxy', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
+        ]);
+      }}
+    ]);
   }
   document.getElementById('pauseBtn').addEventListener('click', enterPause);
   // reprise par geste discret : 3 tapes rapides sur le titre "Notes"
