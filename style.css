@@ -526,7 +526,7 @@
   /* ===== Mode immersif : conversation plein cadre ===== */
   body.immersive { background: linear-gradient(180deg,#F5EEF6,#EEF0FA) !important; }
   /* on masque tout le reporting */
-  body.immersive .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard):not(#questCard) { display:none !important; }
+  body.immersive .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard):not(#questCard):not(#saveCard) { display:none !important; }
   body.immersive #verBadge { opacity:0.5; }
 
   #imChat { display:none; }
