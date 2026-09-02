@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '7.8';
+  const APP_VERSION = '8.3';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1343,6 +1343,22 @@
       apaise: { say:['Apaisé... c\'est exactement ce que je te souhaite. Reste dans cette sensation encore un moment.','Ferme les yeux une seconde si tu veux, savoure. Tu es exactement là où tu dois être. 🦊💛'], expr:'happy', reward:true, opts:[] },
       vulnerable: { say:['Vulnérable... merci de me confier ça. C\'est courageux, la vulnérabilité, pas une faiblesse.','Ici, avec moi, tu peux l\'être sans crainte. Personne ne juge. Se montrer doux et fragile, c\'est aussi une force. Je veille sur toi.'], expr:'concern', reward:true, opts:[] },
       content: { say:['Moi aussi je suis super content de te parler ! Ces moments avec toi, ça compte pour moi.','On est deux voyageurs sur la même route, et franchement, j\'ai de la chance de t\'avoir comme compagnon. 🦊'], expr:'joy', opts:[] }
+    },
+    // 10. Comment tu as fait pour t'habituer au mouillé ?
+    mouille: {
+      start: { say:['Tu veux que je te raconte comment j\'ai fait, moi, pour m\'habituer à rester mouillé longtemps sans que ça me gêne ?','Parce qu\'au début, franchement... c\'était tout un truc dans ma tête.'], expr:'teach', opts:[
+        { label:'Oui, raconte !', to:'oui' },
+        { label:'Ça m\'angoisse un peu justement', to:'angoisse' } ] },
+      oui: { say:['Alors voilà. Les tout premiers jours, je sentais absolument TOUT. Chaque fois, c\'était comme une petite alarme dans ma tête : « il se passe un truc ! »','Et puis, jour après jour, cette alarme s\'est faite plus discrète. Comme quand tu oublies que tu portes un pull. Mon cerveau avait compris que c\'était normal, alors il a arrêté de me le crier.'], expr:'happy', opts:[
+        { label:'Et la sensation de mouillé ?', to:'sensation' },
+        { label:'C\'était pas désagréable ?', to:'desagreable' } ] },
+      sensation: { say:['Ça, ça m\'a surpris ! Une bonne couche, elle garde le mouillé loin de la peau — le gel absorbe et t\'éloigne du liquide.','Du coup, même après plusieurs heures, je restais au sec au toucher. Ce que je sentais, c\'était plus le petit poids, la chaleur douce... pas de l\'humidité froide. Et ça, c\'est devenu presque réconfortant.','Mais attention hein — ce confort, il tient PARCE QU\'on change régulièrement et qu\'on met de la crème. La peau, on la chouchoute toujours, même quand on ne sent plus rien.'], expr:'teach', reward:true, opts:[] },
+      desagreable: { say:['Au début, un peu déroutant, je dirais, plus que désagréable. Le truc désagréable, c\'était surtout dans ma tête — la petite voix qui disait « c\'est pas normal ».','Une fois que j\'ai fait taire cette voix et que je me suis détendu, la sensation est devenue... douce. Enveloppante. Un vrai cocon.','Le secret c\'était pas de supporter, c\'était d\'arrêter de lutter contre. Le jour où j\'ai lâché, tout est devenu agréable.'], expr:'happy', reward:true, opts:[] },
+      angoisse: { say:['Hé, viens là. C\'est normal que ça angoisse, on nous a appris toute notre vie l\'inverse de ça.','Moi aussi j\'ai eu cette boule au ventre. Et tu sais ce qui l\'a dissoute ? Le temps, et la douceur envers moi-même. Pas la force, pas la volonté — juste accepter d\'y aller doucement.'], expr:'concern', opts:[
+        { label:'Comment tu as lâché la peur ?', to:'lacher' },
+        { label:'Et si je reste crispé ?', to:'crispe' } ] },
+      lacher: { say:['Petit à petit. Je me suis autorisé à ne PAS y arriver du premier coup. Chaque jour un tout petit peu plus détendu.','Et j\'ai réassocié la sensation à quelque chose de bien : mon doudou dans les bras, bien au chaud, en sécurité. Mon corps a fini par comprendre que « mouillé » voulait dire « cocon », pas « alerte ». Ça s\'est fait tout seul, à force.'], expr:'teach', reward:true, opts:[] },
+      crispe: { say:['Si tu restes crispé, c\'est pas grave du tout — ça veut juste dire que ton corps a besoin d\'un peu plus de temps. Y\'a zéro échec là-dedans.','Respire, va à ton rythme, et sois patient avec toi comme je le suis avec toi. Ça viendra quand ce sera prêt. Et je serai là à chaque étape, promis. 🦊💛'], expr:'concern', reward:true, opts:[] }
     }
   };
   const INTRO_THEMES = Object.keys(INTRO_TREES);
@@ -1394,7 +1410,12 @@
     'Mon jeu préféré c\'était de faire crisser ma couche exprès en gigotant. Le petit bruit me faisait rire à tous les coups. Essaie, tu verras ! 🤭',
     'Une fois j\'ai empilé TOUS mes doudous pour dormir dessus comme un roi. Je suis tombé du tas au milieu de la nuit. Zéro regret. 😴',
     'J\'ai voulu peindre un arc-en-ciel et j\'ai fini plus coloré que le dessin. Maman renarde a bien rigolé en me débarbouillant.',
-    'Des fois je parlais à mes cubes ABCD comme s\'ils étaient mes copains. Ils étaient d\'excellents auditeurs, très patients ! 🎲'
+    'Des fois je parlais à mes cubes ABCD comme s\'ils étaient mes copains. Ils étaient d\'excellents auditeurs, très patients ! 🎲',
+    'Tu sais comment j\'ai arrêté d\'y penser ? Un jour, en pleine partie de cubes, j\'ai réalisé que j\'étais mouillé depuis des heures... et que je m\'en fichais complètement. J\'ai souri tout seul.',
+    'Au début, chaque fois que ma couche se mouillait, tout mon corps se raidissait une seconde. Et puis un matin, plus rien ne se raidissait. C\'était devenu doux, juste doux.',
+    'Le truc qui m\'a rassuré, c\'est de sentir que je restais au sec contre la peau même après longtemps. La couche gardait tout le mouillé pour elle. Je me sentais protégé, comme dans un petit nid.',
+    'J\'ai mis du temps à comprendre que « mouillé » pouvait rimer avec « bien ». Maintenant, cette petite chaleur douce, c\'est presque un câlin de l\'intérieur. 🦊',
+    'Mon secret contre l\'angoisse du début ? Serrer mon doudou très fort à chaque fois. Petit à petit, mon corps a associé la sensation à ces câlins. Et la peur a fondu.'
   ];
 
   async function maybeIntroReward() {
@@ -2366,6 +2387,7 @@
   }
 
   function popCheck(forcedType) {
+    if (paused) return;
     const type = forcedType || CHECK_TYPES[Math.floor(Math.random() * CHECK_TYPES.length)];
     buildCheck(type);
     document.getElementById('modalCheck').style.display = '';
@@ -3198,6 +3220,7 @@
     }));
   }
   async function showLocalNotif(title, body, itemId) {
+    if (paused) return;
     if (notifPermState() !== 'granted') return;
     const prefix = '🦊 ';
     let icon = 'icon-192.png';
@@ -3270,6 +3293,7 @@
 
   // Redirection auto vers le bilan du soir quand l'heure est venue (à partir de 22h30)
   async function maybeRedirectBilan() {
+    if (paused) return;
     if (voiceMode !== 'report') return;
     const now = new Date();
     const nowMin = now.getHours()*60 + now.getMinutes();
@@ -3303,6 +3327,134 @@
     const show = card.style.display === 'none';
     card.style.display = show ? '' : 'none';
     if (show) { await loadFoxyOutfit(); renderDebugOutfits(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
+
+  // ==== Mode pause (façade neutre, suspend tout, fige le suivi) ====
+  let paused = false;
+  async function loadPause() {
+    try { const r = await window.storage.get('pref:paused'); if (r && r.value) paused = JSON.parse(r.value); } catch(e) {}
+    document.body.classList.toggle('paused', paused);
+  }
+  async function enterPause() {
+    paused = true;
+    document.body.classList.add('paused');
+    try { await window.storage.set('pref:paused', JSON.stringify(true)); } catch(e) {}
+    // ferme toute modale ouverte
+    const ov = document.getElementById('overlay'); if (ov) ov.classList.remove('show');
+    // vide le champ note de la façade
+    const n = document.querySelector('.facade-note'); if (n) n.value = '';
+  }
+  async function exitPause() {
+    paused = false;
+    document.body.classList.remove('paused');
+    try { await window.storage.set('pref:paused', JSON.stringify(false)); } catch(e) {}
+    try { await refresh(); } catch(e) {}
+    // Foxy accueille le retour (uniquement en mode Foxy, hors nuit où il dort)
+    if (voiceMode === 'foxy') {
+      const now = new Date();
+      const isNight = now.getHours() >= 23 || now.getHours() < 7;
+      if (isNight) { try { await imRunMoment(); } catch(e) {} return; }
+      await foxyWelcomeBack();
+    }
+  }
+
+  async function foxyWelcomeBack() {
+    try {
+      imClear();
+      await imSay('Ohhh, te revoilà ! 🦊 Tu m\'as manqué, tu sais !', 700, 'joy');
+      await imSay('On a fait une petite pause, mais je t\'ai attendu bien sagement.', 900, 'happy');
+      await imSay('Dis-moi... tu es prêt à replonger et à reprendre là où on s\'était arrêtés, tous les deux ?', 950, 'pensive');
+      imSetActions([
+        { label:'🤗 Oui, on replonge !', onClick: async () => {
+          imAddMe('Oui, on replonge !');
+          await imSay('Yesss ! J\'étais sûr que tu reviendrais ! Allez, on repart pour l\'aventure, ensemble. 🦊💛', 900, 'joy');
+          await imSay('Content de t\'avoir retrouvé, vraiment. Bon, on reprend le fil...', 800, 'happy');
+          try { await imRunMoment(); } catch(e) {}
+        }},
+        { soft:true, label:'Pas tout de suite', onClick: async () => {
+          imAddMe('Pas tout de suite.');
+          await imSay('Oh... d\'accord. *un petit peu déçu* Mais je comprends, hein, pas de souci.', 850, 'concern');
+          await imSay('Je reste là, bien au chaud, et je t\'attends. Reviens quand tu veux qu\'on s\'amuse de nouveau tous les deux. À très vite, mon compagnon. 🦊💛', 1000, 'neutral');
+          // retour à la façade discrète, sans relancer le programme
+          setTimeout(() => { enterPause(); }, 1400);
+        }}
+      ]);
+    } catch(e) {}
+  }
+  document.getElementById('pauseBtn').addEventListener('click', enterPause);
+  // reprise par geste discret : 3 tapes rapides sur le titre "Notes"
+  (function(){
+    let taps = [], t;
+    const title = document.getElementById('facadeTitle');
+    if (!title) return;
+    title.addEventListener('click', () => {
+      const now = Date.now();
+      taps.push(now);
+      taps = taps.filter(x => now - x < 1200); // fenêtre de 1,2s
+      if (taps.length >= 3) { taps = []; exitPause(); }
+    });
+  })();
+
+  // ---- Menu Sauvegarde (export / import) ----
+  document.getElementById('openSave').addEventListener('click', () => {
+    const card = document.getElementById('saveCard');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) card.scrollIntoView({behavior:'smooth', block:'start'});
+  });
+  function saveFlash(msg, ok) {
+    const f = document.getElementById('saveFlash'); if (!f) return;
+    f.style.color = ok === false ? 'var(--coral)' : 'var(--green)';
+    f.textContent = msg; setTimeout(() => f.textContent = '', 2600);
+  }
+  // rassemble toutes les données du stockage (préfixe habitrain:)
+  async function collectAllData() {
+    const data = {};
+    try {
+      const res = await window.storage.list('');
+      const keys = (res && res.keys) ? res.keys : [];
+      for (const k of keys) {
+        try { const r = await window.storage.get(k); if (r && r.value !== undefined) data[k] = r.value; } catch(e) {}
+      }
+    } catch(e) {}
+    return data;
+  }
+  document.getElementById('saveExport').addEventListener('click', async () => {
+    try {
+      const data = await collectAllData();
+      const payload = { app:'Habitrain', version: (typeof APP_VERSION!=='undefined'?APP_VERSION:'?'), exportedAt: new Date().toISOString(), data };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0,10);
+      a.href = url; a.download = 'habitrain-sauvegarde-' + stamp + '.json';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      saveFlash('✅ Sauvegarde téléchargée (' + Object.keys(data).length + ' entrées)');
+    } catch(e) { saveFlash('Échec de l\'export, réessaie.', false); }
+  });
+  document.getElementById('saveImportBtn').addEventListener('click', () => {
+    document.getElementById('saveImportFile').click();
+  });
+  document.getElementById('saveImportFile').addEventListener('change', async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const data = payload && payload.data ? payload.data : payload; // tolère un format brut
+      if (!data || typeof data !== 'object') { saveFlash('Fichier invalide.', false); return; }
+      let n = 0;
+      for (const k of Object.keys(data)) {
+        try { await window.storage.set(k, typeof data[k] === 'string' ? data[k] : JSON.stringify(data[k])); n++; } catch(e) {}
+      }
+      saveFlash('✅ ' + n + ' entrées restaurées. Rechargement...');
+      setTimeout(() => location.reload(), 1200);
+    } catch(e) {
+      saveFlash('Fichier illisible ou corrompu.', false);
+    } finally {
+      ev.target.value = '';
+    }
   });
 
   // ---- Notre aventure (écran de quête) ----
@@ -3425,6 +3577,7 @@
     await loadFoxyOutfit();
     refreshHeadFoxy();
     await loadVoice();
+    await loadPause();
     scheduleNotifications();
     await renderCheckStat();
     await renderMoment();
@@ -3467,7 +3620,8 @@
       } catch(e) {}
     }
 
-    if (dueSlot && !alreadyDone) {
+    if (paused) { /* mode pause : aucune sollicitation */ }
+    else if (dueSlot && !alreadyDone) {
       // affiche le rappel "c'est l'heure" puis lance le flux guidé.
       // Le créneau n'est PAS marqué ici : "Plus tard" doit le laisser réapparaître.
       setTimeout(() => popChangeDue(dueSlot), 500);
@@ -3482,6 +3636,7 @@
   // Rappel de change persistant : re-propose tant que le pilier n'est pas fait
   let dueSnooze = {}; // key -> timestamp jusqu'auquel on ne re-propose pas
   async function checkDueChangePeriodic() {
+    if (paused) return;
     if (document.getElementById('overlay').classList.contains('show')) return; // déjà une modale ouverte
     const CHANGE_SLOTS = [
       { key:'c0900', m:9*60,     ctx:'pilier', label:'Change du matin' },

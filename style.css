@@ -138,6 +138,21 @@
   .empty-msg { color: var(--muted); font-size: 13px; text-align: center; padding: 8px 0; font-weight: 600; }
   .mini { font-size: 11.5px; color: var(--muted); font-weight: 700; }
 
+  /* ===== Façade neutre du mode pause ===== */
+  #pauseFacade { display:none; position:fixed; inset:0; z-index:9999; background:#f7f7f8; }
+  body.paused #pauseFacade { display:block; }
+  .facade-inner { max-width:640px; margin:0 auto; padding:24px 18px; font-family:system-ui,-apple-system,sans-serif; }
+  .facade-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+  .facade-title { font-size:30px; font-weight:800; color:#1c1c1e; cursor:default; user-select:none; }
+  .facade-plus { font-size:28px; color:#c7a008; font-weight:400; }
+  .facade-note {
+    width:100%; min-height:120px; border:1px solid #e2e2e6; border-radius:12px; padding:14px;
+    font-size:15px; font-family:inherit; color:#1c1c1e; background:#fff; resize:none; margin-bottom:16px;
+  }
+  .facade-note:focus { outline:none; border-color:#c7c7cc; }
+  .facade-list { display:flex; flex-direction:column; gap:1px; background:#e2e2e6; border-radius:12px; overflow:hidden; }
+  .facade-item { background:#fff; padding:15px 14px; font-size:16px; color:#1c1c1e; }
+
   /* barre d'onglets du reporting */
   .tabbar { display:flex; gap:7px; margin-bottom:16px; }
   body.foxy .tabbar, body.immersive .tabbar { display:none; }

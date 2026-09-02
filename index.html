@@ -20,7 +20,24 @@
       <button class="settings-toggle-btn" id="openSettings">⚙️ Réglages</button>
       <button class="settings-toggle-btn" id="toggleVoice">🦊 Mode Foxy</button>
       <button class="settings-toggle-btn" id="openQuest">🗺️ Notre aventure</button>
+      <button class="settings-toggle-btn" id="openSave">💾 Sauvegarde</button>
       <button class="settings-toggle-btn" id="openDebug">🐞 Debug</button>
+      <button class="settings-toggle-btn" id="pauseBtn">⏸️ Pause</button>
+    </div>
+  </div>
+
+  <div id="pauseFacade">
+    <div class="facade-inner">
+      <div class="facade-head">
+        <span class="facade-title" id="facadeTitle">Notes</span>
+        <span class="facade-plus">+</span>
+      </div>
+      <textarea class="facade-note" placeholder="Écris une note…"></textarea>
+      <div class="facade-list">
+        <div class="facade-item">Liste de courses</div>
+        <div class="facade-item">Idées cadeaux</div>
+        <div class="facade-item">À faire ce week-end</div>
+      </div>
     </div>
   </div>
 
@@ -47,6 +64,20 @@
     <div id="setGroups"></div>
 
     <div class="set-note" id="setNote">Rappel : une appli web ne garantit pas les notifications quand elle est complètement fermée. Pour les rappels critiques, garde tes alarmes système.</div>
+  </div>
+
+  <div class="card" id="saveCard" style="display:none">
+    <h2>💾 Sauvegarde</h2>
+    <div class="sub">Exporte toutes tes données (suivi, aventure, confidences, réglages…) dans un fichier à garder en lieu sûr. Réimporte-le pour tout restaurer.</div>
+    <div class="set-cat"><h4>Exporter</h4>
+      <button class="settings-toggle-btn" id="saveExport">⬇️ Télécharger ma sauvegarde</button>
+    </div>
+    <div class="set-cat"><h4>Importer</h4>
+      <input type="file" id="saveImportFile" accept="application/json,.json" style="display:none">
+      <button class="settings-toggle-btn" id="saveImportBtn">⬆️ Choisir un fichier de sauvegarde</button>
+      <div class="set-note">⚠️ L'import remplace tes données actuelles par celles du fichier. Fais un export avant si tu as un doute.</div>
+    </div>
+    <div class="saved-flash" id="saveFlash"></div>
   </div>
 
   <div class="card" id="debugCard" style="display:none">
