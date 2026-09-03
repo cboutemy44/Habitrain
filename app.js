@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '8.7';
+  const APP_VERSION = '8.9';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -873,15 +873,21 @@
   async function tellTodaySubchapter() {
     const q = await getQuest();
     if (q.subToldDate === todayStr()) return; // déjà raconté aujourd'hui
-    const stage = Math.max(0, q.unlockedStage);
+    // on remplit le PLUS ANCIEN chapitre débloqué encore incomplet (rattrape les sauts)
+    let stage = -1;
+    for (let s = 0; s <= Math.max(0, q.unlockedStage); s++) {
+      const list = QUEST_SUBCHAPTERS[s] || [];
+      const told = (q.subs && q.subs[s]) ? q.subs[s] : [];
+      if (told.length < list.length) { stage = s; break; }
+    }
+    if (stage === -1) {
+      // tout ce qui est débloqué est déjà raconté
+      await imSay('Je t\'ai déjà raconté tout ce que j\'avais à dire pour l\'instant... La suite viendra quand on passera un nouveau cap ensemble. 🦊', 900, 'happy');
+      return;
+    }
     const list = QUEST_SUBCHAPTERS[stage] || [];
     const told = (q.subs && q.subs[stage]) ? q.subs[stage] : [];
     const nextIdx = told.length; // prochain sous-chapitre non raconté
-    if (nextIdx >= list.length) {
-      // tous les sous-chapitres du palier sont déjà racontés
-      await imSay('Je t\'ai déjà raconté tout ce que j\'avais à dire pour cette étape... La suite viendra quand on passera un nouveau cap ensemble. 🦊', 900, 'happy');
-      return;
-    }
     const sub = list[nextIdx];
     q.subs = q.subs || {}; q.subs[stage] = told.concat([nextIdx]);
     q.subToldDate = todayStr();
@@ -1114,14 +1120,22 @@
   }
 
   // débloque le chapitre correspondant au palier courant si pas déjà fait
-  async function checkChapterUnlock(stage) {
+  // un chapitre est "terminé" quand tous ses sous-chapitres ont été racontés
+  function chapterSubsComplete(q, stage) {
+    const list = QUEST_SUBCHAPTERS[stage] || [];
+    const told = (q.subs && q.subs[stage]) ? q.subs[stage] : [];
+    return told.length >= list.length;
+  }
+  async function checkChapterUnlock(habitStage) {
     const q = await getQuest();
-    if (stage > q.unlockedStage) {
-      q.unlockedStage = stage;
-      await saveQuest(q);
-      return QUEST_CHAPTERS[stage] || null; // chapitre à révéler
-    }
-    return null;
+    const next = q.unlockedStage + 1;
+    if (next > 3) return null;                 // tout est déjà débloqué
+    if (habitStage < next) return null;        // palier d'habituation pas encore atteint
+    // on n'ouvre le chapitre suivant que si le précédent est entièrement lu
+    if (q.unlockedStage >= 0 && !chapterSubsComplete(q, q.unlockedStage)) return null;
+    q.unlockedStage = next;                     // avance d'UN seul chapitre
+    await saveQuest(q);
+    return QUEST_CHAPTERS[next] || null;
   }
 
   function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
@@ -3662,6 +3676,28 @@
     const f = document.getElementById('dbgFlash'); if (!f) return;
     f.textContent = msg; setTimeout(() => f.textContent = '', 1800);
   }
+  document.getElementById('dbgCatchup').addEventListener('click', async () => {
+    try {
+      const q = await getQuest();
+      q.subs = q.subs || {};
+      // marque comme lus tous les sous-chapitres des chapitres déjà débloqués
+      for (let s = 0; s <= Math.max(0, q.unlockedStage); s++) {
+        const list = QUEST_SUBCHAPTERS[s] || [];
+        q.subs[s] = list.map((_, i) => i);
+      }
+      await saveQuest(q);
+      dbgFlash('📖 Souvenirs débloqués — vois « Notre aventure »');
+      try { await renderQuest(); } catch(e) {}
+    } catch(e) {}
+  });
+  document.getElementById('dbgResetQuest').addEventListener('click', async () => {
+    try {
+      await window.storage.set('quest', JSON.stringify({ unlockedStage:-1, subs:{}, lastRitualDate:null, ritualDoneDate:null, todayRitual:null, subToldDate:null, confidences:[] }));
+      dbgFlash('♻️ Aventure réinitialisée');
+      try { await renderQuest(); } catch(e) {}
+    } catch(e) {}
+  });
+
   document.getElementById('dbgClearChanges').addEventListener('click', async () => {
     const date = todayStr();
     try {
