@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '8.9';
+  const APP_VERSION = '9.3';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -295,25 +295,25 @@
   function showProofPrompt(kind, done) {
     const QR = window.HabitrainQR;
     const expected = kind === 'change' ? 'change_pilier' : kind;
-    // on réutilise la popup Foxy pour l'invite
-    foxyPopShow('Scanne ton QR pour valider — c\'est ta preuve que tu l\'as bien fait ! 🦊', 'joy', [
+    const btns = [
       { label:'📷 Scanner', onClick:() => {
         foxyPopHide();
         QR.startScan(null, (k) => {
-          // accepte le QR de change (pilier ou tous)
           if (k === 'change_pilier' || k === 'change_tous') { done(true); }
-          else { foxyPopShow('Hmm, c\'est pas le bon QR ça ! Réessaie ou valide sans preuve.', 'pensive', proofButtons(kind, done)); }
+          else { foxyPopShow(hardMode ? 'Non, c\'est pas le bon QR. En mode intensif, pas de raccourci : rescanne le vrai. 🦊' : 'Hmm, c\'est pas le bon QR ça ! Réessaie ou valide sans preuve.', 'pensive', proofButtons(kind, done)); }
         });
-      }},
-      { soft:true, label:'Valider sans preuve', onClick:() => { foxyPopHide(); done(false); } }
-    ]);
+      }}
+    ];
+    if (!hardMode) btns.push({ soft:true, label:'Valider sans preuve', onClick:() => { foxyPopHide(); done(false); } });
+    foxyPopShow(hardMode ? 'Mode intensif : scan OBLIGATOIRE pour valider. Pas de preuve, pas de validation. Allez ! 🦊' : 'Scanne ton QR pour valider — c\'est ta preuve que tu l\'as bien fait ! 🦊', hardMode?'proud':'joy', btns);
   }
   function proofButtons(kind, done) {
     const QR = window.HabitrainQR;
-    return [
-      { label:'📷 Rescanner', onClick:() => { foxyPopHide(); QR.startScan(null, (k) => { if (k) done(true); else done(false); }); } },
-      { soft:true, label:'Valider sans preuve', onClick:() => { foxyPopHide(); done(false); } }
+    const btns = [
+      { label:'📷 Rescanner', onClick:() => { foxyPopHide(); QR.startScan(null, (k) => { if (k) done(true); else if (!hardMode) done(false); else foxyPopShow('Toujours pas bon. On ne lâche pas : rescanne. 🦊','pensive', proofButtons(kind,done)); }); } }
     ];
+    if (!hardMode) btns.push({ soft:true, label:'Valider sans preuve', onClick:() => { foxyPopHide(); done(false); } });
+    return btns;
   }
   // fabrique un dataURL d'une cellule (pour l'icône de notification)
   function foxyCellDataURL(expr, size) {
@@ -408,6 +408,15 @@
 
   function imSetActions(buttons) {
     const box = imActions(); box.innerHTML = '';
+    // bouton safeword toujours dispo en mode grand frère
+    if (broOn()) {
+      const sw = document.createElement('button');
+      sw.className = 'soft';
+      sw.style.cssText = 'border-color:#c86b6b;color:#a83b3b;font-weight:800';
+      sw.textContent = '🛑 Stop Foxy (safeword)';
+      sw.addEventListener('click', () => triggerSafeword());
+      box.appendChild(sw);
+    }
     buttons.forEach(b => {
       const btn = document.createElement('button');
       if (b.soft) btn.className = 'soft';
@@ -823,9 +832,39 @@
     // 1) déblocage de chapitre selon le palier courant
     let stage = 0;
     try { const r = await window.storage.get('queststage'); if (r && r.value) stage = JSON.parse(r.value); } catch(e) {}
+    window._lastStage = stage; // mémorisé pour les questions évolutives
+    // MODE INTENSIF : contention douce imposée sur les fenêtres de régression (midi/soir)
+    if (hardMode && (m.key === 'aprem' || m.key === 'soir')) {
+      const nowMin = new Date().getHours()*60 + new Date().getMinutes();
+      const inRegMidi = (nowMin >= 12*60 && nowMin < 13*60);
+      const inRegSoir = (nowMin >= 20*60 && nowMin < 22*60);
+      if (inRegMidi || inRegSoir) {
+        let contDate = null;
+        try { const r = await window.storage.get('cont:last'); if (r && r.value) contDate = JSON.parse(r.value); } catch(e) {}
+        const slot = inRegMidi ? 'midi' : 'soir';
+        const tag = todayStr()+':'+slot;
+        if (contDate !== tag) {
+          await imSay(broOn() ? 'C\'est ta fenêtre de régression. Tu vas mettre ta contention douce, là, maintenant. Ne discute pas — tu sais que tu vas le faire de toute façon.' : 'C\'est ta fenêtre de régression, et en mode intensif ça ne se négocie pas : mets ta contention douce maintenant.', 900, 'proud');
+          await imSay(broOn() ? 'Harnais, mittens, ce que je décide. Tu peux t\'en défaire — mais tu ne le feras pas, parce qu\'au fond tu veux être contenu. Laisse-toi aller, c\'est inévitable et c\'est bon.' : 'Harnais fleece bien réglé, mittens ou combi si tu veux — tout ce qui te contient en douceur. Tu peux toujours t\'en défaire, mais là, on s\'engage. C\'est le moment de lâcher prise pour de vrai.', 1000, 'teach');
+          imSetActions([
+            { label:'🎽 C\'est fait, je suis contenu', onClick: async () => {
+              imAddMe('C\'est fait, je suis contenu.');
+              try { await window.storage.set('cont:last', JSON.stringify(tag)); } catch(e) {}
+              await imSay('Voilà. Maintenant laisse-toi aller complètement, je veille. Tu fais ça très bien. 🦊', 850, 'happy');
+              await imOfferHelp(m);
+            }},
+            { soft:true, label:'Je ne peux pas là', onClick: async () => {
+              imAddMe('Je ne peux pas là.');
+              await imSay('Hmm. J\'insiste : la contention fait partie du cadre intensif que TU as choisi. Dès que tu peux, tu t\'y mets. Je le noterai sinon.', 900, 'concern');
+              await imOfferHelp(m);
+            }}
+          ]);
+          return;
+        }
+      }
+    }
     const chapter = await checkChapterUnlock(stage);
     if (chapter) {
-      // Foxy révèle le nouveau chapitre, ton senpai complice
       pendingExpr = chapter.expr;
       await imSay('Eh... attends. Je crois qu\'on vient de passer un cap, toi et moi. 🦊', 900, chapter.expr);
       await imSay(chapter.text, 1000, chapter.expr);
@@ -834,30 +873,43 @@
       buildMomentReplies(m, true);
       return;
     }
-    // 2) rituel du jour, si c'est le moment tiré et pas encore proposé
+    // 2) rituel du jour
     const q = await ensureTodayRitual();
     if (q.ritualMoment === m.key && q.ritualDoneDate !== todayStr() && q.ritualProposedDate !== todayStr()) {
       q.ritualProposedDate = todayStr();
       await saveQuest(q);
       const ritual = QUEST_RITUALS.find(r => r.id === q.todayRitual) || QUEST_RITUALS[0];
-      await imSay('Au fait ! J\'ai un petit rituel pour nous deux aujourd\'hui.', 800, 'joy');
+      await imSay(hardMode ? 'Rituel du jour. Pas d\'excuse aujourd\'hui, on le fait, toi et moi.' : 'Au fait ! J\'ai un petit rituel pour nous deux aujourd\'hui.', 800, hardMode?'proud':'joy');
       await imSay(ritual.ask, 900, 'happy');
-      imSetActions([
+      const ritualBtns = [
         { label:'🤝 Ça marche, je le fais pour nous', onClick: async () => {
           imAddMe('Ça marche, je le fais !');
           await imSay('Trop bien ! Ça me fait plaisir qu\'on avance ensemble sur ce chemin.', 800, 'proud');
           await tellTodaySubchapter();
           await imOfferHelp(m);
-        }},
-        { soft:true, label:'Une autre fois', onClick: async () => {
+        }}
+      ];
+      if (!hardMode) {
+        ritualBtns.push({ soft:true, label:'Une autre fois', onClick: async () => {
           imAddMe('Une autre fois.');
           await imSay('Pas de souci, à ton rythme. On est deux sur la même route, y\'a pas de pression.', 700, 'neutral');
           await imOfferHelp(m);
-        }}
-      ]);
+        }});
+      }
+      imSetActions(ritualBtns);
       return;
     }
-    // 3) discussion introspective spontanée (max 1/jour, ~30%, hors nuit)
+    // 3) rituel du soir émotionnel (une fois par jour, sur le moment du soir)
+    if (m.key === 'soir') {
+      let ritSoir = null;
+      try { const r = await window.storage.get('ritsoir:last'); if (r && r.value) ritSoir = JSON.parse(r.value); } catch(e) {}
+      if (ritSoir !== todayStr() && Math.random() < 0.6) {
+        try { await window.storage.set('ritsoir:last', JSON.stringify(todayStr())); } catch(e) {}
+        await eveningRitual(m);
+        return;
+      }
+    }
+    // 4) discussion introspective spontanée (max 1/jour, hors nuit)
     if (m.key !== 'nuit') {
       let introDate = null;
       try { const r = await window.storage.get('introspect:last'); if (r && r.value) introDate = JSON.parse(r.value); } catch(e) {}
@@ -865,6 +917,15 @@
         try { await window.storage.set('introspect:last', JSON.stringify(todayStr())); } catch(e) {}
         await imSay('Dis, avant qu\'on continue... j\'aimerais bien prendre de tes nouvelles, pour de vrai.', 900, 'pensive');
         await startIntrospection(m);
+        return;
+      }
+      // 5) Foxy spontané (fréquent) : rêve, jeu, confidence, humeur
+      let spontDate = null;
+      try { const r = await window.storage.get('spont:last'); if (r && r.value) spontDate = JSON.parse(r.value); } catch(e) {}
+      // plusieurs fois par jour possible, mais pas à chaque ouverture
+      if (Math.random() < 0.5) {
+        try { await window.storage.set('spont:last', JSON.stringify(Date.now())); } catch(e) {}
+        try { await foxySpontaneous(m); } catch(e) {}
       }
     }
   }
@@ -1004,6 +1065,10 @@
       ...(isFoxy ? [{ label:'💬 Foxy, on discute ?', onClick: async () => {
         imAddMe('Foxy, on discute ?');
         await startIntrospection(m);
+      }}] : []),
+      ...(isFoxy ? [{ label:'✍️ Écrire dans mon carnet', onClick: async () => {
+        imAddMe('Je veux écrire dans mon carnet.');
+        await startJournal(m);
       }}] : []),
       { soft:true, label:'🍼 Me changer maintenant', onClick: () => startChange(m.key==='reveil'||m.key==='soir'?'pilier':'check') },
       { soft:true, label: isFoxy ? '👍 Ça roule, merci' : '💛 Ça va, merci', onClick: async () => {
@@ -1438,8 +1503,119 @@
 
   // lance une discussion introspective (thème précis ou aléatoire)
   async function startIntrospection(m, theme) {
-    theme = theme || INTRO_THEMES[Math.floor(Math.random()*INTRO_THEMES.length)];
+    theme = theme || pickIntroThemeForStage();
     await runIntroNode(theme, 'start', m || currentM);
+  }
+
+  // ===== Questions d'introspection qui évoluent avec le palier =====
+  const INTRO_BY_STAGE = {
+    0: ['vecu','difficile','origine','mouille'],          // Découverte : peurs, étrangeté
+    1: ['habitue','difficile','change_soi','partage'],     // Ça s'installe : habitude, confiance
+    2: ['moment','present','change_soi','doute'],          // Automatisme : ressenti, moments
+    3: ['change_soi','present','partage','moment']         // Seconde nature : sens, transmission
+  };
+  async function currentStage() {
+    try { const r = await window.storage.get('queststage'); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
+    return 0;
+  }
+  function pickIntroThemeForStage() {
+    // pioché dans les thèmes adaptés au palier ; repli sur tous
+    let pool = INTRO_THEMES;
+    try {
+      const st = window._lastStage != null ? window._lastStage : 0;
+      pool = INTRO_BY_STAGE[st] || INTRO_THEMES;
+    } catch(e) {}
+    return pool[Math.floor(Math.random()*pool.length)];
+  }
+
+  // ===== Foxy spontané : rêves, jeux, confidences surprises, humeurs =====
+  const FOXY_DREAMS = [
+    'Cette nuit j\'ai rêvé que je volais au-dessus de la forêt, tout doux, porté par le vent. C\'était magique !',
+    'J\'ai fait un rêve rigolo : mon doudou parlait et me racontait des blagues nulles. J\'ai ri même en dormant je crois !',
+    'J\'ai rêvé d\'un immense château fait de couvertures et d\'oreillers. On y était tous les deux, bien au chaud.',
+    'Cette nuit, j\'ai rêvé qu\'on nageait dans une mer de lait tiède au biberon géant. N\'importe quoi, hein ? 🤭',
+    'J\'ai rêvé que les étoiles descendaient me border. Je me suis réveillé tout apaisé.'
+  ];
+  const FOXY_GAMES = [
+    { ask:'On joue ? Devine à quoi je pense... un animal tout doux, orange, avec une grande queue touffue !', rep:['🦊 Un renard !','Je sais pas'], react:['Gagné ! C\'est moi, évidemment ! 🦊 T\'es trop fort.','Ha, c\'était moi ! 🦊 Facile pourtant, non ?'] },
+    { ask:'Petit jeu : si tu étais un doudou, tu serais lequel ? Tout mou, ou plutôt tout ferme pour les gros câlins ?', rep:['Tout mou','Ferme pour les câlins'], react:['Un doudou tout mou, comme moi j\'aime ! On serait bien assortis.','Ferme pour les câlins, j\'adore ! Solide et réconfortant.'] },
+    { ask:'On fait un jeu du calme ? On voit qui reste le plus tranquille... Prêt ? Chuuut... 🤫', rep:['Chuuut 🤫','J\'ai bougé !'], react:['Trop fort, t\'es un vrai maître du calme ! Ça détend, hein ?','Ha, t\'as bougé ! Moi aussi en vrai. On rigole trop pour ça ! 😄'] },
+    { ask:'Cache-cache avec mon doudou ! Il est caché... à ton avis, sous la couverture ou derrière le coussin ?', rep:['Sous la couverture','Derrière le coussin'], react:['Bravo, trouvé ! Il adore se cacher là. 🦊','Presque ! Il avait bougé. Petit malin de doudou !'] }
+  ];
+  const FOXY_MOODWORDS = [
+    'Je me sens tout pelucheux et content aujourd\'hui. Et toi, c\'est quoi ta couleur du jour ?',
+    'Aujourd\'hui je suis d\'humeur câline. J\'ai envie de rester blotti. Toi, tu te sens comment ?',
+    'Moi je pétille aujourd\'hui, j\'ai plein d\'énergie douce ! Et dans ton cœur, il fait quel temps ?'
+  ];
+
+  // moteur de spontanéité : Foxy prend une initiative au lieu de juste répondre
+  async function foxySpontaneous(m) {
+    const roll = Math.random();
+    if (roll < 0.3 && m.key === 'reveil') {
+      // un rêve au réveil
+      await imSay(pick(FOXY_DREAMS), 1000, 'happy');
+      await imSay('Bon, assez rêvassé ! Contente-moi : dis-moi bonjour comme il faut. 🦊', 800, 'joy');
+      await imOfferHelp(m); return true;
+    }
+    if (roll < 0.6) {
+      // un petit jeu
+      const g = pick(FOXY_GAMES);
+      await imSay(g.ask, 900, 'joy');
+      imSetActions([
+        { label:g.rep[0], onClick: async () => { imAddMe(g.rep[0]); await imSay(g.react[0], 800, 'laugh'); await imOfferHelp(m); } },
+        { label:g.rep[1], onClick: async () => { imAddMe(g.rep[1]); await imSay(g.react[1], 800, 'happy'); await imOfferHelp(m); } }
+      ]); return true;
+    }
+    if (roll < 0.8) {
+      // une confidence surprise
+      await imSay('Attends, faut que je te dise un truc, comme ça, spontanément...', 850, 'teach');
+      try { await maybeIntroReward(true); } catch(e) {}
+      await imOfferHelp(m); return true;
+    }
+    // une météo intérieure
+    await imSay(pick(FOXY_MOODWORDS), 900, 'pensive');
+    imSetActions([
+      { label:'☀️ Plutôt ensoleillé', onClick: async () => { imAddMe('Ensoleillé'); await imSay('Ahh, du soleil dans ton cœur, ça me réchauffe ! Garde-le bien. ☀️🦊', 800, 'joy'); await imOfferHelp(m); } },
+      { label:'🌥️ Un peu nuageux', onClick: async () => { imAddMe('Nuageux'); await imSay('Un peu nuageux, ça arrive. Je reste près de toi, on attend l\'éclaircie ensemble. 🦊💛', 850, 'concern'); await imOfferHelp(m); } },
+      { label:'🌧️ Pluvieux', onClick: async () => { imAddMe('Pluvieux'); await imSay('Oh... viens là. Les jours de pluie, on se blottit et on attend que ça passe. Je suis là. 🌧️🦊', 900, 'concern'); await imOfferHelp(m); } }
+    ]); return true;
+  }
+
+  // ===== Journal intime guidé =====
+  const JOURNAL_PROMPTS = [
+    'Raconte-moi ta journée en quelques mots, si tu veux. Je t\'écoute.',
+    'Qu\'est-ce qui t\'a fait du bien aujourd\'hui ? Écris-le pour moi.',
+    'Y a-t-il un moment de la journée que tu veux garder en mémoire ? Dis-le-moi.',
+    'Comment tu te sens, là, vraiment ? Prends le temps de l\'écrire.',
+    'Un mot, une phrase, ce que tu veux... qu\'est-ce qui te traverse le cœur en ce moment ?'
+  ];
+  async function startJournal(m) {
+    await imSay(pick(JOURNAL_PROMPTS), 900, 'pensive');
+    await imSay('(écris-moi dans la barre en bas, tout ce que tu veux — ça restera dans notre carnet)', 700, 'happy');
+    journalWaiting = true; // le prochain message libre sera capté comme entrée de journal
+  }
+  let journalWaiting = false;
+  async function saveJournalEntry(text) {
+    const q = await getQuest();
+    q.journal = q.journal || [];
+    q.journal.push({ t: new Date().toISOString(), text });
+    await saveQuest(q);
+  }
+
+  // ===== Rituel du soir émotionnel =====
+  async function eveningRitual(m) {
+    await imSay('La journée touche à sa fin... Prenons un petit moment rien que nous deux, tu veux ?', 950, 'pensive');
+    await imSay('Dis-moi : une chose douce que tu as vécue aujourd\'hui, même toute petite ?', 950, 'happy');
+    imSetActions([
+      { label:'✍️ L\'écrire à Foxy', onClick: async () => { imAddMe('Je l\'écris.'); await imSay('Oui, écris-la-moi... je la garderai précieusement. 🦊', 800, 'happy'); journalWaiting = true; } },
+      { label:'🤔 Je réfléchis...', onClick: async () => { imAddMe('Je réfléchis...'); await imSay('Prends ton temps. Même une toute petite chose compte — un rayon de soleil, un moment de calme.', 900, 'pensive'); await eveningRitualClose(m); } },
+      { label:'Rien de spécial', onClick: async () => { imAddMe('Rien de spécial.'); await imSay('C\'est ok. Certains jours sont juste... des jours. Et tu les as traversés, c\'est déjà beau.', 950, 'concern'); await eveningRitualClose(m); } }
+    ]);
+  }
+  async function eveningRitualClose(m) {
+    await imSay('Et maintenant, dépose ce qui pèse. Laisse la journée derrière toi, tu n\'as plus rien à porter.', 1000, 'concern');
+    await imSay('Je veille sur toi cette nuit. Fais de beaux rêves, mon compagnon. À demain. 🦊💛', 950, 'sleep');
+    await imOfferHelp(m);
   }
 
   // récompense : parfois un souvenir de Foxy à la fin d'un échange profond
@@ -1473,8 +1649,8 @@
     'Mon secret contre l\'angoisse du début ? Serrer mon doudou très fort à chaque fois. Petit à petit, mon corps a associé la sensation à ces câlins. Et la peur a fondu.'
   ];
 
-  async function maybeIntroReward() {
-    if (Math.random() >= 0.5) return;
+  async function maybeIntroReward(force) {
+    if (!force && Math.random() >= 0.5) return;
     const q = await getQuest();
     q.confidences = q.confidences || [];
     const remaining = FOXY_CONFIDENCES.filter(c => !q.confidences.includes(c));
@@ -1501,8 +1677,28 @@
   async function foxyHandleInput(raw) {
     const text = (raw || '').trim();
     if (!text) return;
+    // SAFEWORD : coupe tout, ramène le Foxy doux (priorité absolue)
+    const norm = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    if (broOn() && (norm.includes('stop foxy') || norm === 'stop' || norm.includes('safeword'))) {
+      imAddMe(text);
+      const inp0 = document.getElementById('imTalkInput'); if (inp0) inp0.value = '';
+      await triggerSafeword();
+      return;
+    }
     imAddMe(text);
     const inp = document.getElementById('imTalkInput'); if (inp) inp.value = '';
+    // si Foxy attend une entrée de journal, on la capte
+    if (journalWaiting) {
+      journalWaiting = false;
+      await saveJournalEntry(text);
+      await imSay(pick([
+        'Merci de m\'avoir confié ça. Je le range précieusement dans notre carnet. 🦊💛',
+        'C\'est noté, mot pour mot. Ces petits bouts de toi, je les garde comme des trésors.',
+        'Voilà, c\'est dans notre carnet à nous. Merci de m\'ouvrir ton cœur comme ça.'
+      ]), 900, 'happy');
+      if (currentM) await imOfferHelp(currentM);
+      return;
+    }
     const intent = detectIntent(text);
     if (!intent) {
       await imSay(pick(FOXY_FALLBACK), 700, 'pensive');
@@ -1820,15 +2016,32 @@
     }
     ctx = ctx || {};
     // ===== ALERTES (toujours prioritaires) =====
+    // MODE INTENSIF : port prolongé (mouillée/saturée gardée trop longtemps)
+    if (hardMode && hours != null && ctx.state !== 'sec') {
+      if (hours >= HARD.wearCapH) {
+        return { expr:'surprised', cls:'long',
+          say:'STOP. Ça fait beaucoup trop longtemps que tu portes cette couche. On ne discute pas : tu vas te changer MAINTENANT. C\'est pour ta peau, et je ne te lâche pas là-dessus. 🦊' };
+      }
+      if (hours >= HARD.wearAlertH) {
+        return { expr:'concern', cls:'long',
+          say:'Écoute-moi bien : ça fait un sacré moment maintenant. Tu tiens le cadre, c\'est bien, mais là il faut penser à changer. Ne pousse pas trop, ta peau compte plus que le record.' };
+      }
+    }
     // couche sèche depuis plus de 3h de port → travail du lâcher-prise
     if (ctx.state === 'sec' && hours != null && hours >= 3) {
       return { expr:'concern', cls:'long',
-        say:'Dis donc... ta couche est encore sèche après tout ce temps. Tu te retiens sans t\'en rendre compte. Rappelle-toi : ici on apprend à lâcher prise, pas à se contrôler. Détends-toi, laisse venir quand ça vient. Tu es en sécurité, je suis là. 🦊' };
+        say: broOn()
+          ? 'Encore sèche ? Tu luttes encore, je le vois... Mais tu sais très bien que c\'est inutile. Tu vas finir par lâcher, c\'est inévitable. Alors arrête de te battre et laisse-toi aller. Maintenant.'
+          : (hardMode
+          ? 'Sèche, encore ? Là tu te retiens, et en mode intensif je ne te laisse pas passer ça. Concentre-toi, relâche, c\'est le cœur du travail. Je sais que tu peux mieux faire.'
+          : 'Dis donc... ta couche est encore sèche après tout ce temps. Tu te retiens sans t\'en rendre compte. Rappelle-toi : ici on apprend à lâcher prise, pas à se contrôler. Détends-toi, laisse venir quand ça vient. Tu es en sécurité, je suis là. 🦊') };
     }
-    // change obligatoire dépassé de 15 min et NON fait → inquiet
+    // change obligatoire dépassé et NON fait → inquiet
     if (ctx.overdue) {
       return { expr:'concern', cls:'long',
-        say:'Hé... l\'heure de ton change est passée et tu ne l\'as pas encore fait. Tout va bien ? Va vite t\'en occuper, je m\'inquiète un peu pour ta peau !' };
+        say: hardMode
+          ? 'L\'heure est passée et tu n\'as pas changé. En mode intensif, ça ne se laisse pas traîner — allez, debout, on s\'en occupe tout de suite. Tu vaux mieux que ce relâchement.'
+          : 'Hé... l\'heure de ton change est passée et tu ne l\'as pas encore fait. Tout va bien ? Va vite t\'en occuper, je m\'inquiète un peu pour ta peau !' };
     }
     // ===== COMPORTEMENT NORMAL =====
     // 1h30 ou moins avant le prochain change → excité
@@ -1852,7 +2065,7 @@
     let overdue = false;
     if (prev != null) {
       const since = nowMin - prev.m;
-      if (since >= 15 && since <= 120) {
+      if (since >= (hardMode ? HARD.overdueMin : 15) && since <= 120) {
         // le pilier est-il déjà fait aujourd'hui ?
         try {
           const r = await window.storage.get('slotdone:'+todayStr());
@@ -2059,7 +2272,8 @@
     const on = await getBreaches(date);
     let p = 0;
     BREACHES.forEach(b => { if (on[b.id]) p += b.w; });
-    return Math.min(40, p); // plafonné pour ne pas écraser tout le score
+    if (hardMode) p = Math.round(p * 1.5); // entorses plus lourdes en mode intensif
+    return Math.min(hardMode ? 55 : 40, p);
   }
 
   let breachSel = null; // sélection locale en cours (non enregistrée)
@@ -2129,8 +2343,16 @@
     for (let i = 0; ; i++) {
       const d = new Date(); d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0,10);
+      // en mode intensif, un jour avec entorse déclarée casse la série
+      if (hardMode) {
+        try {
+          const rb = await window.storage.get('breach:'+key);
+          const b = (rb && rb.value) ? JSON.parse(rb.value) : {};
+          if (Object.keys(b).some(k => b[k])) { if (i === 0) { /* aujourd'hui : on continue à regarder */ } else break; }
+        } catch(e) {}
+      }
       if (byDate[key]) streak++;
-      else { if (i === 0) continue; break; } // tolère aujourd'hui pas encore rempli
+      else { if (i === 0) continue; break; }
     }
     const spanDays = Math.round((today - first) / 86400000) + 1;
     const fillRate = spanDays ? filledTotal / spanDays : 1;
@@ -2509,9 +2731,22 @@
 
     if (slot.ctx === 'pilier') {
       // change imposé : direct au flux guidé
-      document.getElementById('dueText').textContent = 'C\'est l\'heure de ton change, viens on s\'en occupe étape par étape !';
+      document.getElementById('dueText').textContent = broOn()
+        ? 'Inutile de résister, tu le sais déjà. On fait ton change, maintenant. Laisse-toi faire, c\'est plus simple ainsi.'
+        : (hardMode ? 'Mode intensif : c\'est l\'heure, pas de discussion. On fait ton change MAINTENANT.'
+        : 'C\'est l\'heure de ton change, viens on s\'en occupe étape par étape !');
       addBtn(acts, 'ok', '🦊 Faire le change avec Foxy', () => startChange('pilier'));
-      addBtn(acts, 'adj', 'Plus tard', () => { dueSnooze[slot.key] = Date.now() + 10*60000; activeSlotKey = null; closeCheck(); });
+      if (hardMode) {
+        addBtn(acts, 'adj', 'Vraiment pas maintenant', () => {
+          document.getElementById('dueText').textContent = 'Tu me dois une explication : pourquoi tu repousses ?';
+          const a = document.getElementById('dueActs'); a.innerHTML = '';
+          addBtn(a, 'adj', 'Je suis occupé', () => { dueSnooze[slot.key] = Date.now()+5*60000; activeSlotKey=null; closeCheck(); });
+          addBtn(a, 'adj', 'J\'ai la flemme', () => { dueSnooze[slot.key] = Date.now()+3*60000; activeSlotKey=null; closeCheck(); });
+          addBtn(a, 'ok', 'Ok, finalement je le fais', () => startChange('pilier'));
+        });
+      } else {
+        addBtn(acts, 'adj', 'Plus tard', () => { dueSnooze[slot.key] = Date.now() + 10*60000; activeSlotKey = null; closeCheck(); });
+      }
     } else {
       // check : on reporte d'abord l'état de la couche
       document.getElementById('dueText').textContent = 'Petit check ! Ta couche, elle est comment ?';
@@ -3180,6 +3415,46 @@
     ]}
   ];
 
+  // ===== MODE INTENSIF (cadre strict + Foxy exigeant) =====
+  let hardMode = false;
+  const HARD = {
+    overdueMin: 5,       // Foxy s'inquiète à +5 min (vs 15)
+    wearAlertH: 5,       // alerte ferme de port prolongé à 5h
+    wearCapH: 6.5,       // plafond non-reportable à 6h30
+    maxBiberons: 5       // plafond hydratation (anti-excès)
+  };
+  async function loadHardMode() {
+    try { const r = await window.storage.get('pref:hard'); if (r && r.value) hardMode = JSON.parse(r.value); } catch(e) {}
+    try { const r2 = await window.storage.get('pref:bigbro'); if (r2 && r2.value) bigbro = JSON.parse(r2.value); } catch(e) {}
+  }
+  // ===== Foxy grand frère (ton dominateur bienveillant) =====
+  let bigbro = false;
+  function broOn() { return hardMode && bigbro; } // nécessite le mode intensif
+  async function setBigbro(v) {
+    bigbro = v;
+    try { await window.storage.set('pref:bigbro', JSON.stringify(v)); } catch(e) {}
+    const sw = document.getElementById('bigbroSwitch'); if (sw) sw.classList.toggle('on', bigbro);
+  }
+  // choisit le texte selon le mode : bro(texte doux, texte grand frère)
+  function bro(soft, dom) { return broOn() ? dom : soft; }
+  // le safeword coupe tout et ramène le Foxy doux
+  async function triggerSafeword() {
+    bigbro = false;
+    try { await window.storage.set('pref:bigbro', JSON.stringify(false)); } catch(e) {}
+    const sw = document.getElementById('bigbroSwitch'); if (sw) sw.classList.remove('on');
+    try { imClear(); } catch(e) {}
+    await imSay('*doux, immédiatement* Hé, je suis là. On arrête tout, d\'accord ? C\'est bon, tu es en sécurité.', 700, 'concern');
+    await imSay('Reprends ton souffle. Je redeviens ton Foxy tout doux. Tu as très bien fait de me le dire. On va à ton rythme, tranquille. 🦊💛', 900, 'happy');
+    if (currentM) await imOfferHelp(currentM);
+  }
+  async function setHardMode(v) {
+    hardMode = v;
+    try { await window.storage.set('pref:hard', JSON.stringify(v)); } catch(e) {}
+    const sw = document.getElementById('hardSwitch'); if (sw) sw.classList.toggle('on', hardMode);
+    document.body.classList.toggle('hardmode', hardMode);
+    try { await refresh(); } catch(e) {}
+  }
+
   let notifPrefs = {};
   async function loadNotifPrefs() {
     try { const r = await window.storage.get('pref:notif'); if (r && r.value) notifPrefs = JSON.parse(r.value); } catch(e) {}
@@ -3415,9 +3690,20 @@
     const n = document.querySelector('.facade-note'); if (n) n.value = '';
   }
   function enterPause() {
-    // Foxy dit au revoir dans une popup, puis on bascule sur la façade
     try { foxyPopHide(); } catch(e) {}
     try { loadFoxyOutfit(); } catch(e) {}
+    if (hardMode) {
+      // en intensif, Foxy résiste : il faut confirmer fermement
+      foxyPopShow('Tu veux vraiment faire une pause ? En mode intensif, on ne s\'échappe pas comme ça... Réfléchis bien. Tu es sûr ?', 'concern', [
+        { label:'Oui, j\'ai vraiment besoin de faire une pause', onClick: async () => {
+          foxyPopShow('Bon... d\'accord, si tu en as VRAIMENT besoin. Mais je compte sur toi pour revenir vite reprendre le cadre. À tout à l\'heure. 🦊', 'pensive', [
+            { label:'Je reviens vite, promis', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
+          ]);
+        }},
+        { soft:true, label:'Non, je continue', onClick: async () => { foxyPopHide(); } }
+      ]);
+      return;
+    }
     foxyPopShow('À très vite, mon compagnon ! Je t\'attends bien au chaud, reviens quand tu veux. 🦊💛', 'wave', [
       { label:'À tout à l\'heure Foxy', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
     ]);
@@ -3654,6 +3940,19 @@
         conf.map(c => '<div style="font-size:12.5px;font-weight:600;color:var(--ink);font-style:italic;line-height:1.5;padding:6px 0;border-top:1px dashed var(--line)">« '+c+' »</div>').join('');
       box.appendChild(sec);
     }
+    // Mon carnet (journal intime)
+    const journal = (q.journal || []);
+    if (journal.length) {
+      const sec = document.createElement('div');
+      sec.style.cssText = 'margin-top:16px;padding-top:12px;border-top:2px dashed #e0d3bd';
+      sec.innerHTML = '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:15px;color:#5a4326;margin-bottom:8px">✍️ Mon carnet</div>'+
+        '<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px">'+journal.length+' entrée'+(journal.length>1?'s':'')+' — tes mots à toi, gardés par Foxy</div>'+
+        journal.slice().reverse().map(e => {
+          let d = ''; try { d = new Date(e.t).toLocaleDateString('fr-FR',{day:'numeric',month:'short'}); } catch(x){}
+          return '<div style="padding:7px 0;border-top:1px dashed var(--line)"><div style="font-size:10.5px;font-weight:800;color:var(--muted)">'+d+'</div><div style="font-size:13px;font-weight:600;color:var(--ink);line-height:1.5">'+e.text.replace(/</g,'&lt;')+'</div></div>';
+        }).join('');
+      box.appendChild(sec);
+    }
   }
   document.getElementById('openQuest').addEventListener('click', async () => {
     const card = document.getElementById('questCard');
@@ -3736,9 +4035,16 @@
     document.getElementById('dateInput').value = todayStr();
     await loadAutoPref();
     await loadNotifPrefs();
+    await loadHardMode();
+    const hsw = document.getElementById('hardSwitch');
+    if (hsw) { hsw.classList.toggle('on', hardMode); hsw.addEventListener('click', () => setHardMode(!hardMode)); }
+    const bsw = document.getElementById('bigbroSwitch');
+    if (bsw) { bsw.classList.toggle('on', bigbro); bsw.addEventListener('click', () => setBigbro(!bigbro)); }
+    document.body.classList.toggle('hardmode', hardMode);
     await loadFoxyOutfit();
     refreshHeadFoxy();
     await loadVoice();
+    try { const r = await window.storage.get('queststage'); window._lastStage = (r && r.value) ? JSON.parse(r.value) : 0; } catch(e) { window._lastStage = 0; }
     await loadPause();
     try { await checkQrLock(); } catch(e) {}
     scheduleNotifications();
@@ -3814,8 +4120,10 @@
     // un pilier reste "dû" de son heure jusqu'à +2h (les checks : fenêtre courte de 45 min)
     let due = null;
     for (const s of CHANGE_SLOTS) {
-      const window = (s.ctx === 'pilier') ? 120 : 45;
-      if (nowMin >= s.m && nowMin <= s.m + window) { due = s; break; }
+      // en mode intensif, tous les créneaux deviennent des piliers obligatoires
+      const ctx = hardMode ? 'pilier' : s.ctx;
+      const window = (ctx === 'pilier') ? 120 : 45;
+      if (nowMin >= s.m && nowMin <= s.m + window) { due = Object.assign({}, s, { ctx }); break; }
     }
     if (!due) return;
     // déjà fait ?
