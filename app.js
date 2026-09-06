@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '9.3';
+  const APP_VERSION = '9.4';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -743,7 +743,25 @@
       ]
     }
   };
+  // réactions en mode grand frère (dominateur bienveillant, jamais dégradant)
+  const BRO_REACT = {
+    reveil_sec:'Sèche. Tu résistes encore. Ça ne durera pas — je te connais, tu vas céder. Détends-toi.',
+    reveil_mouille:'Bien mouillée. Voilà ce que j\'attends de toi. Tu vois comme c\'est bien quand tu te laisses aller ?',
+    reveil_fuite:'Une fuite. On ajustera. Ne t\'en fais pas de ça, c\'est mon rôle de veiller au cadre.',
+    matin_ok:'Parfait. Tu as fait ce qu\'il fallait. C\'est bien quand tu m\'obéis sans que j\'insiste.',
+    matin_change:'On te change. Maintenant. Allonge-toi, laisse-moi faire.',
+    matin_soif:'Tu n\'as pas bu. Tu vas le faire, tout de suite. Je ne le répète pas.',
+    aprem_ok:'Bien. Tout est en ordre. Continue à te laisser guider comme ça.',
+    aprem_sieste:'Tu t\'es reposé, bien. Le repos aussi, c\'est moi qui le décide pour toi.',
+    aprem_change:'Ta couche a assez servi. On change. Ne discute pas.',
+    soir_ok:'Journée tenue. Tu as été sage. C\'est exactement ce que j\'attendais de toi.',
+    soir_souci:'Ta peau demande de l\'attention. On s\'en occupe sérieusement, tout de suite.',
+    tet_ok:'Bien. Ta tétine est là où elle doit être.',
+    tet_prise:'Reprends-la. Voilà. C\'est mieux quand tu fais ce que je dis.',
+    tet_miss:'Tu l\'as perdue ? Va la chercher. Un petit garçon sage garde sa tétine près de lui.'
+  };
   function react(result) {
+    if (broOn() && BRO_REACT[result]) return BRO_REACT[result];
     const persona = voiceMode === 'foxy' ? 'foxy' : 'care';
     const pool = REACT_POOLS[persona] && REACT_POOLS[persona][result];
     if (pool && pool.length) return pool[Math.floor(Math.random()*pool.length)];
@@ -971,6 +989,15 @@
 
   // variantes Foxy pour les moments
   function foxyOpener(m) {
+    if (broOn()) {
+      const map = {
+        reveil:'Debout. Je t\'attendais.', matin:'Te voilà. On va faire les choses bien ce matin.',
+        aprem:'Approche. C\'est l\'heure de faire le point, et cette fois tu m\'écoutes.',
+        soir:'La journée se termine. Tu vas me rendre des comptes, tranquillement.',
+        nuit:'Tu devrais dormir. Mais puisque tu es là, écoute-moi.'
+      };
+      return map[m.key] || m.title;
+    }
     const map = {
       reveil:'Hey, bien dormi ?', matin:'Coucou, ça roule ce matin ?',
       aprem:'Alors, cette aprem ?', soir:'La journée est bientôt bouclée !',
@@ -979,6 +1006,16 @@
     return map[m.key] || m.title;
   }
   function foxyQ(m) {
+    if (broOn()) {
+      const map = {
+        reveil:'Ta couche de nuit. Montre-moi comment elle a tenu — ne me fais pas répéter.',
+        matin:'Dis-moi l\'état de ta couche. Et ton biberon, tu l\'as bu ? Je le saurai.',
+        aprem:'On fait le point, et tu réponds franchement. Couche, sieste, hydratation.',
+        soir:'On fait ton change de nuit et ton bilan. Ce n\'est pas une option.',
+        nuit:'Change ou pas, dis-le-moi. Ensuite tu dors, c\'est moi qui décide.'
+      };
+      return map[m.key] || m.q;
+    }
     const map = {
       reveil:'Ta couche de nuit, elle a bien tenu ?',
       matin:'Ta couche est comment, et t\'as pensé à ton premier biberon ?',
@@ -989,6 +1026,16 @@
     return map[m.key] || m.q;
   }
   function foxyAfter(m) {
+    if (broOn()) {
+      const map = {
+        reveil:'Le grand change est à 9h. Tu y seras, et tu ne discuteras pas.',
+        matin:'Tu bois, régulièrement. Je n\'ai pas à te le redemander.',
+        aprem:'Tu tiens le rythme que j\'ai fixé. Ce soir, bilan.',
+        soir:'Tu allèges l\'eau et tu crèmes bien. Fais-le pour moi.',
+        nuit:'Maintenant tu dors. C\'est un ordre, et un doux.'
+      };
+      return map[m.key] || (m.after||'');
+    }
     const map = {
       reveil:'Le grand change c\'est à 9h, tu vas voir ça passe crème.',
       matin:'Continue à boire, c\'est le truc qui change tout, crois-moi.',
@@ -1026,7 +1073,12 @@
   // Le personnage demande ce qu'il peut faire, avec un menu de réconfort/guidage
   async function imOfferHelp(m) {
     const isFoxy = voiceMode === 'foxy';
-    const openers = isFoxy ? [
+    const openers = broOn() ? [
+      'Qu\'est-ce qu\'il te faut ? Dis-le, et je déciderai.',
+      'Je t\'écoute. Mais c\'est moi qui juge de ce dont tu as besoin.',
+      'Parle. Je suis là, et je gère.',
+      'De quoi as-tu besoin ? Ne réfléchis pas trop, laisse-moi faire.'
+    ] : isFoxy ? [
       'Un truc que je peux faire pour toi ?',
       'T\'as besoin de quoi, là ?',
       'Dis-moi tout, je suis là.',
@@ -1487,8 +1539,9 @@
   async function runIntroNode(theme, nodeId, m) {
     const node = INTRO_TREES[theme] && INTRO_TREES[theme][nodeId];
     if (!node) { if (m) await imOfferHelp(m); return; }
+    // En grand frère : ton dominateur SAUF sur les nœuds sensibles (wellbeing) qui restent doux.
+    // Sur ces nœuds, Foxy redevient tendre et protecteur, quel que soit le mode.
     for (const line of node.say) { await imSay(line, 850, node.expr || 'pensive'); }
-    // récompense narrative éventuelle
     if (node.reward) { try { await maybeIntroReward(); } catch(e) {} }
     if (node.opts && node.opts.length) {
       imSetActions(node.opts.map(o => ({
@@ -1496,7 +1549,6 @@
         onClick: async () => { imAddMe(o.label); await runIntroNode(theme, o.to, m); }
       })));
     } else {
-      // fin de branche : on rend la main en douceur
       if (m) await imOfferHelp(m);
     }
   }
@@ -1504,6 +1556,14 @@
   // lance une discussion introspective (thème précis ou aléatoire)
   async function startIntrospection(m, theme) {
     theme = theme || pickIntroThemeForStage();
+    // lead-in grand frère : il mène la discussion (mais le contenu sensible reste doux)
+    if (broOn()) {
+      await imSay(pick([
+        'On va parler, toi et moi. Et tu vas me répondre franchement, sans te dérober.',
+        'Assieds-toi. Je veux savoir où tu en es, et tu ne vas rien me cacher.',
+        'C\'est le moment de te confier à moi. Ne réfléchis pas trop — parle.'
+      ]), 850, 'proud');
+    }
     await runIntroNode(theme, 'start', m || currentM);
   }
 
@@ -1552,27 +1612,25 @@
   async function foxySpontaneous(m) {
     const roll = Math.random();
     if (roll < 0.3 && m.key === 'reveil') {
-      // un rêve au réveil
       await imSay(pick(FOXY_DREAMS), 1000, 'happy');
-      await imSay('Bon, assez rêvassé ! Contente-moi : dis-moi bonjour comme il faut. 🦊', 800, 'joy');
+      await imSay(bro('Bon, assez rêvassé ! Contente-moi : dis-moi bonjour comme il faut. 🦊', 'Voilà pour mon rêve. Maintenant dis-moi bonjour comme il faut — je l\'attends.'), 800, 'joy');
       await imOfferHelp(m); return true;
     }
     if (roll < 0.6) {
-      // un petit jeu
+      // un petit jeu — en grand frère : joueur mais c'est lui qui mène
       const g = pick(FOXY_GAMES);
-      await imSay(g.ask, 900, 'joy');
+      await imSay(broOn() ? 'On va jouer. C\'est moi qui choisis le jeu, et tu joues avec moi. ' + g.ask : g.ask, 900, 'joy');
       imSetActions([
         { label:g.rep[0], onClick: async () => { imAddMe(g.rep[0]); await imSay(g.react[0], 800, 'laugh'); await imOfferHelp(m); } },
         { label:g.rep[1], onClick: async () => { imAddMe(g.rep[1]); await imSay(g.react[1], 800, 'happy'); await imOfferHelp(m); } }
       ]); return true;
     }
     if (roll < 0.8) {
-      // une confidence surprise
-      await imSay('Attends, faut que je te dise un truc, comme ça, spontanément...', 850, 'teach');
+      await imSay(bro('Attends, faut que je te dise un truc, comme ça, spontanément...', 'Écoute-moi. Je vais te confier quelque chose, et tu vas m\'écouter sagement.'), 850, 'teach');
       try { await maybeIntroReward(true); } catch(e) {}
       await imOfferHelp(m); return true;
     }
-    // une météo intérieure
+    // une météo intérieure (reste douce même en grand frère : touche l'émotionnel)
     await imSay(pick(FOXY_MOODWORDS), 900, 'pensive');
     imSetActions([
       { label:'☀️ Plutôt ensoleillé', onClick: async () => { imAddMe('Ensoleillé'); await imSay('Ahh, du soleil dans ton cœur, ça me réchauffe ! Garde-le bien. ☀️🦊', 800, 'joy'); await imOfferHelp(m); } },
