@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '9.4';
+  const APP_VERSION = '9.5';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -745,20 +745,20 @@
   };
   // réactions en mode grand frère (dominateur bienveillant, jamais dégradant)
   const BRO_REACT = {
-    reveil_sec:'Sèche. Tu résistes encore. Ça ne durera pas — je te connais, tu vas céder. Détends-toi.',
-    reveil_mouille:'Bien mouillée. Voilà ce que j\'attends de toi. Tu vois comme c\'est bien quand tu te laisses aller ?',
-    reveil_fuite:'Une fuite. On ajustera. Ne t\'en fais pas de ça, c\'est mon rôle de veiller au cadre.',
-    matin_ok:'Parfait. Tu as fait ce qu\'il fallait. C\'est bien quand tu m\'obéis sans que j\'insiste.',
-    matin_change:'On te change. Maintenant. Allonge-toi, laisse-moi faire.',
-    matin_soif:'Tu n\'as pas bu. Tu vas le faire, tout de suite. Je ne le répète pas.',
-    aprem_ok:'Bien. Tout est en ordre. Continue à te laisser guider comme ça.',
-    aprem_sieste:'Tu t\'es reposé, bien. Le repos aussi, c\'est moi qui le décide pour toi.',
-    aprem_change:'Ta couche a assez servi. On change. Ne discute pas.',
-    soir_ok:'Journée tenue. Tu as été sage. C\'est exactement ce que j\'attendais de toi.',
-    soir_souci:'Ta peau demande de l\'attention. On s\'en occupe sérieusement, tout de suite.',
-    tet_ok:'Bien. Ta tétine est là où elle doit être.',
-    tet_prise:'Reprends-la. Voilà. C\'est mieux quand tu fais ce que je dis.',
-    tet_miss:'Tu l\'as perdue ? Va la chercher. Un petit garçon sage garde sa tétine près de lui.'
+    reveil_sec:'Sèche, encore... Tu résistes toujours, je le vois. C\'est mignon. Mais tu sais déjà comment ça finit — tu vas céder, c\'est inévitable. Laisse-toi aller, va.',
+    reveil_mouille:'Bien mouillée... Voilà. Tu vois comme c\'est doux quand tu ne luttes plus ? C\'est ça, exactement ça. Laisse-toi couler.',
+    reveil_fuite:'Une fuite... ce n\'est rien. On ajustera. Ne t\'inquiète pas de ça, laisse-moi veiller sur le reste.',
+    matin_ok:'Tout est en ordre... Tu vois comme c\'est simple, quand tu arrêtes de te battre ? Ça vient tout seul maintenant.',
+    matin_change:'On va te changer... Tu peux traîner si tu veux, mais ça arrivera de toute façon. Autant te laisser faire tout de suite, tu seras mieux.',
+    matin_soif:'Tu n\'as pas bu... Tu vas le faire. Pas parce que je l\'ordonne — parce qu\'au fond, tu sais que c\'est ce qu\'il te faut. Laisse-toi guider.',
+    aprem_ok:'Tout roule... Tu te laisses porter maintenant, sans même y penser. C\'est là que ça devient bon.',
+    aprem_sieste:'Tu t\'es reposé... Le sommeil t\'a pris, tu ne pouvais pas y résister. Et c\'était doux, hein ?',
+    aprem_change:'Ta couche a bien servi... On la change. Ne te crispe pas, laisse-toi faire, c\'est plus simple ainsi.',
+    soir_ok:'Belle journée... Tu t\'es laissé porter du début à la fin. Tu vois ? Résister n\'avait aucun sens.',
+    soir_souci:'Ta peau demande de l\'attention... On s\'en occupe, doucement mais vraiment. Laisse-moi prendre soin de toi.',
+    tet_ok:'Ta tétine est là... bien sûr qu\'elle est là. Tu ne peux plus t\'en passer, et c\'est très bien comme ça.',
+    tet_prise:'Reprends-la... voilà. Tu vois comme c\'est naturel, maintenant ? Tu n\'y penses même plus.',
+    tet_miss:'Tu l\'as perdue ? Va la retrouver... tu en as besoin, tu le sais. Inutile de faire semblant du contraire.'
   };
   function react(result) {
     if (broOn() && BRO_REACT[result]) return BRO_REACT[result];
@@ -862,8 +862,8 @@
         const slot = inRegMidi ? 'midi' : 'soir';
         const tag = todayStr()+':'+slot;
         if (contDate !== tag) {
-          await imSay(broOn() ? 'C\'est ta fenêtre de régression. Tu vas mettre ta contention douce, là, maintenant. Ne discute pas — tu sais que tu vas le faire de toute façon.' : 'C\'est ta fenêtre de régression, et en mode intensif ça ne se négocie pas : mets ta contention douce maintenant.', 900, 'proud');
-          await imSay(broOn() ? 'Harnais, mittens, ce que je décide. Tu peux t\'en défaire — mais tu ne le feras pas, parce qu\'au fond tu veux être contenu. Laisse-toi aller, c\'est inévitable et c\'est bon.' : 'Harnais fleece bien réglé, mittens ou combi si tu veux — tout ce qui te contient en douceur. Tu peux toujours t\'en défaire, mais là, on s\'engage. C\'est le moment de lâcher prise pour de vrai.', 1000, 'teach');
+          await imSay(broOn() ? 'C\'est ta fenêtre de régression... Tu vas mettre ta contention douce. Tu peux hésiter, mais au fond tu sais que tu le feras — tu en as envie.' : 'C\'est ta fenêtre de régression, et en mode intensif ça ne se négocie pas : mets ta contention douce maintenant.', 900, 'proud');
+          await imSay(broOn() ? 'Harnais, mittens... laisse-toi contenir. Tu pourrais t\'en défaire, mais tu ne le feras pas. Résister à ce besoin d\'être tenu, c\'est vain, et tu le sais. Abandonne-toi.' : 'Harnais fleece bien réglé, mittens ou combi si tu veux — tout ce qui te contient en douceur. Tu peux toujours t\'en défaire, mais là, on s\'engage. C\'est le moment de lâcher prise pour de vrai.', 1000, 'teach');
           imSetActions([
             { label:'🎽 C\'est fait, je suis contenu', onClick: async () => {
               imAddMe('C\'est fait, je suis contenu.');
@@ -991,10 +991,11 @@
   function foxyOpener(m) {
     if (broOn()) {
       const map = {
-        reveil:'Debout. Je t\'attendais.', matin:'Te voilà. On va faire les choses bien ce matin.',
-        aprem:'Approche. C\'est l\'heure de faire le point, et cette fois tu m\'écoutes.',
-        soir:'La journée se termine. Tu vas me rendre des comptes, tranquillement.',
-        nuit:'Tu devrais dormir. Mais puisque tu es là, écoute-moi.'
+        reveil:'Te voilà réveillé... Tu vois, tu es déjà revenu vers moi.',
+        matin:'Ah, tu es là. Comme toujours. Tu ne pourrais pas faire autrement, au fond.',
+        aprem:'On se retrouve, forcément. Approche, laisse-toi porter un moment.',
+        soir:'La journée se termine, et te voilà près de moi. C\'est dans l\'ordre des choses.',
+        nuit:'Tu devrais dormir... mais tu es venu me voir. Tu ne résistes plus, hein ?'
       };
       return map[m.key] || m.title;
     }
@@ -1008,11 +1009,11 @@
   function foxyQ(m) {
     if (broOn()) {
       const map = {
-        reveil:'Ta couche de nuit. Montre-moi comment elle a tenu — ne me fais pas répéter.',
-        matin:'Dis-moi l\'état de ta couche. Et ton biberon, tu l\'as bu ? Je le saurai.',
-        aprem:'On fait le point, et tu réponds franchement. Couche, sieste, hydratation.',
-        soir:'On fait ton change de nuit et ton bilan. Ce n\'est pas une option.',
-        nuit:'Change ou pas, dis-le-moi. Ensuite tu dors, c\'est moi qui décide.'
+        reveil:'Alors, ta couche de nuit... Inutile de me cacher quoi que ce soit, tu finiras par tout me dire de toute façon.',
+        matin:'Ta couche, ton biberon... dis-moi. Ça ne sert à rien de faire semblant avec moi, tu le sais.',
+        aprem:'On fait le point. Ne te dérobe pas — tu vas me répondre, c\'est inévitable.',
+        soir:'Le change de nuit et le bilan... tu vas t\'y laisser aller, comme chaque soir. Autant maintenant.',
+        nuit:'Un change, ou juste dormir ? Laisse venir ce qui doit venir, ne lutte pas.'
       };
       return map[m.key] || m.q;
     }
@@ -1028,11 +1029,11 @@
   function foxyAfter(m) {
     if (broOn()) {
       const map = {
-        reveil:'Le grand change est à 9h. Tu y seras, et tu ne discuteras pas.',
-        matin:'Tu bois, régulièrement. Je n\'ai pas à te le redemander.',
-        aprem:'Tu tiens le rythme que j\'ai fixé. Ce soir, bilan.',
-        soir:'Tu allèges l\'eau et tu crèmes bien. Fais-le pour moi.',
-        nuit:'Maintenant tu dors. C\'est un ordre, et un doux.'
+        reveil:'Le grand change sera à 9h. Tu y viendras, tu le sais déjà. Inutile d\'y penser.',
+        matin:'Tu boiras, comme il faut. Ça se fera tout seul, laisse-toi porter.',
+        aprem:'Le rythme te tient plus que tu ne le tiens. Laisse-le faire.',
+        soir:'Allège l\'eau, crème bien... tu vas te laisser border pour la nuit, forcément.',
+        nuit:'Tes yeux se ferment déjà. Ne lutte pas contre le sommeil, laisse-toi partir...'
       };
       return map[m.key] || (m.after||'');
     }
@@ -1074,10 +1075,10 @@
   async function imOfferHelp(m) {
     const isFoxy = voiceMode === 'foxy';
     const openers = broOn() ? [
-      'Qu\'est-ce qu\'il te faut ? Dis-le, et je déciderai.',
-      'Je t\'écoute. Mais c\'est moi qui juge de ce dont tu as besoin.',
-      'Parle. Je suis là, et je gère.',
-      'De quoi as-tu besoin ? Ne réfléchis pas trop, laisse-moi faire.'
+      'De quoi as-tu besoin ? Ne réfléchis pas trop... laisse-moi deviner, je te connais mieux que toi.',
+      'Dis-moi... ou ne dis rien, je finirai par comprendre de toute façon.',
+      'Je suis là. Laisse-toi aller, dis-moi ce qui te traverse.',
+      'Approche. Tu n\'as plus besoin de tout gérer seul, tu le sais bien maintenant.'
     ] : isFoxy ? [
       'Un truc que je peux faire pour toi ?',
       'T\'as besoin de quoi, là ?',
@@ -1559,10 +1560,10 @@
     // lead-in grand frère : il mène la discussion (mais le contenu sensible reste doux)
     if (broOn()) {
       await imSay(pick([
-        'On va parler, toi et moi. Et tu vas me répondre franchement, sans te dérober.',
-        'Assieds-toi. Je veux savoir où tu en es, et tu ne vas rien me cacher.',
-        'C\'est le moment de te confier à moi. Ne réfléchis pas trop — parle.'
-      ]), 850, 'proud');
+        'On va parler, toi et moi... Et tu vas te confier, doucement. Tu ne pourras pas t\'en empêcher.',
+        'Viens là. Dis-moi ce qui se passe en toi... inutile de résister, ça sortira tout seul.',
+        'Laisse-toi aller à me parler. Tu verras, c\'est plus facile quand tu arrêtes de te retenir.'
+      ]), 850, 'pensive');
     }
     await runIntroNode(theme, 'start', m || currentM);
   }
@@ -1613,20 +1614,20 @@
     const roll = Math.random();
     if (roll < 0.3 && m.key === 'reveil') {
       await imSay(pick(FOXY_DREAMS), 1000, 'happy');
-      await imSay(bro('Bon, assez rêvassé ! Contente-moi : dis-moi bonjour comme il faut. 🦊', 'Voilà pour mon rêve. Maintenant dis-moi bonjour comme il faut — je l\'attends.'), 800, 'joy');
+      await imSay(bro('Bon, assez rêvassé ! Contente-moi : dis-moi bonjour comme il faut. 🦊', 'Voilà mon rêve... Allez, dis-moi bonjour. Tu en avais envie de toute façon, non ? 🦊'), 800, 'joy');
       await imOfferHelp(m); return true;
     }
     if (roll < 0.6) {
-      // un petit jeu — en grand frère : joueur mais c'est lui qui mène
+      // un petit jeu — en grand frère : joueur mais il mène, sans forcer
       const g = pick(FOXY_GAMES);
-      await imSay(broOn() ? 'On va jouer. C\'est moi qui choisis le jeu, et tu joues avec moi. ' + g.ask : g.ask, 900, 'joy');
+      await imSay(broOn() ? 'On va jouer, toi et moi... Tu vas adorer, tu ne pourras pas t\'en empêcher. ' + g.ask : g.ask, 900, 'joy');
       imSetActions([
         { label:g.rep[0], onClick: async () => { imAddMe(g.rep[0]); await imSay(g.react[0], 800, 'laugh'); await imOfferHelp(m); } },
         { label:g.rep[1], onClick: async () => { imAddMe(g.rep[1]); await imSay(g.react[1], 800, 'happy'); await imOfferHelp(m); } }
       ]); return true;
     }
     if (roll < 0.8) {
-      await imSay(bro('Attends, faut que je te dise un truc, comme ça, spontanément...', 'Écoute-moi. Je vais te confier quelque chose, et tu vas m\'écouter sagement.'), 850, 'teach');
+      await imSay(bro('Attends, faut que je te dise un truc, comme ça, spontanément...', 'Reste un instant... j\'ai quelque chose à te confier. Écoute, laisse-toi porter.'), 850, 'teach');
       try { await maybeIntroReward(true); } catch(e) {}
       await imOfferHelp(m); return true;
     }
@@ -2089,7 +2090,7 @@
     if (ctx.state === 'sec' && hours != null && hours >= 3) {
       return { expr:'concern', cls:'long',
         say: broOn()
-          ? 'Encore sèche ? Tu luttes encore, je le vois... Mais tu sais très bien que c\'est inutile. Tu vas finir par lâcher, c\'est inévitable. Alors arrête de te battre et laisse-toi aller. Maintenant.'
+          ? 'Encore sèche... Tu luttes toujours, je le sens. Mais tu sais bien que c\'est vain. Tu vas finir par lâcher, c\'est inévitable — alors laisse-toi aller, doucement. Ça viendra tout seul.'
           : (hardMode
           ? 'Sèche, encore ? Là tu te retiens, et en mode intensif je ne te laisse pas passer ça. Concentre-toi, relâche, c\'est le cœur du travail. Je sais que tu peux mieux faire.'
           : 'Dis donc... ta couche est encore sèche après tout ce temps. Tu te retiens sans t\'en rendre compte. Rappelle-toi : ici on apprend à lâcher prise, pas à se contrôler. Détends-toi, laisse venir quand ça vient. Tu es en sécurité, je suis là. 🦊') };
@@ -2790,7 +2791,7 @@
     if (slot.ctx === 'pilier') {
       // change imposé : direct au flux guidé
       document.getElementById('dueText').textContent = broOn()
-        ? 'Inutile de résister, tu le sais déjà. On fait ton change, maintenant. Laisse-toi faire, c\'est plus simple ainsi.'
+        ? 'C\'est l\'heure de ton change. Tu peux traîner encore un peu... mais ça arrivera, tu le sais. Autant te laisser faire maintenant.'
         : (hardMode ? 'Mode intensif : c\'est l\'heure, pas de discussion. On fait ton change MAINTENANT.'
         : 'C\'est l\'heure de ton change, viens on s\'en occupe étape par étape !');
       addBtn(acts, 'ok', '🦊 Faire le change avec Foxy', () => startChange('pilier'));
