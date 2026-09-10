@@ -81,6 +81,7 @@
     if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
     const ov = document.getElementById('qrScanOverlay');
     if (ov) ov.style.display = 'none';
+    try { if (window.HabitrainNFC && window.HabitrainNFC.isScanning()) window.HabitrainNFC.stopScan(); } catch (e) {}
   }
   // onResult(kind|null). expected = kind attendu ('unlock' ou une action) ou null (accepte tout)
   async function startScan(expected, onResult) {
@@ -90,13 +91,30 @@
     const hint = document.getElementById('qrScanHint');
     if (!ov || !video || !canvas) { onResult && onResult(null); return; }
     ov.style.display = 'flex';
-    hint.textContent = 'Vise le QR code...';
+    const nfcOn = window.HabitrainNFC && window.HabitrainNFC.supported();
+    hint.textContent = nfcOn ? 'Approche ton tag NFC, ou vise le QR code...' : 'Vise le QR code...';
+    // ---- écoute NFC en parallèle (hybride) : le premier qui répond gagne ----
+    if (nfcOn) {
+      try {
+        window.HabitrainNFC.startScan(async (payload) => {
+          const kind = await parsePayload(payload);
+          if (kind && (!expected || kind === expected)) {
+            stopScan(); onResult && onResult(kind);
+          } else {
+            hint.textContent = 'Tag NFC non reconnu, réessaie...';
+          }
+        });
+      } catch (e) { /* NFC indisponible : on continue en QR seul */ }
+    }
     try {
       scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       video.srcObject = scanStream; video.setAttribute('playsinline', 'true'); await video.play();
     } catch (e) {
-      hint.textContent = 'Caméra indisponible. Vérifie l\'autorisation.';
-      return;
+      hint.textContent = nfcOn
+        ? 'Caméra indisponible — mais tu peux approcher ton tag NFC.'
+        : 'Caméra indisponible. Vérifie l\'autorisation.';
+      if (!nfcOn) return;
+      return; // le NFC reste à l'écoute
     }
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const tick = async () => {

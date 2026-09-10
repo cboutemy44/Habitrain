@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '9.5';
+  const APP_VERSION = '11.8';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -85,7 +85,7 @@
   // Personnage courant (caregiver ou foxy)
   function persona() {
     if (voiceMode === 'foxy') return {
-      name:'Foxy', avatar:'🦊', status:'ton compagnon de voyage 🦊',
+      name:'Foxy', avatar:'🦊', status: (foxyMood && !broOn()) ? ('d\'humeur ' + mood().label + ' aujourd\'hui 🦊') : 'ton compagnon de voyage 🦊',
       grad:'linear-gradient(135deg,#f0a060,#d9743a)', headbg:'linear-gradient(180deg,#FDEFE2,#FBF3EA)',
       whoColor:'#a85a2a', statusColor:'#c8843a', bubble:'#FCEBDD', bubbleInk:'#7a4420',
       meGrad:'linear-gradient(135deg,#e08840,#c8703a)'
@@ -105,24 +105,106 @@
   // Expressions Foxy → index de cellule (grille 4×4, 0..15, lecture ligne par ligne)
   // Deux familles de sheets avec des ordres d'expressions DIFFÉRENTS (vérifié case par case).
   // Famille A : paw + diaper. Famille B : blue + blue2.
-  const EXPR_A = {
-    happy:0, concern:1, pensive:2, surprised:3,
-    neutral:6, relaxed:7, wave:9, cuddle:10, laugh:11,
-    joy:12, proud:12, explain:14, sleep:15
+  // Mapping UNIQUE : les 4 planches partagent désormais le même ordre (vérifié visuellement).
+  // 0 fier · 1 ronchon · 2 taquin · 3 nostalgique · 4 fatigué · 5 assurance · 6 réconfort
+  // 7 curieux · 8 ému · 9 encourageant · 10 biberon · 11 tétine · 12 rassurant · 13 rigolard
+  // 14 déçu doux · 15 endormi
+  const EXPR = {
+    proud:0,        // fier — enfin distinct de la joie !
+    grumpy:1,       // ronchon (humeur du jour)
+    playful:2,      // taquin (humeur du jour)
+    wistful:3,      // nostalgique (humeur du jour)
+    sleepy:4,       // fatigué éveillé (humeur du jour)
+    calm:5,         // assurance tranquille — le registre grand frère
+    comfort:6,      // réconfort, bras ouverts
+    curious:7,      // curieux / attentif
+    moved:8,        // ému, touché
+    cheer:9,        // encourageant
+    bottle:10,      // avec biberon
+    paci:11,        // avec tétine
+    reassure:12,    // rassurant, main tendue
+    laugh:13,       // rigolard
+    sad:14,         // déçu doux
+    sleep:15,       // endormi profond
+
+    // --- alias de compatibilité avec le code existant ---
+    happy:0,        // content → fier/heureux
+    joy:13,         // joie → rigolard
+    concern:14,     // inquiétude → déçu doux
+    pensive:3,      // pensif → nostalgique
+    surprised:7,    // surpris → curieux
+    neutral:5,      // neutre → assurance tranquille
+    relaxed:4,      // détendu → fatigué/relax
+    wave:12,        // coucou → main tendue
+    cuddle:6,       // câlin → bras ouverts
+    explain:9,      // explique → encourageant
+    teach:9         // enseigne → encourageant
   };
-  const EXPR_B = {
-    happy:0, concern:1, pensive:2, surprised:3,
-    neutral:0, relaxed:7, wave:11, cuddle:0, laugh:15,
-    joy:4, proud:11, explain:14, sleep:13
+  // ===== SÉRIE v3 — variantes (ordre unique, vérifié) =====
+  // 0 content doux · 1 content yeux fermés · 2 content timide · 3 pensif menton
+  // 4 pensif en l'air · 5 perplexe · 6 soucieux · 7 inquiet · 8 alerté · 9 profil
+  // 10 allongé · 11 tailleur · 12 sautille · 13 frotte les yeux · 14 applaudit · 15 hausse épaules
+  const EXPR_V3 = {
+    happy:0, gentle:0, blissful:1, shy:2, pensive:3, thinking:3, wondering:4,
+    puzzled:5, curious:5, worried:6, concern:7, alarmed:8, surprised:8,
+    profile:9, lying:10, crosslegged:11, hop:12, joy:12, cheer:12,
+    rubeyes:13, sleepy:13, clap:14, proud:14, laugh:12, shrug:15,
+    // alias pour couvrir tout le code existant
+    calm:0, comfort:15, reassure:15, moved:2, wistful:4, grumpy:6, playful:2,
+    sad:6, sleep:13, bottle:10, paci:11, explain:4, teach:4,
+    cuddle:10, neutral:0, relaxed:10, wave:15
   };
-  function exprMap() { return foxyOutfit.fam === 'B' ? EXPR_B : EXPR_A; }
+
+  // ===== ANCIENNES PLANCHES (série v1) — deux ordres distincts =====
+  // Famille X : paw-v1 + diaper-v1
+  const EXPR_V1_X = {
+    happy:0, proud:0, sad:1, concern:1, wistful:2, pensive:2, curious:3, surprised:3,
+    paci:4, walk:5, sit:6, relaxed:7, sleepy:7, crouch:8, wave:9, reassure:9,
+    cuddle:10, comfort:10, roll:11, playful:11, laugh:12, cheer:13, moved:13,
+    explain:14, teach:14, calm:14, sleep:15, grumpy:1, bottle:4, paci2:4,
+    joy:12, neutral:6
+  };
+  // Famille Y : blue-v1 + blue2-v1
+  const EXPR_V1_Y = {
+    happy:0, proud:0, sad:1, concern:1, wistful:2, pensive:2, curious:3, surprised:3,
+    run:4, laugh:4, cheer:4, paci:5, playful:5, cry:6, grumpy:6, blocks:7, calm:7,
+    eat:8, bottle:8, sulk:9, moved:9, scared:10, fist:11, reassure:11, wave:11,
+    sneeze:12, sleep:13, sleepy:13, explain:14, teach:14, comfort:14, cuddle:14, yawn:15, relaxed:15,
+    joy:4, neutral:0
+  };
+  const V1_FAMILY = { paw:'X', diaper:'X', blue:'Y', blue2:'Y' };
+
+  // Série active pour la journée : 'v2' (nouvelles) ou 'v1' (anciennes)
+  let foxySerie = 'v2';
+  async function loadFoxySerie() {
+    const date = todayStr();
+    try {
+      const r = await window.storage.get('foxyserie:'+date);
+      if (r && r.value) { foxySerie = JSON.parse(r.value); return; }
+    } catch(e) {}
+    foxySerie = ['v1','v2','v3'][Math.floor(Math.random()*3)];
+    try { await window.storage.set('foxyserie:'+date, JSON.stringify(foxySerie)); } catch(e) {}
+  }
+  // feuille réellement utilisée selon la série du jour
+  function activeSheet() {
+    if (foxySerie === 'v1') return foxyOutfit.sheet.replace('.png', '-v1.png');
+    if (foxySerie === 'v3') return foxyOutfit.sheet.replace('.png', '-v3.png');
+    return foxyOutfit.sheet;
+  }
+  function exprMap() {
+    if (foxySerie === 'v3') return EXPR_V3;
+    if (foxySerie === 'v1') {
+      return V1_FAMILY[foxyOutfit.id] === 'Y' ? EXPR_V1_Y : EXPR_V1_X;
+    }
+    return EXPR;
+  }
 
   // Tenues de Foxy, chacune rattachée à sa famille d'expressions
   const FOXY_OUTFITS = [
-    { id:'paw',    sheet:'foxy-paw.png',    name:'grenouillère à pattes', fam:'A' },
-    { id:'diaper', sheet:'foxy-diaper.png', name:'couche',                fam:'A' },
-    { id:'blue',   sheet:'foxy-blue.png',   name:'grenouillère bleue',    fam:'B' },
-    { id:'blue2',  sheet:'foxy-blue2.png',  name:'pyjama bleu',           fam:'B' }
+    { id:'paw',    sheet:'foxy-paw.png',    name:'grenouillère à pattes' },
+    { id:'diaper', sheet:'foxy-diaper.png', name:'couche' },
+    { id:'blue',   sheet:'foxy-blue.png',   name:'grenouillère bleue' },
+    { id:'blue2',  sheet:'foxy-blue2.png',  name:'pyjama bleu' }
   ];
   let foxyOutfit = FOXY_OUTFITS[0];
   async function loadFoxyOutfit() {
@@ -137,14 +219,14 @@
   function afterOutfitSet() { try { refreshHeadFoxy(); } catch(e) {} }
 
   const EXPR_SETS = {
-    positive:['happy','joy','proud','wave'],
-    calm:['neutral','relaxed'],
-    tender:['cuddle','happy'],
-    worried:['concern','surprised'],
-    think:['pensive','neutral'],
-    teach:['explain'],
-    sleepy:['sleep','relaxed'],
-    fun:['laugh','joy','wave']
+    positive:['proud','cheer','laugh'],
+    calm:['calm','reassure'],
+    tender:['comfort','moved','reassure'],
+    worried:['sad','curious'],
+    think:['wistful','curious','calm'],
+    teach:['cheer','calm'],
+    sleepy:['sleep','sleepy'],
+    fun:['laugh','playful','cheer']
   };
   function pickExpr(set) {
     const arr = EXPR_SETS[set] || ['neutral'];
@@ -155,7 +237,7 @@
   function setFoxyPortrait(expr) {
     const p = document.getElementById('rpgPortrait');
     if (!p) return;
-    p.style.backgroundImage = "url('" + foxyOutfit.sheet + "')";
+    p.style.backgroundImage = "url('" + activeSheet() + "')";
     const map = exprMap();
     const idx = (expr in map) ? map[expr] : map.neutral;
     const col = idx % 4, row = Math.floor(idx / 4);
@@ -169,7 +251,7 @@
     const map = exprMap();
     const idx = (expr in map) ? map[expr] : map.neutral;
     const col = idx % 4, row = Math.floor(idx / 4);
-    el.style.backgroundImage = "url('" + foxyOutfit.sheet + "')";
+    el.style.backgroundImage = "url('" + activeSheet() + "')";
     el.style.backgroundSize = (sizePx*4) + 'px ' + (sizePx*4) + 'px';
     el.style.backgroundRepeat = 'no-repeat';
     el.style.backgroundPosition = (-(col*sizePx)) + 'px ' + (-(row*sizePx)) + 'px';
@@ -225,6 +307,27 @@
     el.style.backgroundPosition = (col * (100/3)) + '% ' + (row * 100) + '%';
   }
 
+  let changeModel = null;   // modèle de couche annoncé pour le change en cours
+
+  // choisit et annonce le modèle à utiliser, selon le moment
+  async function pickChangeModel() {
+    changeModel = null;
+    try {
+      if (!window.HabitrainWardrobe) return null;
+      const h = new Date().getHours();
+      const period = (h >= 22 || h < 8) ? 'nuit' : 'jour';
+      const dispo = (await window.HabitrainWardrobe.modelsFor(period)).filter(m => m.qty > 0);
+      if (!dispo.length) {
+        const tous = await window.HabitrainWardrobe.getStock();
+        const reste = tous.filter(m => m.qty > 0);
+        changeModel = reste.length ? reste[0] : null;
+        return changeModel ? { model:changeModel, horsPeriode:true, period } : { vide:true, period };
+      }
+      changeModel = dispo[0];
+      return { model:changeModel, period };
+    } catch(e) { return null; }
+  }
+
   function runChangeStep(i) {
     const step = CHANGE_STEPS[i];
     const last = i === CHANGE_STEPS.length - 1;
@@ -232,6 +335,25 @@
     document.getElementById('poseStepNum').textContent = 'Étape ' + (i+1) + ' / ' + CHANGE_STEPS.length;
     const acts = document.getElementById('poseActs');
     acts.innerHTML = '';
+    // à la première étape, on annonce quel modèle prendre
+    if (i === 0) {
+      pickChangeModel().then(info => {
+        const line = document.getElementById('poseLine');
+        if (!info || !line) return;
+        let msg = '';
+        if (info.vide) {
+          msg = '⚠️ Plus aucune couche en stock ! Prends ce que tu as et pense à recommander.';
+        } else if (info.horsPeriode) {
+          msg = '⚠️ Plus de modèle « ' + info.period + ' » : prends une ' + info.model.name + ' (' + info.model.qty + ' restantes).';
+        } else {
+          msg = '🍼 Prends une ' + info.model.name + ' (' + info.model.qty + ' de ce modèle).';
+        }
+        const tag = document.createElement('div');
+        tag.style.cssText = 'font-size:12.5px;font-weight:800;color:#a85a2a;background:#FBF3E0;border:1px solid #ecd9a8;border-radius:10px;padding:8px 10px;margin-bottom:10px';
+        tag.textContent = msg;
+        line.parentNode.insertBefore(tag, line);
+      });
+    }
     poseType(step.t, () => {
       const b = document.createElement('button');
       b.className = 'ok';
@@ -332,7 +454,7 @@
         } catch(e) { resolve('icon-192.png'); }
       };
       img.onerror = () => resolve('icon-192.png');
-      img.src = foxyOutfit.sheet;
+      img.src = activeSheet();
     });
   }
 
@@ -800,8 +922,19 @@
       return;
     }
 
-    const opener = voiceMode === 'foxy' ? foxyOpener(m) : (m.titi ? m.titi : m.title);
-    await imSay(opener, 500, pickExpr('fun'));
+    let opener = voiceMode === 'foxy' ? foxyOpener(m) : (m.titi ? m.titi : m.title);
+    // en mode Foxy : parfois il annonce son humeur du jour au lieu du bonjour habituel
+    if (voiceMode === 'foxy' && !broOn() && m.key === 'reveil' && Math.random() < 0.5) {
+      opener = pick(mood().hello);
+      await imSay(opener, 500, mood().expr);
+    } else {
+      await imSay(humanize(opener), 500, voiceMode === 'foxy' && !broOn() ? mood().expr : pickExpr('fun'));
+    }
+    // conscience temporelle : un mot sur le jour/l'heure de temps en temps
+    if (voiceMode === 'foxy' && !broOn() && Math.random() < 0.25) {
+      const tl = timeAwareLine();
+      if (tl) await imSay(tl, 800, mood().expr);
+    }
     if (done[m.key]) {
       // point déjà fait → Foxy demande simplement l'état de la couche (rien de spécial)
       if (voiceMode === 'foxy') {
@@ -862,7 +995,7 @@
         const slot = inRegMidi ? 'midi' : 'soir';
         const tag = todayStr()+':'+slot;
         if (contDate !== tag) {
-          await imSay(broOn() ? 'C\'est ta fenêtre de régression... Tu vas mettre ta contention douce. Tu peux hésiter, mais au fond tu sais que tu le feras — tu en as envie.' : 'C\'est ta fenêtre de régression, et en mode intensif ça ne se négocie pas : mets ta contention douce maintenant.', 900, 'proud');
+          await imSay(broOn() ? 'C\'est ta fenêtre de régression... Tu vas mettre ta contention douce. Tu peux hésiter, mais au fond tu sais que tu le feras — tu en as envie.' : 'C\'est ta fenêtre de régression, et en mode intensif ça ne se négocie pas : mets ta contention douce maintenant.', 900, broOn() ? 'pensive' : 'proud');
           await imSay(broOn() ? 'Harnais, mittens... laisse-toi contenir. Tu pourrais t\'en défaire, mais tu ne le feras pas. Résister à ce besoin d\'être tenu, c\'est vain, et tu le sais. Abandonne-toi.' : 'Harnais fleece bien réglé, mittens ou combi si tu veux — tout ce qui te contient en douceur. Tu peux toujours t\'en défaire, mais là, on s\'engage. C\'est le moment de lâcher prise pour de vrai.', 1000, 'teach');
           imSetActions([
             { label:'🎽 C\'est fait, je suis contenu', onClick: async () => {
@@ -937,6 +1070,58 @@
         await startIntrospection(m);
         return;
       }
+      // 4quater) Alerte stock de couches (une fois par jour)
+      try {
+        if (window.HabitrainWardrobe) {
+          let stockDate = null;
+          try { const r = await window.storage.get('stockalert:last'); if (r && r.value) stockDate = JSON.parse(r.value); } catch(e) {}
+          if (stockDate !== todayStr()) {
+            const bas = await window.HabitrainWardrobe.lowStock();
+            if (bas.length) {
+              try { await window.storage.set('stockalert:last', JSON.stringify(todayStr())); } catch(e) {}
+              const vides = bas.filter(c => c.empty);
+              const faibles = bas.filter(c => !c.empty);
+              const nom = p => p === 'jour' ? 'la journée' : 'la nuit';
+              let txt;
+              if (vides.length) {
+                txt = broOn()
+                  ? 'Plus rien pour ' + vides.map(c=>nom(c.period)).join(' ni ') + '. Tu commandes, maintenant — sans couches, pas de programme.'
+                  : '⚠️ Plus aucune couche pour ' + vides.map(c=>nom(c.period)).join(' ni ') + ' ! Faut recommander vite. 🦊';
+              } else {
+                txt = broOn()
+                  ? 'Il te reste peu pour ' + faibles.map(c=>nom(c.period)+' ('+c.total+')').join(' et ') + '. Anticipe, ne me fais pas attendre.'
+                  : 'Au fait, ton stock baisse : ' + faibles.map(c=>c.total+' pour '+nom(c.period)).join(', ') + '. Pense à recommander bientôt ! 🦊';
+              }
+              await imSay(txt, 900, vides.length ? 'alarmed' : 'concern');
+              await imOfferHelp(m);
+              return;
+            }
+          }
+        }
+      } catch(e) {}
+      // 4ter) Foxy réagit au contexte réel (série, entorses, peau)
+      try {
+        let ctxDate = null;
+        try { const r = await window.storage.get('ctxcomment:last'); if (r && r.value) ctxDate = JSON.parse(r.value); } catch(e) {}
+        if (ctxDate !== todayStr() && Math.random() < 0.45) {
+          const line = await foxyContextComment();
+          if (line) {
+            try { await window.storage.set('ctxcomment:last', JSON.stringify(todayStr())); } catch(e) {}
+            await imSay(line.t, 900, line.expr);
+            await imOfferHelp(m);
+            return;
+          }
+        }
+      } catch(e) {}
+      // 4bis) Foxy revient sur un sujet passé (mémoire)
+      try {
+        const rc = await foxyRecall();
+        if (rc && Math.random() < 0.4) {
+          await imSay(rc, 950, 'pensive');
+          await imOfferHelp(m);
+          return;
+        }
+      } catch(e) {}
       // 5) Foxy spontané (fréquent) : rêve, jeu, confidence, humeur
       let spontDate = null;
       try { const r = await window.storage.get('spont:last'); if (r && r.value) spontDate = JSON.parse(r.value); } catch(e) {}
@@ -1375,6 +1560,297 @@
       ]}
   ];
 
+  /* ============================================================
+     HUMEUR DU JOUR DE FOXY — il a sa propre vie intérieure
+     Elle colore la FORME de ses réponses, jamais sa fiabilité :
+     même ronchon, il assure les alertes et le soutien.
+     ============================================================ */
+  const FOXY_MOODS = {
+    petillant: {
+      label:'pétillant', expr:'cheer',
+      hello:['Salut toiii ! J\'ai une pêche d\'enfer aujourd\'hui !','Héhé, te voilà ! Je suis à fond, moi, ce matin !','Ouiii, tu es là ! J\'ai plein d\'énergie, viens !'],
+      tics:[' !',' héhé.',' 😄'],
+      color:'énergique'
+    },
+    calin: {
+      label:'câlin', expr:'comfort',
+      hello:['Coucou toi... j\'ai envie de câlins aujourd\'hui, je te préviens.','Te voilà... viens près de moi, j\'ai besoin de douceur.','Hey... j\'suis d\'humeur toute molle et tendre aujourd\'hui.'],
+      tics:[' 💛',' ...',' mon pote.'],
+      color:'tendre'
+    },
+    calme: {
+      label:'tranquille', expr:'calm',
+      hello:['Salut. Journée tranquille pour moi aujourd\'hui.','Hey. Je suis posé, là. Ça fait du bien.','Coucou. Tout doux aujourd\'hui, j\'ai pas envie de m\'agiter.'],
+      tics:['.',' voilà.',''],
+      color:'posé'
+    },
+    nostalgique: {
+      label:'nostalgique', expr:'wistful',
+      hello:['Hey... je repensais à mon propre mois, tout à l\'heure.','Salut toi. J\'suis dans mes pensées aujourd\'hui, va savoir pourquoi.','Coucou... j\'ai le cœur un peu ailleurs, mais je suis content de te voir.'],
+      tics:['...',' enfin bref.',' tu vois.'],
+      color:'songeur'
+    },
+    taquin: {
+      label:'taquin', expr:'playful',
+      hello:['Alors, on se réveille ? J\'attendais que môssieur daigne arriver !','Tiens tiens, revoilà le champion ! J\'allais commencer sans toi.','Ha ! Je me demandais si t\'allais venir. J\'suis d\'humeur à t\'embêter aujourd\'hui.'],
+      tics:[' 😏',' héhé.',' avoue.'],
+      color:'espiègle'
+    },
+    fatigue: {
+      label:'fatigué', expr:'sleepy',
+      hello:['Mmh... salut. J\'ai super mal dormi, moi.','Hey... *bâille* excuse-moi, je suis vaseux aujourd\'hui.','Coucou... j\'suis crevé, mais je suis là pour toi hein.'],
+      tics:[' *bâille*',' ...',' pff.'],
+      color:'endormi'
+    },
+    ronchon: {
+      label:'ronchon', expr:'grumpy',
+      hello:['Ouais, salut. J\'suis un peu grognon aujourd\'hui, désolé d\'avance.','Hey... j\'ai pas mon meilleur jour, mais t\'y es pour rien.','Salut. J\'suis d\'une humeur de renard mal léché. Ça va passer.'],
+      tics:[' bon.',' bref.',' hmpf.'],
+      color:'grognon'
+    }
+  };
+  let foxyMood = null;
+
+  async function loadFoxyMood() {
+    const date = todayStr();
+    try {
+      const r = await window.storage.get('foxymood:'+date);
+      if (r && r.value) { const k = JSON.parse(r.value); if (FOXY_MOODS[k]) { foxyMood = k; return; } }
+    } catch(e) {}
+    // pondération : les humeurs "difficiles" sont plus rares
+    const pool = ['petillant','petillant','calin','calin','calme','calme','taquin','nostalgique','fatigue','ronchon'];
+    foxyMood = pool[Math.floor(Math.random()*pool.length)];
+    try { await window.storage.set('foxymood:'+date, JSON.stringify(foxyMood)); } catch(e) {}
+  }
+  function mood() { return FOXY_MOODS[foxyMood] || FOXY_MOODS.calme; }
+  // ajoute le tic verbal de l'humeur du jour à une phrase
+  function moodify(txt) {
+    if (!foxyMood || broOn()) return txt; // en grand frère, le ton domine
+    const m = mood();
+    if (Math.random() < 0.35 && m.tics.length) {
+      const tic = m.tics[Math.floor(Math.random()*m.tics.length)];
+      if (tic && !txt.endsWith(tic)) return txt.replace(/[.!]?$/, '') + tic;
+    }
+    return txt;
+  }
+
+  /* ============================================================
+     IMPERFECTIONS HUMAINES — hésitations, reprises, digressions
+     ============================================================ */
+  const HESITATIONS = ['Euh...','Attends...','Hmm...','Alors...','Bon...','Comment dire...'];
+  const REPRISES = ['enfin je veux dire,','ou plutôt,','non, en fait,','bref,'];
+  const TICS_FOXY = ['tu vois','franchement','sérieux','hein','mine de rien','crois-moi'];
+
+  // parfois Foxy hésite avant de répondre (une fois de temps en temps)
+  async function maybeHesitate() {
+    if (broOn()) return; // le grand frère ne bafouille pas
+    if (Math.random() < 0.12) {
+      await imSay(pick(HESITATIONS), 500, 'pensive');
+    }
+  }
+  // insère parfois un tic de langage dans une phrase
+  function humanize(txt) {
+    if (broOn()) return txt;
+    let out = moodify(txt);
+    if (Math.random() < 0.15) {
+      const tic = pick(TICS_FOXY);
+      // insère le tic après la première virgule, sinon à la fin
+      if (out.includes(', ')) out = out.replace(', ', ', ' + tic + ', ');
+      else out = out.replace(/[.!?]?$/, '') + ', ' + tic + '.';
+    }
+    return out;
+  }
+
+  /* ============================================================
+     MANIES ET GOÛTS DE FOXY — de petits traits qui le rendent lui
+     ============================================================ */
+  const FOXY_QUIRKS = [
+    'Tu sais que je range toujours mon doudou du côté gauche ? Sinon je dors mal. C\'est bête, hein.',
+    'Moi, ma couleur préférée c\'est le bleu. Comme ma grenouillère. Va savoir pourquoi.',
+    'J\'ai horreur des chaussettes qui glissent dans la grenouillère. Ça me rend fou.',
+    'Mon truc à moi, c\'est de renifler la couche fraîche avant de la mettre. C\'est bizarre ? Bon.',
+    'Je compte toujours jusqu\'à trois avant de me lever le matin. Toujours. Depuis toujours.',
+    'J\'adore le bruit du scratch qu\'on décolle. Franchement, c\'est satisfaisant.',
+    'Je garde toujours une tétine de secours cachée sous mon oreiller. On sait jamais.',
+    'Le pire pour moi, c\'est les couvertures qui grattent. Je supporte pas.',
+    'J\'ai un doudou préféré, mais je le dis pas aux autres pour pas les vexer. 🤫',
+    'Moi je bois toujours mon biberon en trois fois. Jamais d\'un coup. Rituel.'
+  ];
+  async function maybeQuirk() {
+    if (broOn()) return false;
+    let last = null;
+    try { const r = await window.storage.get('quirk:last'); if (r && r.value) last = JSON.parse(r.value); } catch(e) {}
+    if (last === todayStr()) return false;
+    if (Math.random() >= 0.2) return false;
+    try { await window.storage.set('quirk:last', JSON.stringify(todayStr())); } catch(e) {}
+    await imSay(pick(FOXY_QUIRKS), 950, mood().expr);
+    return true;
+  }
+
+  /* ============================================================
+     CONSCIENCE TEMPORELLE — il sait quel jour, quelle heure
+     ============================================================ */
+  function timeAwareLine() {
+    const now = new Date();
+    const jour = now.getDay();       // 0 = dimanche
+    const h = now.getHours();
+    const lines = [];
+    if (jour === 0) lines.push('C\'est dimanche... journée molle par excellence, profites-en.');
+    if (jour === 1 && h < 12) lines.push('Lundi matin. Courage hein, on est deux.');
+    if (jour === 6) lines.push('Samedi ! Le week-end, c\'est fait pour se laisser aller, non ?');
+    if (jour === 5 && h >= 17) lines.push('Vendredi soir... j\'aime bien ce moment, tout ralentit.');
+    if (h >= 0 && h < 5) lines.push('Il est vraiment tard, tu sais. Ou très tôt. J\'sais plus.');
+    if (h >= 5 && h < 7) lines.push('T\'es matinal aujourd\'hui ! Moi j\'émerge à peine.');
+    if (h >= 14 && h < 16) lines.push('L\'heure du creux de l\'après-midi... celle où tout le monde traîne.');
+    if (h >= 22) lines.push('Ça sent la fin de journée, ça. On lève le pied ?');
+    return lines.length ? pick(lines) : null;
+  }
+
+  /* ============================================================
+     RELANCES — il ne laisse pas mourir la conversation
+     ============================================================ */
+  const RELANCES = [
+    'Et toi, raconte — comment tu te sens là, maintenant ?',
+    'Dis-moi autre chose. N\'importe quoi, j\'écoute.',
+    'Et sinon, ta journée ? Elle ressemble à quoi ?',
+    'Tu veux qu\'on parle d\'autre chose, ou tu préfères qu\'on reste tranquilles ?',
+    'Y\'a un truc qui te trotte dans la tête en ce moment ?'
+  ];
+  const RELANCES_BRO = [
+    'Continue. Dis-moi ce qui te traverse, ne garde rien.',
+    'Et après ? Tu ne vas pas t\'arrêter là.',
+    'Parle-moi encore. Tu en as envie, je le sais.'
+  ];
+  async function maybeRelance() {
+    if (Math.random() < 0.25) {
+      await imSay(pick(broOn() ? RELANCES_BRO : RELANCES), 900, broOn() ? 'pensive' : mood().expr);
+      return true;
+    }
+    return false;
+  }
+
+  /* ============================================================
+     MÉMOIRE DE FOXY — il retient ce que tu lui dis et y revient
+     ============================================================ */
+  async function getFoxyMemory() {
+    try { const r = await window.storage.get('foxymem'); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
+    return { topics:{}, prefs:{}, lastSeen:null, recalls:{} };
+  }
+  async function saveFoxyMemory(m) { try { await window.storage.set('foxymem', JSON.stringify(m)); } catch(e) {} }
+
+  // note un sujet abordé (peur, fatigue, honte, fierté...) avec sa date
+  async function rememberTopic(topic, detail) {
+    const m = await getFoxyMemory();
+    m.topics[topic] = m.topics[topic] || { count:0, first:null, last:null, detail:null };
+    m.topics[topic].count++;
+    m.topics[topic].last = new Date().toISOString();
+    if (!m.topics[topic].first) m.topics[topic].first = m.topics[topic].last;
+    if (detail) m.topics[topic].detail = detail;
+    await saveFoxyMemory(m);
+  }
+  // note une préférence exprimée (moment préféré, tenue, etc.)
+  async function rememberPref(key, value) {
+    const m = await getFoxyMemory();
+    m.prefs[key] = value;
+    await saveFoxyMemory(m);
+  }
+
+  // Foxy revient sur un sujet abordé il y a quelques jours (max 1 rappel/jour/sujet)
+  async function foxyRecall() {
+    const m = await getFoxyMemory();
+    const today = todayStr();
+    const RECALL = {
+      peur:      { q:'Dis... l\'autre jour tu me parlais de tes peurs. Ça va mieux là-dessus ?', bro:'Tu me parlais de tes peurs il y a peu. Elles s\'estompent, hein ? Je te l\'avais dit.' },
+      honte:     { q:'Je repense à ce que tu m\'as confié sur le regard des autres. Tu te sens plus léger depuis ?', bro:'Le regard des autres te pesait. Ça se dissout, doucement. C\'est inévitable.' },
+      fatigue:   { q:'Tu m\'avais dit que tu étais fatigué ces jours-ci. Tu récupères un peu ?', bro:'Tu traînais de la fatigue. Tu te reposes mieux maintenant ? Laisse-toi aller au sommeil.' },
+      triste:    { q:'L\'autre fois tu n\'allais pas fort. Comment tu te sens aujourd\'hui ?', bro:'Tu n\'allais pas fort récemment. Dis-moi où tu en es, ne me cache rien.' },
+      fier:      { q:'Tu étais fier de toi l\'autre jour — et tu avais raison. Ça continue ?', bro:'Tu étais fier récemment. C\'était mérité. Ça continue, forcément.' },
+      calin:     { q:'Tu m\'as demandé pas mal de câlins ces temps-ci. T\'en veux un maintenant ?', bro:'Tu réclames souvent des câlins. Tu en as besoin, c\'est comme ça. Viens.' },
+      controle:  { q:'Tu me disais que lâcher le contrôle était dur. Tu y arrives mieux ?', bro:'Lâcher le contrôle te résistait. Ça cède, petit à petit. Je te l\'avais dit.' }
+    };
+    // cherche un sujet abordé il y a 2 à 10 jours, pas encore rappelé aujourd'hui
+    const candidats = Object.keys(m.topics).filter(t => {
+      if (!RECALL[t]) return false;
+      if (m.recalls && m.recalls[t] === today) return false;
+      const last = new Date(m.topics[t].last);
+      const jours = (Date.now() - last.getTime()) / 86400000;
+      return jours >= 2 && jours <= 10;
+    });
+    if (!candidats.length) return null;
+    const t = candidats[Math.floor(Math.random()*candidats.length)];
+    m.recalls = m.recalls || {}; m.recalls[t] = today;
+    await saveFoxyMemory(m);
+    return broOn() ? RECALL[t].bro : RECALL[t].q;
+  }
+
+  // Foxy commente ta situation réelle : série, entorses récentes, peau
+  async function foxyContextComment() {
+    // série de jours consécutifs
+    try {
+      const entries = await getAll();
+      const byDate = {}; entries.forEach(e => { if (e && e.date) byDate[e.date] = true; });
+      let streak = 0;
+      for (let i = 0; ; i++) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        const k = d.toISOString().slice(0,10);
+        if (byDate[k]) streak++; else { if (i === 0) continue; break; }
+      }
+      if (streak >= 3 && Math.random() < 0.5) {
+        return { expr:'proud', t: broOn()
+          ? streak + ' jours d\'affilée. Tu ne t\'arrêtes plus, hein ? C\'est devenu plus fort que toi.'
+          : 'Eh ! ' + streak + ' jours d\'affilée, tu te rends compte ? Je suis fier de toi, sérieux. 🦊' };
+      }
+      // peau : dérive récente
+      const recent = entries.slice(-3);
+      const souci = recent.filter(e => e && (e.skin === 'surveiller' || e.skin === 'traiter')).length;
+      if (souci >= 2) {
+        return { expr:'concern', t:'Ta peau donne des signes ces derniers jours. On lève le pied et on crème généreusement, d\'accord ? Ça compte plus que tout le reste.' };
+      }
+      // entorses du jour
+      const rb = await window.storage.get('breach:'+todayStr());
+      const b = (rb && rb.value) ? JSON.parse(rb.value) : {};
+      const nb = Object.keys(b).filter(k => b[k]).length;
+      if (nb >= 2) {
+        return { expr:'pensive', t: broOn()
+          ? 'Plusieurs écarts aujourd\'hui. Je ne te gronde pas — mais tu sais qu\'on va reprendre le fil, forcément.'
+          : 'Y\'a eu quelques écarts aujourd\'hui. C\'est pas grave, on repart proprement — demain est un autre jour. 🦊' };
+      }
+    } catch(e) {}
+    return null;
+  }
+
+  /* ============================================================
+     COMPRÉHENSION ENRICHIE — négation, intensité, sujet précis
+     ============================================================ */
+  const NEGATIONS = ['pas', 'plus', 'jamais', 'aucun', 'aucune', 'ni', 'sans'];
+  const INTENSIFIERS = { fort:['tres','très','trop','vraiment','super','hyper','completement','complètement','enormement','énormément','grave'],
+                         faible:['un peu','legerement','légèrement','parfois','plutot','plutôt','assez'] };
+  const SUJETS = {
+    couche:['couche','protection','crinklz','safari','kiddo'],
+    biberon:['biberon','bibi','boire','eau','hydrat'],
+    sieste:['sieste','dormir','sommeil','dodo','nuit'],
+    tetine:['tetine','tétine','sucette'],
+    contention:['harnais','mitten','contention','segufix','combi'],
+    peau:['peau','rougeur','irritation','creme','crème'],
+    change:['change','changer','tapis']
+  };
+
+  // renvoie { negated:bool, intensity:'fort'|'faible'|null, sujet:string|null }
+  function analyzeText(text) {
+    const n = normalize(text);
+    const mots = n.split(/\s+/);
+    const negated = NEGATIONS.some(g => mots.includes(g));
+    let intensity = null;
+    for (const lvl of ['fort','faible']) {
+      if (INTENSIFIERS[lvl].some(w => n.includes(normalize(w)))) { intensity = lvl; break; }
+    }
+    let sujet = null;
+    for (const s of Object.keys(SUJETS)) {
+      if (SUJETS[s].some(w => n.includes(normalize(w)))) { sujet = s; break; }
+    }
+    return { negated, intensity, sujet };
+  }
+
   function detectIntent(text) {
     const n = normalize(text);
     let best = null, bestScore = 0;
@@ -1563,7 +2039,7 @@
         'On va parler, toi et moi... Et tu vas te confier, doucement. Tu ne pourras pas t\'en empêcher.',
         'Viens là. Dis-moi ce qui se passe en toi... inutile de résister, ça sortira tout seul.',
         'Laisse-toi aller à me parler. Tu verras, c\'est plus facile quand tu arrêtes de te retenir.'
-      ]), 850, 'pensive');
+      ]), 850, broOn() ? 'calm' : 'wistful');
     }
     await runIntroNode(theme, 'start', m || currentM);
   }
@@ -1631,6 +2107,8 @@
       try { await maybeIntroReward(true); } catch(e) {}
       await imOfferHelp(m); return true;
     }
+    // parfois, une manie personnelle de Foxy
+    if (await maybeQuirk()) { await imOfferHelp(m); return true; }
     // une météo intérieure (reste douce même en grand frère : touche l'émotionnel)
     await imSay(pick(FOXY_MOODWORDS), 900, 'pensive');
     imSetActions([
@@ -1672,6 +2150,20 @@
     ]);
   }
   async function eveningRitualClose(m) {
+    // Foxy commente le respect du cadre des serrures sur la journée
+    try {
+      const checks = await getChecks(todayStr());
+      const open = checks.filter(c => c.result === 'lock_open').length;
+      const refus = checks.filter(c => c.result === 'lock_denied' || c.result === 'lock_quota').length;
+      const urg = checks.filter(c => c.result === 'lock_emergency').length;
+      if (open || refus || urg) {
+        let txt;
+        if (urg) txt = 'Côté serrures : ' + open + ' ouverture(s), et ' + urg + ' en urgence. Ça arrive, mais on garde ça exceptionnel, d\'accord ?';
+        else if (refus) txt = 'Côté serrures : ' + open + ' ouverture(s), et ' + refus + ' fois où le cadre t\'a arrêté. Tu as tenu, c\'est ça qui compte.';
+        else txt = 'Côté serrures : ' + open + ' ouverture(s), toutes dans les règles. Tu as respecté le cadre aujourd\'hui, bravo.';
+        await imSay(txt, 900, urg ? 'pensive' : 'happy');
+      }
+    } catch(e) {}
     await imSay('Et maintenant, dépose ce qui pèse. Laisse la journée derrière toi, tu n\'as plus rien à porter.', 1000, 'concern');
     await imSay('Je veille sur toi cette nuit. Fais de beaux rêves, mon compagnon. À demain. 🦊💛', 950, 'sleep');
     await imOfferHelp(m);
@@ -1759,11 +2251,36 @@
       return;
     }
     const intent = detectIntent(text);
+    const ana = analyzeText(text);
     if (!intent) {
-      await imSay(pick(FOXY_FALLBACK), 700, 'pensive');
+      // repli enrichi : si on a repéré un sujet, Foxy rebondit dessus
+      if (ana.sujet) {
+        const REBOND = {
+          couche:'Tu me parles de ta couche... dis-m\'en plus, elle est comment là ?',
+          biberon:'Ton biberon, oui ! Tu en es où de ton hydratation aujourd\'hui ?',
+          sieste:'Le sommeil, hein... tu as bien récupéré ces temps-ci ?',
+          tetine:'Ta tétine ? Elle est près de toi j\'espère.',
+          contention:'La contention... tu te sens bien contenu en ce moment ?',
+          peau:'Ta peau, c\'est important. Elle va bien ? Pas de rougeur ?',
+          change:'Un change ? Dis-moi si tu veux qu\'on s\'en occupe ensemble.'
+        };
+        await imSay(REBOND[ana.sujet], 800, 'pensive');
+      } else {
+        await imSay(pick(FOXY_FALLBACK), 700, 'pensive');
+      }
       if (currentM) await imOfferHelp(currentM);
       return;
     }
+    // négation : « je n'ai pas peur » ne doit pas déclencher la branche peur
+    if (ana.negated && ['peur','triste','fatigue'].includes(intent.id)) {
+      await imSay(broOn()
+        ? 'Tu me dis que non... j\'entends. Mais je reste attentif, on ne se ment pas entre nous.'
+        : 'Ah, tant mieux alors ! Je préfère ça. Mais tu sais que je suis là si jamais. 🦊', 800, 'happy');
+      if (currentM) await imOfferHelp(currentM);
+      return;
+    }
+    // mémorise le sujet émotionnel abordé
+    try { if (['peur','triste','fatigue','fier','calin'].includes(intent.id)) await rememberTopic(intent.id, text.slice(0,120)); } catch(e) {}
     if (intent.action === 'change') {
       await imSay(pick(intent.rep), 700, intent.expr);
       if (currentM) await imOfferHelp(currentM);
@@ -1780,7 +2297,18 @@
       if (currentM) await imOfferHelp(currentM);
       return;
     }
-    await imSay(pick(intent.rep), 800, intent.expr);
+    await maybeHesitate();
+    await imSay(humanize(pick(intent.rep)), 800, intent.expr);
+    // nuance selon l'intensité exprimée
+    if (ana.intensity === 'fort' && ['peur','triste','fatigue'].includes(intent.id)) {
+      await imSay(broOn()
+        ? 'Et là c\'est fort, je le sens. Raison de plus pour arrêter de lutter et te laisser porter.'
+        : 'Et je vois que c\'est costaud là. Viens, on prend le temps qu\'il faut, je bouge pas. 🦊💛', 900, 'concern');
+    } else if (ana.intensity === 'faible' && ['peur','triste','fatigue'].includes(intent.id)) {
+      await imSay('Un petit peu seulement, ok. Ça reste gérable alors — mais je garde un œil sur toi.', 800, 'neutral');
+    }
+    // relance : Foxy rebondit au lieu de laisser mourir l'échange
+    if (voiceMode === 'foxy') { try { await maybeRelance(); } catch(e) {} }
     if (currentM) await imOfferHelp(currentM); // les boutons reviennent toujours
   }
   // câblage du champ "Parler à Foxy"
@@ -1936,13 +2464,14 @@
       matin_ok:'matinée OK', matin_change:'à changer', matin_soif:'pas hydraté',
       aprem_ok:'après-midi OK', aprem_sieste:'sieste faite', aprem_change:'à changer',
       soir_ok:'soir OK', soir_bilan:'bilan lancé', soir_souci:'peau à surveiller',
-      nuit_ok:'nuit OK', nuit_change:'change nocturne'
+      nuit_ok:'nuit OK', nuit_change:'change nocturne',
+      lock_open:'serrure ouverte', lock_denied:'ouverture refusée', lock_quota:'quota serrure atteint', lock_emergency:'ouverture d\'URGENCE'
     };
     return map[res] || res;
   }
   function resultColor(res) {
-    if (['miss','sature','etat_sature','tet_miss','reveil_fuite','soir_souci'].includes(res)) return 'var(--coral)';
-    if (['adj','mouille','etat_mouille','matin_change','aprem_change','matin_soif'].includes(res)) return 'var(--amber)';
+    if (['miss','sature','etat_sature','tet_miss','reveil_fuite','soir_souci','lock_quota','lock_emergency'].includes(res)) return 'var(--coral)';
+    if (['adj','mouille','etat_mouille','matin_change','aprem_change','matin_soif','lock_denied'].includes(res)) return 'var(--amber)';
     return 'var(--green)';
   }
   function fmtClock(iso) {
@@ -1988,6 +2517,23 @@
       if (e && e.bib !== undefined) bits.push('🍼 '+e.bib+'/3');
       if (e && e.nuit) bits.push(nuitLabel[e.nuit]);
       if (checks.length) bits.push('✅ '+checks.length+' check'+(checks.length>1?'s':''));
+      // résumé automatique des serrures du jour (ouvertures / refus, par serrure)
+      const lockEvents = checks.filter(c => ['lock_open','lock_denied','lock_quota','lock_emergency'].includes(c.result));
+      if (lockEvents.length) {
+        const perLock = {};
+        lockEvents.forEach(c => {
+          const nom = (c.type && c.type.indexOf('serrure:') === 0) ? c.type.slice(8) : 'serrure';
+          if (!perLock[nom]) perLock[nom] = { open:0, refus:0 };
+          if (c.result === 'lock_open') perLock[nom].open++;
+          else if (c.result === 'lock_emergency') { perLock[nom].open++; perLock[nom].urgence = (perLock[nom].urgence||0)+1; }
+          else perLock[nom].refus++;
+        });
+        const parts = Object.keys(perLock).map(n => {
+          const q = perLock[n];
+          return n + ' ' + q.open + '🔓' + (q.refus ? ' / ' + q.refus + '⛔' : '') + (q.urgence ? ' / ' + q.urgence + '🆘' : '');
+        });
+        bits.push('🔐 ' + parts.join(' · '));
+      }
 
       // détail des checks (repliable)
       let checksHtml = '';
@@ -1995,10 +2541,15 @@
         const rows = checks.map(c => {
           const time = c.t ? fmtClock(c.t) : '';
           const col = resultColor(c.result);
+          // pour les événements de serrure, on affiche son nom (type = "serrure:<nom>")
+          let extra = '';
+          if (c.type && c.type.indexOf('serrure:') === 0) {
+            extra = ' <span style="color:var(--muted)">— ' + c.type.slice(8).replace(/</g,'&lt;') + '</span>';
+          }
           return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;font-weight:600">'
             + '<span style="color:var(--muted);width:44px;flex:none">'+time+'</span>'
             + '<span style="width:8px;height:8px;border-radius:50%;background:'+col+';flex:none"></span>'
-            + '<span>'+labelResult(c.result)+'</span></div>';
+            + '<span>'+labelResult(c.result)+extra+'</span></div>';
         }).join('');
         checksHtml = '<div class="check-detail" style="display:none;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)">'+rows+'</div>';
       }
@@ -2124,7 +2675,13 @@
     let overdue = false;
     if (prev != null) {
       const since = nowMin - prev.m;
-      if (since >= (hardMode ? HARD.overdueMin : 15) && since <= 120) {
+      // vigilance renforcée (après une pause longue) → tolérance réduite de moitié
+      let tol = hardMode ? HARD.overdueMin : 15;
+      try {
+        const rv = await window.storage.get('vigilance:until');
+        if (rv && rv.value && Date.now() < JSON.parse(rv.value)) tol = Math.max(2, Math.round(tol/2));
+      } catch(e) {}
+      if (since >= tol && since <= 120) {
         // le pilier est-il déjà fait aujourd'hui ?
         try {
           const r = await window.storage.get('slotdone:'+todayStr());
@@ -2213,7 +2770,72 @@
     return '<span class="lbl">🔑 Prochain change dans</span> ' + rem + ' <span class="lbl">(' + next.label + ' à ' + at + ' ' + dayLabel + ')</span>';
   }
   // met à jour le compteur régulièrement
-  setInterval(() => { renderSince(); renderTimeline(); maybeRedirectBilan(); }, 60000);
+  setInterval(() => { renderSince(); renderTimeline(); maybeRedirectBilan(); checkLockAlerts(); }, 60000);
+
+  // ===== Veille des serrures : fenêtre qui approche/se ferme, quota bientôt épuisé =====
+  let lockAlertSent = {};
+  async function checkLockAlerts() {
+    if (paused || !window.HabitrainLock) return;
+    const PIL = [9*60, 16*60, 22*60+30];
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    let locks = [];
+    try { locks = await window.HabitrainLock.getLocks(); } catch(e) { return; }
+    for (const l of locks) {
+      if (!l.enabled) continue;
+      const key = todayStr() + ':' + l.id;
+      lockAlertSent[key] = lockAlertSent[key] || {};
+
+      if (l.useWindows) {
+        // fenêtre en cours ? calcule le temps restant avant fermeture
+        const p = PIL.find(m => Math.abs(nowMin - m) <= l.windowMin);
+        if (p != null) {
+          const fin = p + l.windowMin;
+          const reste = fin - nowMin;
+          if (reste > 0 && reste <= 10 && !lockAlertSent[key].closing) {
+            lockAlertSent[key].closing = true;
+            showLocalNotif('Fenêtre bientôt fermée', '« ' + l.name +' » se referme dans ' + reste + ' min.', 'lock');
+            if (voiceMode === 'foxy') {
+              await imSay(broOn()
+                ? '« ' + l.name + ' » se referme dans ' + reste + ' minutes. Après, ce sera trop tard — tu attendras la prochaine fenêtre.'
+                : 'Attention ! « ' + l.name + ' » se referme dans ' + reste + ' min. Prends ce qu\'il te faut maintenant. 🦊', 850, 'concern');
+              try { await imOfferHelp(currentM || currentMoment(new Date())); } catch(e) {}
+            }
+          }
+        } else {
+          // fenêtre qui approche (dans 20 min)
+          const next = PIL.find(m => (m - l.windowMin) > nowMin);
+          if (next != null) {
+            const avant = (next - l.windowMin) - nowMin;
+            if (avant > 0 && avant <= 20 && !lockAlertSent[key].opening) {
+              lockAlertSent[key].opening = true;
+              showLocalNotif('Fenêtre bientôt ouverte', '« ' + l.name + ' » s\'ouvre dans ' + avant + ' min.', 'lock');
+              if (voiceMode === 'foxy') {
+                await imSay(broOn()
+                  ? '« ' + l.name + ' » s\'ouvrira dans ' + avant + ' minutes. Prépare-toi, tu sais déjà que tu iras.'
+                  : '« ' + l.name + ' » s\'ouvre dans ' + avant + ' min, prépare-toi ! 🦊', 850, 'joy');
+                try { await imOfferHelp(currentM || currentMoment(new Date())); } catch(e) {}
+              }
+            }
+          }
+        }
+      }
+
+      // quota bientôt épuisé (il reste 1)
+      try {
+        const opens = await window.HabitrainLock.getOpensToday(l.id);
+        if (opens === l.dailyQuota - 1 && !lockAlertSent[key].quota) {
+          lockAlertSent[key].quota = true;
+          if (voiceMode === 'foxy') {
+            await imSay(broOn()
+              ? 'Il ne te reste qu\'UNE ouverture de « ' + l.name + ' » aujourd\'hui. Choisis bien ton moment.'
+              : 'Attention, il te reste une seule ouverture de « ' + l.name + ' » aujourd\'hui ! 🦊', 850, 'pensive');
+            try { await imOfferHelp(currentM || currentMoment(new Date())); } catch(e) {}
+          }
+        }
+      } catch(e) {}
+    }
+  }
 
   // Durée de port : intervalles entre changes enregistrés (result 'change_fait')
   async function renderWear() {
@@ -2315,7 +2937,11 @@
     { id:'b_retrait_2h',   n:'Couche retirée plus de 2h',               grav:'moyenne', w:7 },
     { id:'b_pilier',       n:'Change pilier sauté (matin ou soir)',     grav:'moyenne', w:7 },
     { id:'b_hors_couche',  n:'Miction/selle hors couche (hors fenêtres)', grav:'moyenne', w:7 },
-    { id:'b_hydra',        n:'Hydratation négligée (biberons non bus)', grav:'legere',  w:3 }
+    { id:'b_hydra',        n:'Hydratation négligée (biberons non bus)', grav:'legere',  w:3 },
+    { id:'pause_moyenne',     n:'Pause de plusieurs heures',            grav:'legere',  w:3 },
+    { id:'pause_longue',      n:'Pause de 1 à 3 jours',                 grav:'moyenne', w:7 },
+    { id:'pause_tres_longue', n:'Désertion du programme (+3 jours)',    grav:'grave',   w:12 },
+    { id:'lock_emergency',    n:'Ouverture de serrure en urgence',       grav:'legere',  w:3 }
   ];
   const GRAV_LABEL = { grave:'Grave', moyenne:'Moyenne', legere:'Légère' };
 
@@ -2750,6 +3376,7 @@
   }
   function closeCheck() {
     document.getElementById('overlay').classList.remove('show');
+    changeModel = null;   // libère le modèle réservé si le change est abandonné
     if (poseTypeTimer) { clearInterval(poseTypeTimer); poseTypeTimer = null; }
   }
 
@@ -3190,11 +3817,19 @@
 
   function pickOne(arr) { return arr[Math.floor(Math.random()*arr.length)]; }
 
+  let liveWardrobe = null;  // garde-robe personnalisée (chargée au démarrage)
+  async function loadLiveWardrobe() {
+    try { if (window.HabitrainWardrobe) liveWardrobe = await window.HabitrainWardrobe.getWardrobe(); } catch(e) {}
+  }
+  function wb(cat) {
+    const src = (liveWardrobe && liveWardrobe[cat] && liveWardrobe[cat].length) ? liveWardrobe[cat] : WARDROBE[cat];
+    return src || [];
+  }
   function drawOutfit() {
     return {
-      nuit: pickOne(WARDROBE.nuit),
-      jour: pickOne(WARDROBE.jour),
-      sieste: pickOne(WARDROBE.sieste)
+      nuit: pickOne(wb('nuit')),
+      jour: pickOne(wb('jour')),
+      sieste: pickOne(wb('sieste'))
     };
   }
 
@@ -3745,6 +4380,7 @@
     paused = true;
     document.body.classList.add('paused');
     try { await window.storage.set('pref:paused', JSON.stringify(true)); } catch(e) {}
+    try { await window.storage.set('pause:start', JSON.stringify(Date.now())); } catch(e) {}
     const ov = document.getElementById('overlay'); if (ov) ov.classList.remove('show');
     const n = document.querySelector('.facade-note'); if (n) n.value = '';
   }
@@ -3772,24 +4408,82 @@
     document.body.classList.remove('paused');
     try { await window.storage.set('pref:paused', JSON.stringify(false)); } catch(e) {}
     try { await refresh(); } catch(e) {}
-    // Foxy accueille le retour dans une popup
+    // durée de la pause → programme de reprise gradué
+    let start = null;
+    try { const r = await window.storage.get('pause:start'); if (r && r.value) start = JSON.parse(r.value); } catch(e) {}
+    const hours = start ? (Date.now() - start) / 3600000 : 0;
+    await runResumeProgram(hours);
+  }
+
+  // Programme de reprise : plus la pause a duré, plus la reprise est exigeante
+  async function runResumeProgram(hours) {
     const now = new Date();
     const isNight = now.getHours() >= 23 || now.getHours() < 7;
-    if (isNight) {
-      foxyPopShow('Mmh... *se réveille doucement* Oh, te revoilà... Il est tard, mais je suis content que tu sois là. 😴🦊', 'sleep', [
-        { label:'Coucou Foxy', onClick: async () => { foxyPopHide(); if (voiceMode==='foxy') { try { await imRunMoment(); } catch(e){} } } }
+
+    // --- Palier COURT (< 2h) : reprise légère ---
+    if (hours < 2) {
+      if (isNight) {
+        foxyPopShow('Mmh... te revoilà. Il est tard, mais je suis content que tu sois là. 😴🦊', 'sleep', [
+          { label:'Coucou Foxy', onClick: async () => { foxyPopHide(); if (voiceMode==='foxy') { try { await imRunMoment(); } catch(e){} } } }
+        ]);
+        return;
+      }
+      foxyPopShow('Te revoilà ! Courte absence, on reprend le fil tranquillement. Tu es prêt ?', 'joy', [
+        { label:'🤗 Oui, on replonge !', onClick: async () => { foxyPopHide(); if (voiceMode !== 'foxy') { await setVoiceMode('foxy'); } else { try { await imRunMoment(); } catch(e){} } }},
+        { soft:true, label:'Pas tout de suite', onClick: async () => {
+          foxyPopShow('D\'accord... je t\'attends. Reviens vite. 🦊💛', 'concern', [
+            { label:'À très vite', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
+          ]);
+        }}
       ]);
       return;
     }
-    foxyPopShow('Ohhh, te revoilà ! 🦊 Tu m\'as manqué ! Tu es prêt à replonger et reprendre où on s\'était arrêtés ?', 'joy', [
-      { label:'🤗 Oui, on replonge !', onClick: async () => {
-        foxyPopHide();
-        if (voiceMode !== 'foxy') { await setVoiceMode('foxy'); }
-        else { try { await imRunMoment(); } catch(e){} }
-      }},
-      { soft:true, label:'Pas tout de suite', onClick: async () => {
-        foxyPopShow('Oh... d\'accord. *un peu déçu* Mais je comprends, hein. Je reste là et je t\'attends. Reviens quand tu veux qu\'on s\'amuse de nouveau. 🦊💛', 'concern', [
-          { label:'À très vite Foxy', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
+
+    // --- Paliers supérieurs : reprise imposée ---
+    let niveau, dureeTxt, entorse, msg1, msg2;
+    if (hours < 24) {
+      niveau = 'moyen';
+      dureeTxt = Math.round(hours) + 'h';
+      entorse = 'pause_moyenne';
+      msg1 = 'Te voilà. Tu as été absent ' + dureeTxt + '. On ne reprend pas comme si de rien n\'était.';
+      msg2 = 'Change de reprise, tout de suite, et vérification de ton état. Ensuite on retrouve le rythme. Allez.';
+    } else if (hours < 72) {
+      niveau = 'long';
+      dureeTxt = Math.round(hours/24) + ' jour(s)';
+      entorse = 'pause_longue';
+      msg1 = dureeTxt + ' d\'absence. C\'est long. Le cadre s\'est défait pendant ce temps, et ça, ça compte.';
+      msg2 = 'Reprise stricte : change immédiat, contention sur ta prochaine fenêtre, et je te surveille de près pour le reste de la journée. On répare ça ensemble.';
+    } else {
+      niveau = 'tres_long';
+      dureeTxt = Math.round(hours/24) + ' jours';
+      entorse = 'pause_tres_longue';
+      msg1 = dureeTxt + ' sans rien. Tu as complètement déserté le programme. Je ne vais pas faire semblant que ce n\'est rien.';
+      msg2 = 'On reprend au maximum d\'exigence, immédiatement. Change, contention, vigilance totale. Ton corps aura besoin de quelques heures pour relâcher à nouveau — ça, c\'est normal, je ne t\'en tiens pas rigueur. Mais l\'engagement, lui, tu le reprends maintenant. Entièrement.';
+    }
+
+    // enregistre l'entorse correspondante
+    try {
+      const date = todayStr();
+      const r = await window.storage.get('breach:'+date);
+      const b = (r && r.value) ? JSON.parse(r.value) : {};
+      b[entorse] = true;
+      await window.storage.set('breach:'+date, JSON.stringify(b));
+    } catch(e) {}
+    // vigilance renforcée le reste de la journée
+    if (niveau === 'long' || niveau === 'tres_long') {
+      try { await window.storage.set('vigilance:until', JSON.stringify(new Date().setHours(23,59,59,999))); } catch(e) {}
+    }
+    // marque le change de reprise à faire
+    try { await window.storage.set('reprise:change', JSON.stringify(todayStr()+':'+Date.now())); } catch(e) {}
+
+    foxyPopShow(msg1, 'concern', [
+      { label:'Je t\'écoute...', onClick: async () => {
+        foxyPopShow(msg2, niveau === 'tres_long' ? 'surprised' : 'concern', [
+          { label:'🦊 On fait le change de reprise', onClick: async () => {
+            foxyPopHide();
+            if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e){} }
+            try { startChange('pilier'); } catch(e) {}
+          }}
         ]);
       }}
     ]);
@@ -3822,8 +4516,498 @@
     const card = document.getElementById('qrCard');
     const show = card.style.display === 'none';
     card.style.display = show ? '' : 'none';
-    if (show) { await renderQrConfig(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+    if (show) { await renderQrConfig(); await renderNfcWriter(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
   });
+  // ===== Programmation des tags NFC =====
+  async function renderNfcWriter() {
+    const sup = document.getElementById('nfcSupport');
+    const list = document.getElementById('nfcWriteList');
+    const res = document.getElementById('nfcWriteResult');
+    if (!sup || !list) return;
+    const NFC = window.HabitrainNFC;
+    if (!NFC || !NFC.supported()) {
+      sup.innerHTML = '⚠️ Web NFC non disponible sur cet appareil (Android + Chrome requis). Les QR codes fonctionnent normalement.';
+      list.innerHTML = '';
+      return;
+    }
+    sup.innerHTML = '✅ NFC disponible. Choisis ce que tu veux écrire, puis approche un tag vierge du dos du téléphone.';
+    list.innerHTML = '';
+    const cibles = [
+      { kind:'unlock',        label:'🔒 Bracelet (déverrouillage)' },
+      { kind:'change_pilier', label:'🔑 Change pilier' },
+      { kind:'change_tous',   label:'🍼 Tous les changes' },
+      { kind:'biberon',       label:'🍼 Biberon' },
+      { kind:'coucher',       label:'🌙 Coucher' }
+    ];
+    cibles.forEach(c => {
+      const b = document.createElement('button');
+      b.className = 'settings-toggle-btn';
+      b.textContent = '📶 Écrire : ' + c.label;
+      b.addEventListener('click', async () => {
+        try {
+          const payload = await window.HabitrainQR.payloadFor(c.kind);
+          res.textContent = '📶 Approche le tag du dos du téléphone...';
+          await NFC.writeTag(payload);
+          res.textContent = '✅ Tag « ' + c.label + ' » programmé ! Colle-le au bon endroit.';
+        } catch (e) {
+          res.textContent = '⚠️ Échec : ' + (e.message || 'tag non détecté ou protégé') + '. Réessaie en le maintenant contre le téléphone.';
+        }
+      });
+      list.appendChild(b);
+    });
+  }
+
+  (function(){
+    const t = document.getElementById('qrGuideToggle');
+    if (t) t.addEventListener('click', () => {
+      const g = document.getElementById('qrGuide');
+      if (g) g.style.display = g.style.display === 'none' ? '' : 'none';
+    });
+    const t2 = document.getElementById('qrRulesToggle');
+    if (t2) t2.addEventListener('click', () => {
+      const g = document.getElementById('qrRules');
+      if (g) g.style.display = g.style.display === 'none' ? '' : 'none';
+    });
+  })();
+
+  // ===== Garde-robe & stock =====
+  const WB = window.HabitrainWardrobe;
+  document.getElementById('openWardrobe').addEventListener('click', async () => {
+    const card = document.getElementById('wardrobeCard');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) { await renderWardrobe(); await renderStock(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
+
+  async function renderWardrobe() {
+    if (!WB) return;
+    const box = document.getElementById('wardrobeCats');
+    const w = await WB.getWardrobe();
+    box.innerHTML = '';
+    WB.CATEGORIES.forEach(cat => {
+      const div = document.createElement('div');
+      div.className = 'set-cat';
+      div.style.cssText = 'border:1.5px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px';
+      const items = (w[cat.id] || []);
+      div.innerHTML = '<h4>' + cat.icon + ' ' + cat.label + ' <span style="font-weight:700;color:var(--muted);font-size:11px">(' + items.length + ')</span></h4>' +
+        '<div class="wb-items"></div>' +
+        '<div style="display:flex;gap:8px;margin-top:8px">' +
+          '<input type="text" class="wb-new" placeholder="Ajouter…" style="flex:1;padding:8px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:600;font-size:13px">' +
+          '<button class="settings-toggle-btn wb-add">➕</button>' +
+        '</div>';
+      const list = div.querySelector('.wb-items');
+      items.forEach(it => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:6px;align-items:center;padding:3px 0';
+        row.innerHTML = '<input type="text" class="wb-name" value="' + it.replace(/"/g,'&quot;') + '" style="flex:1;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-weight:600;font-size:12.5px">' +
+                        '<button class="settings-toggle-btn wb-del" style="color:#a8543b;padding:4px 9px">✕</button>';
+        row.querySelector('.wb-name').addEventListener('change', async (ev) => {
+          await WB.renameItem(cat.id, it, ev.target.value); await renderWardrobe();
+        });
+        row.querySelector('.wb-del').addEventListener('click', async () => {
+          await WB.removeItem(cat.id, it); await renderWardrobe();
+        });
+        list.appendChild(row);
+      });
+      div.querySelector('.wb-add').addEventListener('click', async () => {
+        const inp = div.querySelector('.wb-new');
+        if (inp.value.trim()) { await WB.addItem(cat.id, inp.value); inp.value=''; await renderWardrobe(); }
+      });
+      box.appendChild(div);
+    });
+  }
+
+  async function renderStock() {
+    if (!WB) return;
+    // résumé par catégorie (c'est là que se juge l'alerte)
+    try {
+      const st = await WB.categoryStatus();
+      const th = await WB.getThresholds();
+      document.getElementById('thJour').value = th.jour;
+      document.getElementById('thNuit').value = th.nuit;
+      const sum = document.getElementById('stockSummary');
+      const bloc = (p, ic) => {
+        const c = st[p];
+        const col = c.empty ? 'var(--coral)' : (c.low ? 'var(--amber)' : 'var(--green)');
+        return '<div style="flex:1;text-align:center;padding:10px;border:1.5px solid '+col+';border-radius:12px">'+
+          '<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase">'+ic+' '+p+'</div>'+
+          '<div style="font-family:\'Fraunces\',serif;font-size:26px;font-weight:600;color:'+col+'">'+c.total+'</div>'+
+          '<div style="font-size:10.5px;font-weight:700;color:var(--muted)">seuil '+c.seuil+(c.low?' · ⚠️ bas':'')+'</div></div>';
+      };
+      sum.innerHTML = '<div style="display:flex;gap:8px">' + bloc('jour','☀️') + bloc('nuit','🌙') + '</div>';
+    } catch(e) {}
+    const box = document.getElementById('stockList');
+    const list = await WB.getStock();
+    box.innerHTML = '';
+    if (!list.length) { box.innerHTML = '<div class="set-note">Aucun modèle. Ajoute-en un ci-dessus.</div>'; return; }
+    const USAGE = { jour:'☀️ Jour', nuit:'🌙 Nuit', both:'🔄 Jour+Nuit' };
+    list.forEach(m => {
+      const low = m.qty === 0;
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);flex-wrap:wrap';
+      row.innerHTML =
+        '<input type="text" class="st-name" value="' + m.name.replace(/"/g,'&quot;') + '" style="flex:1;min-width:110px;padding:7px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-weight:700;font-size:13px">' +
+        '<select class="st-usage" style="padding:7px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-weight:700;font-size:12px">' +
+          ['jour','nuit','both'].map(u => '<option value="'+u+'"'+(m.usage===u?' selected':'')+'>'+USAGE[u]+'</option>').join('') +
+        '</select>' +
+        '<button class="settings-toggle-btn st-minus" style="padding:5px 11px">−</button>' +
+        '<span class="st-qty" style="font-family:\'Fraunces\',serif;font-size:19px;font-weight:600;min-width:44px;text-align:center;color:' + (low?'var(--coral)':'var(--ink)') + '">' + m.qty + '</span>' +
+        '<button class="settings-toggle-btn st-plus" style="padding:5px 11px">+</button>' +
+        '<button class="settings-toggle-btn st-del" style="color:#a8543b;padding:5px 9px">✕</button>' +
+        (low ? '<div style="width:100%;font-size:11.5px;font-weight:800;color:var(--coral)">épuisé</div>' : '');
+      row.querySelector('.st-name').addEventListener('change', async e => { await WB.updateModel(m.id,{name:e.target.value}); await renderStock(); });
+      row.querySelector('.st-usage').addEventListener('change', async e => { await WB.updateModel(m.id,{usage:e.target.value}); await renderStock(); });
+      row.querySelector('.st-plus').addEventListener('click', async () => { await WB.updateModel(m.id,{qty:m.qty+1}); await renderStock(); });
+      row.querySelector('.st-minus').addEventListener('click', async () => { await WB.updateModel(m.id,{qty:Math.max(0,m.qty-1)}); await renderStock(); });
+      row.querySelector('.st-del').addEventListener('click', async () => { await WB.removeModel(m.id); await renderStock(); });
+      box.appendChild(row);
+    });
+  }
+  document.getElementById('thSave').addEventListener('click', async () => {
+    const t = { jour: parseInt(document.getElementById('thJour').value,10)||0,
+                nuit: parseInt(document.getElementById('thNuit').value,10)||0 };
+    await WB.setThresholds(t);
+    const f = document.getElementById('thFlash');
+    if (f) { f.textContent = '💾 Seuils enregistrés'; setTimeout(()=>f.textContent='',2000); }
+    await renderStock();
+  });
+  document.getElementById('stockAdd').addEventListener('click', async () => {
+    const n = document.getElementById('stockNewName');
+    const u = document.getElementById('stockNewUsage');
+    if (n.value.trim()) { await WB.addModel(n.value, u.value, 0); n.value=''; await renderStock(); }
+  });
+
+  // ===== Serrures (multi) =====
+  const LK = window.HabitrainLock;
+  document.getElementById('openLock').addEventListener('click', async () => {
+    const card = document.getElementById('lockCard');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) { await renderLockList(); renderLockGuide(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
+  (function(){
+    const t = document.getElementById('lockGuideToggle');
+    if (t) t.addEventListener('click', () => {
+      const g = document.getElementById('lockGuide');
+      if (g) g.style.display = g.style.display === 'none' ? '' : 'none';
+    });
+  })();
+  document.getElementById('lockAdd').addEventListener('click', async () => {
+    if (!LK) return;
+    const inp = document.getElementById('lockNewName');
+    const name = (inp.value || '').trim() || 'Nouvelle serrure';
+    await LK.addLock(name);
+    inp.value = '';
+    await renderLockList();
+  });
+
+  function lockFieldRow(label, desc, inputHtml) {
+    return '<div class="set-row"><div class="info"><div class="n">'+label+'</div><div class="d">'+desc+'</div></div>'+inputHtml+'</div>';
+  }
+
+  async function renderLockList() {
+    if (!LK) return;
+    const box = document.getElementById('lockList');
+    const locks = await LK.getLocks();
+    box.innerHTML = '';
+    if (!locks.length) {
+      box.innerHTML = '<div class="set-note">Aucune serrure. Ajoute-en une ci-dessus (ex. « Placard couches », « Tiroir contention »).</div>';
+      return;
+    }
+    for (const l of locks) {
+      const opens = await LK.getOpensToday(l.id);
+      const div = document.createElement('div');
+      div.className = 'set-cat';
+      div.style.cssText = 'border:1.5px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px';
+      div.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
+          '<input type="text" class="lk-name" value="'+(l.name||'').replace(/"/g,'&quot;')+'" style="flex:1;font-family:\'Fraunces\',serif;font-size:16px;font-weight:600;color:#5a4326;border:none;background:transparent;padding:2px 0">'+
+          '<div class="switch lk-enabled'+(l.enabled?' on':'')+'"><div class="knob"></div></div>'+
+        '</div>'+
+        '<div class="d" style="font-size:11.5px;color:var(--muted);font-weight:700;margin-bottom:8px">'+opens+' ouverture(s) aujourd\'hui · <span class="lk-status">'+(LK.isConnected(l.id)?'🟢 connectée':'non connectée')+'</span></div>'+
+        lockFieldRow('Fenêtres horaires','Limiter aux piliers (9h/16h/22h30)','<div class="switch lk-usewin'+(l.useWindows?' on':'')+'"><div class="knob"></div></div>')+
+        lockFieldRow('Largeur fenêtre','± minutes','<input type="number" class="lk-window" min="5" max="180" step="5" value="'+l.windowMin+'" style="width:70px;padding:8px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:700;text-align:center">')+
+        lockFieldRow('Délai après demande','secondes','<input type="number" class="lk-delay" min="0" max="900" step="10" value="'+l.delaySec+'" style="width:70px;padding:8px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:700;text-align:center">')+
+        lockFieldRow('Durée d\'ouverture','secondes de gâche ouverte','<input type="number" class="lk-opensec" min="1" max="120" step="1" value="'+l.openSec+'" style="width:70px;padding:8px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:700;text-align:center">')+
+        lockFieldRow('Quota journalier','ouvertures max/jour','<input type="number" class="lk-quota" min="1" max="30" step="1" value="'+l.dailyQuota+'" style="width:70px;padding:8px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:700;text-align:center">')+
+        lockFieldRow('Change validé requis','le change précédent doit être bouclé','<div class="switch lk-reqchange'+(l.requireChangeDone?' on':'')+'"><div class="knob"></div></div>')+
+        lockFieldRow('Verrouillée en pause','pas d\'accès hors programme','<div class="switch lk-nopause'+(l.blockDuringPause?' on':'')+'"><div class="knob"></div></div>')+
+        lockFieldRow('Secret partagé','doit être identique dans son firmware','<input type="text" class="lk-secret" value="'+(l.secret||'').replace(/"/g,'&quot;')+'" style="width:140px;padding:8px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:700;font-size:11px">')+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+
+          '<button class="settings-toggle-btn lk-save">💾 Enregistrer</button>'+
+          '<button class="settings-toggle-btn lk-connect">🔗 Connecter</button>'+
+          '<button class="settings-toggle-btn lk-open">🔓 Ouvrir</button>'+
+          '<button class="settings-toggle-btn lk-emg" style="color:#a8543b;border-color:#e8896b">🆘 Urgence</button>'+
+          '<button class="settings-toggle-btn lk-del" style="color:#a8543b">🗑️</button>'+
+        '</div>'+
+        '<div class="set-note lk-result"></div>';
+      box.appendChild(div);
+
+      // interrupteurs
+      div.querySelectorAll('.switch').forEach(sw => sw.addEventListener('click', () => sw.classList.toggle('on')));
+
+      // enregistrer
+      div.querySelector('.lk-save').addEventListener('click', async () => {
+        await LK.updateLock(l.id, {
+          name: div.querySelector('.lk-name').value.trim() || l.name,
+          enabled: div.querySelector('.lk-enabled').classList.contains('on'),
+          useWindows: div.querySelector('.lk-usewin').classList.contains('on'),
+          windowMin: parseInt(div.querySelector('.lk-window').value,10) || 30,
+          delaySec: parseInt(div.querySelector('.lk-delay').value,10) || 0,
+          openSec: parseInt(div.querySelector('.lk-opensec').value,10) || 5,
+          dailyQuota: parseInt(div.querySelector('.lk-quota').value,10) || 4,
+          requireChangeDone: div.querySelector('.lk-reqchange').classList.contains('on'),
+          blockDuringPause: div.querySelector('.lk-nopause').classList.contains('on'),
+          secret: div.querySelector('.lk-secret').value.trim() || l.secret
+        });
+        const r = div.querySelector('.lk-result');
+        r.textContent = '💾 « ' + (div.querySelector('.lk-name').value.trim() || l.name) + ' » enregistrée.'; setTimeout(()=>r.textContent='', 2200);
+      });
+
+      // connecter
+      div.querySelector('.lk-connect').addEventListener('click', async () => {
+        const r = div.querySelector('.lk-result');
+        if (!LK.supported()) { r.textContent = 'Non supporté (Android/Chrome requis)'; return; }
+        r.textContent = '🔗 Connexion à « ' + l.name + ' »...';
+        LK.onStatus((id, st) => {
+          if (id !== l.id) return;
+          const s2 = div.querySelector('.lk-status');
+          if (s2) s2.textContent = st === 'OPEN' ? '🔓 ouverte' : (st === 'DENIED' ? '⛔ secret refusé' : (st === 'DISCONNECTED' ? 'déconnectée' : '🔒 verrouillée'));
+        });
+        try { await LK.connect(l.id); r.textContent = '🦊 « ' + l.name + ' » est connectée, je la contrôle maintenant.'; div.querySelector('.lk-status').textContent = '🟢 connectée'; }
+        catch (e) { r.textContent = '⚠️ Connexion à « ' + l.name + ' » échouée ou annulée.'; }
+      });
+
+      // ouvrir (conditions → délai → ordre)
+      div.querySelector('.lk-open').addEventListener('click', async () => {
+        const r = div.querySelector('.lk-result');
+        let lastPillarDone = true;
+        try {
+          const pil = pillarSlotForNow();
+          if (pil) {
+            const rr = await window.storage.get('slotdone:'+todayStr());
+            const done = (rr && rr.value) ? JSON.parse(rr.value) : {};
+            const PIL = ['c0900','c1600','c2230'];
+            const idx = PIL.indexOf(pil.key);
+            if (idx > 0) lastPillarDone = !!done[PIL[idx-1]];
+          }
+        } catch(e) {}
+        const verdict = await LK.evaluate(l.id, { paused, lastPillarDone });
+        if (!verdict.ok) {
+          try {
+            const isQuota = /Quota atteint/i.test(verdict.reason || '');
+            await saveCheck(isQuota ? 'lock_quota' : 'lock_denied', 'serrure:' + l.name);
+          } catch(e) {}
+          r.textContent = broOn()
+            ? '🦊 « ' + l.name +' » reste fermée. ' + verdict.reason + ' Inutile d\'insister, tu attendras.'
+            : '🦊 Désolé, « ' + l.name + ' » reste fermée. ' + verdict.reason;
+          return;
+        }
+        if (!LK.isConnected(l.id)) { r.textContent = '⚠️ « ' + l.name + ' » n\'est pas connectée. Connecte-la d\'abord.'; return; }
+        let reste = verdict.delaySec || 0;
+        if (reste > 0) {
+          r.textContent = broOn()
+            ? '🦊 « ' + l.name + ' » s\'ouvrira dans ' + reste + ' s. Patiente, c\'est voulu.'
+            : '🦊 J\'ouvre « ' + l.name + ' » dans ' + reste + ' s... un peu de patience !';
+          const iv = setInterval(async () => {
+            reste--;
+            if (reste > 0) { r.textContent = '🦊 « ' + l.name + ' » dans ' + reste + ' s...'; return; }
+            clearInterval(iv);
+            try {
+              await LK.open(l.id);
+              try { await saveCheck('lock_open', 'serrure:' + l.name); } catch(e) {}
+              r.textContent = (broOn()
+                ? '🔓 « ' + l.name + ' » est ouverte pour ' + l.openSec + ' s. Prends ce qu\'il te faut, sans traîner.'
+                : '🔓 Voilà, « ' + l.name + ' » est ouverte pendant ' + l.openSec + ' s ! Vas-y.')
+                + ' (' + (verdict.opens+1) + '/' + verdict.quota + ' aujourd\'hui)';
+            }
+            catch (e) { r.textContent = '⚠️ « ' + l.name + ' » : ' + e.message; }
+          }, 1000);
+        } else {
+          try {
+            await LK.open(l.id);
+            try { await saveCheck('lock_open', 'serrure:' + l.name); } catch(e) {}
+            r.textContent = (broOn()
+              ? '🔓 « ' + l.name + ' » est ouverte pour ' + l.openSec + ' s. Prends ce qu\'il te faut, sans traîner.'
+              : '🔓 Voilà, « ' + l.name + ' » est ouverte pendant ' + l.openSec + ' s ! Vas-y.')
+              + ' (' + (verdict.opens+1) + '/' + verdict.quota + ' aujourd\'hui)';
+          }
+          catch (e) { r.textContent = '⚠️ « ' + l.name + ' » : ' + e.message; }
+        }
+      });
+
+      // ouverture d'urgence (ignore les conditions, mais tracée)
+      div.querySelector('.lk-emg').addEventListener('click', async () => {
+        const r = div.querySelector('.lk-result');
+        r.innerHTML = '🆘 Ouvrir « '+l.name+' » <b>sans condition</b> ? Ce sera noté comme une entorse. '+
+          '<b class="lk-eyes" style="color:#a8543b;cursor:pointer">Oui, j\'en ai besoin</b> · <b class="lk-eno" style="cursor:pointer">Annuler</b>';
+        div.querySelector('.lk-eno').addEventListener('click', () => { r.textContent = ''; });
+        div.querySelector('.lk-eyes').addEventListener('click', async () => {
+          if (!LK.isConnected(l.id)) { r.textContent = '⚠️ « ' + l.name + ' » n\'est pas connectée.'; return; }
+          try {
+            await LK.emergencyOpen(l.id);
+            // trace : journal + entorse du jour
+            try { await saveCheck('lock_emergency', 'serrure:' + l.name); } catch(e) {}
+            try {
+              const date = todayStr();
+              const rb = await window.storage.get('breach:'+date);
+              const b = (rb && rb.value) ? JSON.parse(rb.value) : {};
+              b['lock_emergency'] = true;
+              await window.storage.set('breach:'+date, JSON.stringify(b));
+            } catch(e) {}
+            r.textContent = broOn()
+              ? '🆘 « ' + l.name + ' » ouverte en urgence pour ' + l.openSec + ' s. C\'est noté. Je ne te juge pas, mais on en reparlera.'
+              : '🆘 « ' + l.name + ' » ouverte en urgence pour ' + l.openSec + ' s. C\'est noté dans ton journal — tu as bien fait si tu en avais besoin. 🦊';
+            try { await refresh(); } catch(e) {}
+          } catch (e) { r.textContent = '⚠️ ' + e.message; }
+        });
+      });
+
+      // supprimer
+      div.querySelector('.lk-del').addEventListener('click', async () => {
+        const r = div.querySelector('.lk-result');
+        r.innerHTML = 'Supprimer « '+l.name+' » ? <b class="lk-yes" style="color:#a8543b;cursor:pointer">Oui</b> · <b class="lk-no" style="cursor:pointer">Non</b>';
+        div.querySelector('.lk-yes').addEventListener('click', async () => { await LK.removeLock(l.id); await renderLockList(); });
+        div.querySelector('.lk-no').addEventListener('click', () => { r.textContent = ''; });
+      });
+    }
+  }
+
+  function renderLockGuide() {
+    const g = document.getElementById('lockGuide');
+    if (!g || g.dataset.filled) return;
+    g.dataset.filled = '1';
+    g.innerHTML =
+      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:6px 0 4px">Une serrure = un ESP32</div>'+
+      'Chaque placard ou boîte a son propre ESP32 + sa gâche. Tu crées une entrée par serrure ici, tu la nommes, et tu règles ses conditions.'+
+      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">Matériel par serrure (~25-35 €)</div>'+
+      '• 1 <b>ESP32</b> alimenté en permanence<br>'+
+      '• 1 <b>gâche électrique 12V</b> (préfère « fail-safe » : s\'ouvre en cas de coupure) ou un servo<br>'+
+      '• 1 <b>module relais</b> + alimentation 12V<br>'+
+      '• <b>Une clé de secours mécanique</b> (indispensable)'+
+      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">Câblage</div>'+
+      'GPIO5 → entrée du relais ; le relais commute le 12V vers la gâche ; GND commun.'+
+      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">Secret partagé (important)</div>'+
+      'Chaque serrure a son <b>propre secret</b>, généré ici. Copie-le dans le champ SECRET du firmware <b>habitrain-serrure.ino</b> de CETTE serrure, puis flashe. Deux serrures ne doivent jamais partager le même secret.'+
+      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">Connexion</div>'+
+      'Clique <b>Connecter</b> sur la serrure voulue et choisis-la dans la liste Bluetooth. Astuce : donne un nom distinct à chaque ESP32 dans son firmware (BLEDevice::init) pour les reconnaître facilement.'+
+      '<div style="background:#FBEBE5;border:1px solid #e8896b;border-radius:10px;padding:10px 12px;margin-top:14px;font-size:12px;font-weight:800;color:#a8543b">'+
+      '🔑 Une clé de secours par serrure, rangée ailleurs que dans le meuble concerné. Teste-la avant la mise en service.'+
+      '</div>';
+  }
+
+  // ===== Capteur de couche (BLE) =====
+  const SENSOR_LABELS = { sec:'☀️ Sèche', mouille:'💧 Mouillée', sature:'🌊 Saturée' };
+  let lastSensorState = null;
+  document.getElementById('openSensor').addEventListener('click', () => {
+    const card = document.getElementById('sensorCard');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) { renderSensorGuide(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
+  (function(){
+    const t = document.getElementById('sensorGuideToggle');
+    if (t) t.addEventListener('click', () => {
+      const g = document.getElementById('sensorGuide');
+      if (g) g.style.display = g.style.display === 'none' ? '' : 'none';
+    });
+  })();
+  document.getElementById('sensorConnect').addEventListener('click', async () => {
+    const S = window.HabitrainSensor;
+    const statusEl = document.getElementById('sensorStatus');
+    if (!S || !S.supported()) { statusEl.textContent = 'Non supporté (Android/Chrome requis)'; return; }
+    statusEl.textContent = 'Connexion...';
+    S.onState((state) => onSensorState(state));
+    S.onRaw((n) => { const r = document.getElementById('sensorRaw'); if (r) r.textContent = n; });
+    S.onLog((events) => onSensorLog(events));
+    try {
+      await S.connect();
+      statusEl.textContent = '🟢 Connecté';
+      document.getElementById('sensorConnect').textContent = '🔄 Resynchroniser';
+    } catch (e) {
+      statusEl.textContent = 'Échec / annulé';
+    }
+  });
+
+  // intègre le journal reçu à la connexion (événements survenus appli fermée)
+  async function onSensorLog(events) {
+    if (!events || !events.length) return;
+    let n = 0;
+    for (const ev of events) {
+      try {
+        // enregistre chaque événement horodaté comme un état, à sa vraie heure
+        const dateKey = ev.t.slice(0,10);
+        const list = await getChecks(dateKey);
+        list.push({ t: ev.t, result: 'etat_'+ev.state, type: 'capteur' });
+        await window.storage.set('check:'+dateKey, JSON.stringify(list));
+        n++;
+      } catch(e) {}
+    }
+    try { await refresh(); } catch(e) {}
+    const statusEl = document.getElementById('sensorStatus');
+    if (statusEl) statusEl.textContent = '🟢 Connecté · ' + n + ' événement' + (n>1?'s':'') + ' synchronisé' + (n>1?'s':'');
+    // Foxy commente la synchro en différé (mode Foxy, hors pause)
+    if (voiceMode === 'foxy' && !paused && n > 0) {
+      const last = events[events.length-1];
+      const summary = events.filter(e=>e.state==='mouille').length;
+      const sat = events.filter(e=>e.state==='sature').length;
+      const m = currentM || currentMoment(new Date());
+      await imSay(broOn()
+        ? 'Voyons voir ce que ton capteur a enregistré pendant mon absence... ' + summary + ' fois mouillé, ' + sat + ' fois saturé. Tu vois ? Tu t\'es laissé aller, exactement comme je l\'avais dit.'
+        : 'Ton capteur m\'a tout raconté ! ' + summary + ' fois mouillé, ' + sat + ' fois saturé pendant qu\'on était pas ensemble. Tu t\'es bien laissé aller, bravo. 🦊', 900, broOn() ? 'pensive' : 'happy');
+      try { await imOfferHelp(m); } catch(e) {}
+    }
+  }
+
+  // à chaque changement d'état capteur : maj statut + réaction Foxy
+  async function onSensorState(state) {
+    const live = document.getElementById('sensorLive');
+    if (live) live.textContent = SENSOR_LABELS[state] || '—';
+    if (state === lastSensorState) return;
+    lastSensorState = state;
+    // enregistre l'état comme un check automatique
+    try { await saveCheck('etat_'+state, 'capteur'); } catch(e) {}
+    try { await renderSince(); } catch(e) {}
+    // Foxy réagit en temps réel si on est en mode Foxy et pas en pause
+    if (voiceMode === 'foxy' && !paused) {
+      const m = currentM || currentMoment(new Date());
+      if (state === 'mouille') {
+        await imSay(broOn()
+          ? 'Ah... tu viens de te mouiller. Voilà. Tu vois comme c\'est venu tout seul, sans que tu puisses l\'empêcher ? C\'est ça, se laisser aller.'
+          : 'Oh, tu viens de te mouiller ! C\'est bien, tu t\'es laissé aller. 🦊', 800, broOn() ? 'pensive' : 'happy');
+      } else if (state === 'sature') {
+        await imSay(broOn()
+          ? 'Ta couche est saturée maintenant. On va te changer — inutile d\'attendre, laisse-moi m\'en occuper.'
+          : 'Ta couche est bien saturée là ! On va penser à te changer bientôt, pour ta peau. 🦊', 850, 'concern');
+      }
+      try { await imOfferHelp(m); } catch(e) {}
+    }
+  }
+
+  function renderSensorGuide() {
+    const g = document.getElementById('sensorGuide');
+    if (!g || g.dataset.filled) return;
+    g.dataset.filled = '1';
+    g.innerHTML =
+      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:6px 0 4px">Matériel (~15-20 €)</div>'+
+      '• 1 carte <b>ESP32-C3 mini</b> (LOLIN C3 Mini ou équivalent)<br>'+
+      '• 1 <b>capteur d\'humidité capacitif</b> (type sonde sol capacitive) OU 2 fils-électrodes inox<br>'+
+      '• 1 <b>batterie LiPo 3.7V</b> (~400-500 mAh) avec connecteur, ou alim USB<br>'+
+      '• Un petit boîtier, du fil, fer à souder<br>'+
+      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">1. Préparer l\'IDE Arduino</div>'+
+      'Installe l\'IDE Arduino (gratuit). Dans Préférences → URL de gestionnaire de cartes, ajoute l\'URL ESP32 d\'Espressif, puis installe le paquet "esp32" dans le gestionnaire de cartes. Choisis la carte <b>ESP32C3 Dev Module</b>.'+
+      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">2. Câbler le capteur</div>'+
+      'Relie la sortie analogique du capteur à <b>GPIO0</b> de l\'ESP32-C3, son + au 3V3, son − au GND. (Le fichier firmware utilise GPIO0.)'+
+      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">3. Flasher le firmware</div>'+
+      'Ouvre le fichier <b>habitrain-capteur-couche.ino</b> (fourni), branche l\'ESP32 en USB, sélectionne le bon port, et clique Téléverser.'+
+      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">4. Calibrer</div>'+
+      'Reviens ici, clique <b>Connecter</b>. Regarde la <b>valeur brute</b> : note-la couche sèche, puis mouillée, puis saturée. Reporte ces valeurs dans le firmware (SEUIL_MOUILLE et SEUIL_SATURE), re-flashe une fois. C\'est réglé.'+
+      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">5. Monter sur la couche</div>'+
+      'Clipse le capteur à l\'extérieur de la couche, à l\'avant-bas (zone qui se mouille en premier). Boîtier + batterie fixés à la ceinture ou dans une poche du body.'+
+      '<div style="background:#FBF3E0;border:1px solid #ecd9a8;border-radius:10px;padding:10px 12px;margin-top:14px;font-size:12px;font-weight:700;color:#8a6a30">'+
+      '🔋 Sécurité : batterie LiPo basse tension, aucun risque électrique. Garde l\'électronique au sec (le capteur détecte l\'humidité, mais la carte reste protégée). Nettoie les électrodes régulièrement.'+
+      '</div>';
+  }
   async function renderQrConfig() {
     if (!QR) return;
     const prefs = await QR.getQrPrefs();
@@ -3845,6 +5029,19 @@
     const us = document.getElementById('qrUnlockSwitch');
     us.classList.toggle('on', !!prefs.unlock);
     us.onclick = async () => { const p = await QR.getQrPrefs(); p.unlock = !p.unlock; await QR.saveQrPrefs(p); renderQrConfig(); };
+    // switch bracelet obligatoire
+    const br = document.getElementById('braceletReqSwitch');
+    if (br) {
+      br.classList.toggle('on', !!prefs.braceletRequired);
+      br.onclick = async () => {
+        const p = await QR.getQrPrefs();
+        p.braceletRequired = !p.braceletRequired;
+        if (p.braceletRequired) p.unlock = true; // implique le verrouillage à l'ouverture
+        await QR.saveQrPrefs(p);
+        renderQrConfig();
+        scheduleBraceletChecks();
+      };
+    }
     // génération
     const gl = document.getElementById('qrGenList'); gl.innerHTML = '';
     const toGen = QR.QR_ACTIONS.concat([{ id:'unlock', label:'Bracelet de déverrouillage' }]);
@@ -3871,21 +5068,36 @@
     showQrLock();
   }
   let sessionUnlocked = false;
-  function showQrLock() {
+  function showQrLock(isSurprise) {
     const lock = document.getElementById('qrLock');
     lock.style.display = 'flex';
+    const sub = document.getElementById('qrLockSub');
+    if (sub) sub.textContent = isSurprise ? 'Contrôle : scanne ton bracelet pour continuer.' : 'Scanne ton bracelet pour déverrouiller.';
     document.getElementById('qrUnlockBtn').onclick = () => {
       QR.startScan('unlock', (kind) => {
         if (kind === 'unlock') { sessionUnlocked = true; lock.style.display = 'none'; }
       });
     };
-    // secours discret : 3 tapes sur le titre
+    // secours discret : 3 tapes sur le titre (TOUJOURS actif, anti-blocage)
     let taps = [];
     const title = document.getElementById('qrLockTitle');
     title.onclick = () => {
       const now = Date.now(); taps.push(now); taps = taps.filter(x => now - x < 1200);
       if (taps.length >= 3) { taps = []; sessionUnlocked = true; lock.style.display = 'none'; }
     };
+  }
+  // contrôles surprises du bracelet obligatoire (bloquants, secours actif)
+  let braceletTimer = null;
+  async function scheduleBraceletChecks() {
+    if (braceletTimer) { clearTimeout(braceletTimer); braceletTimer = null; }
+    if (!QR) return;
+    const prefs = await QR.getQrPrefs();
+    if (!prefs.braceletRequired) return;
+    const delay = (30 + Math.floor(Math.random()*60)) * 60000; // 30-90 min
+    braceletTimer = setTimeout(async () => {
+      if (!paused) { showQrLock(true); }
+      scheduleBraceletChecks();
+    }, delay);
   }
   function saveFlash(msg, ok) {
     const f = document.getElementById('saveFlash'); if (!f) return;
@@ -4105,7 +5317,11 @@
     await loadVoice();
     try { const r = await window.storage.get('queststage'); window._lastStage = (r && r.value) ? JSON.parse(r.value) : 0; } catch(e) { window._lastStage = 0; }
     await loadPause();
+    try { await loadFoxyMood(); } catch(e) {}
+    try { await loadFoxySerie(); } catch(e) {}
+    try { await loadLiveWardrobe(); } catch(e) {}
     try { await checkQrLock(); } catch(e) {}
+    try { await scheduleBraceletChecks(); } catch(e) {}
     scheduleNotifications();
     await renderCheckStat();
     await renderMoment();

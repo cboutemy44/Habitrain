@@ -22,6 +22,9 @@
       <button class="settings-toggle-btn" id="openQuest">🗺️ Notre aventure</button>
       <button class="settings-toggle-btn" id="openSave">💾 Sauvegarde</button>
       <button class="settings-toggle-btn" id="openQr">📷 QR codes</button>
+      <button class="settings-toggle-btn" id="openWardrobe">👕 Garde-robe & stock</button>
+      <button class="settings-toggle-btn" id="openSensor">📡 Capteur couche</button>
+      <button class="settings-toggle-btn" id="openLock">🔐 Serrure placard</button>
       <button class="settings-toggle-btn" id="openDebug">🐞 Debug</button>
       <button class="settings-toggle-btn" id="pauseBtn">⏸️ Pause</button>
     </div>
@@ -105,6 +108,80 @@
     <div class="set-note" id="setNote">Rappel : une appli web ne garantit pas les notifications quand elle est complètement fermée. Pour les rappels critiques, garde tes alarmes système.</div>
   </div>
 
+  <div class="card" id="wardrobeCard" style="display:none">
+    <h2>👕 Garde-robe &amp; stock</h2>
+    <div class="sub">Personnalise tes vêtements et accessoires par catégorie, et gère ton stock de couches par modèle.</div>
+    <div id="wardrobeCats"></div>
+
+    <div class="set-cat" style="margin-top:16px;padding-top:12px;border-top:2px solid var(--line)">
+      <h4>🍼 Stock de couches</h4>
+      <div class="sub">Le stock se décrémente tout seul à chaque change, selon le moment (jour / nuit).</div>
+      <div style="display:flex;gap:8px;margin:10px 0">
+        <input type="text" id="stockNewName" placeholder="Nouveau modèle" style="flex:1;padding:9px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:600">
+        <select id="stockNewUsage" style="padding:9px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:700">
+          <option value="jour">Jour</option><option value="nuit">Nuit</option><option value="both">Les deux</option>
+        </select>
+        <button class="settings-toggle-btn" id="stockAdd">➕</button>
+      </div>
+      <div id="stockSummary" style="margin-bottom:10px"></div>
+      <div class="set-row">
+        <div class="info"><div class="n">Seuil d'alerte ☀️ Jour</div><div class="d">Alerte quand le total jour passe à ce niveau</div></div>
+        <input type="number" id="thJour" min="0" max="99" step="1" style="width:70px;padding:8px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:700;text-align:center">
+      </div>
+      <div class="set-row">
+        <div class="info"><div class="n">Seuil d'alerte 🌙 Nuit</div><div class="d">Alerte quand le total nuit passe à ce niveau</div></div>
+        <input type="number" id="thNuit" min="0" max="99" step="1" style="width:70px;padding:8px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:700;text-align:center">
+      </div>
+      <button class="settings-toggle-btn" id="thSave" style="margin-bottom:10px">💾 Enregistrer les seuils</button>
+      <div class="saved-flash" id="thFlash"></div>
+      <div id="stockList"></div>
+    </div>
+  </div>
+
+  <div class="card" id="lockCard" style="display:none">
+    <h2>🔐 Serrures</h2>
+    <div class="sub">Tes placards et boîtes verrouillés. Chacun a son nom et ses propres conditions d'ouverture.</div>
+
+    <div class="set-cat">
+      <div style="display:flex;gap:8px">
+        <input type="text" id="lockNewName" placeholder="Nom de la serrure (ex. Placard couches)" style="flex:1;padding:10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:600">
+        <button class="settings-toggle-btn" id="lockAdd">➕</button>
+      </div>
+    </div>
+
+    <div id="lockList"></div>
+
+    <div class="set-cat">
+      <button class="settings-toggle-btn" id="lockGuideToggle" style="width:100%">📖 Guide de montage — afficher / masquer</button>
+      <div id="lockGuide" style="display:none;margin-top:12px;font-size:13px;line-height:1.6;color:var(--ink)"></div>
+    </div>
+
+    <div class="set-note" style="background:#FBEBE5;border:1.5px solid var(--coral);color:#a8543b;font-weight:800">
+      ⚠️ SÉCURITÉ : prévois TOUJOURS une clé de secours mécanique pour chaque serrure, rangée ailleurs. En cas de panne, batterie vide ou besoin urgent de matériel, tu dois pouvoir accéder sans l'électronique. Ne verrouille jamais autre chose qu'un contenant.
+    </div>
+  </div>
+
+  <div class="card" id="sensorCard" style="display:none">
+    <h2>📡 Capteur de couche</h2>
+    <div class="sub">Le capteur (ESP32) enregistre ta couche en autonomie, même appli fermée. À la connexion, il transmet tout l'historique horodaté et Foxy le commente.</div>
+    <div class="set-cat"><h4>Connexion</h4>
+      <button class="settings-toggle-btn" id="sensorConnect">🔗 Connecter mon capteur</button>
+      <div class="set-row" style="margin-top:8px">
+        <div class="info"><div class="n">État</div><div class="d" id="sensorStatus">Non connecté</div></div>
+        <div class="info" style="text-align:right"><div class="n" id="sensorLive">—</div></div>
+      </div>
+    </div>
+    <div class="set-cat"><h4>Calibration</h4>
+      <div class="sub">Valeur brute en direct (te sert à régler les seuils dans le firmware). Sec = valeur basse, saturé = valeur haute.</div>
+      <div style="font-family:'Fraunces',serif;font-size:22px;font-weight:600;color:var(--blue-deep);text-align:center;margin:8px 0" id="sensorRaw">—</div>
+    </div>
+    <div class="set-cat">
+      <button class="settings-toggle-btn" id="sensorGuideToggle" style="width:100%">📖 Guide de montage — afficher / masquer</button>
+      <div id="sensorGuide" style="display:none;margin-top:12px;font-size:13px;line-height:1.6;color:var(--ink)"></div>
+    </div>
+    <div class="set-note">⚠️ Nécessite Android + Chrome (Web Bluetooth). L'automatisation retire le geste de constat manuel — à toi de voir si tu préfères garder ce rituel.</div>
+  </div>
+
   <div class="card" id="qrCard" style="display:none">
     <h2>📷 QR codes</h2>
     <div class="sub">Valide certaines actions en scannant un QR physique (preuve que tu l'as vraiment faite). Colle-les aux bons endroits.</div>
@@ -116,12 +193,82 @@
         <div class="info"><div class="n">Déverrouiller par QR</div><div class="d">Scan du bracelet à l'ouverture. Secours : 3 tapes sur le titre.</div></div>
         <div class="switch" id="qrUnlockSwitch"><div class="knob"></div></div>
       </div>
+      <div class="set-row" style="margin-top:8px">
+        <div class="info"><div class="n">🔒 Bracelet obligatoire</div><div class="d">Contrôles surprises dans la journée. Sans scan = appli verrouillée. Secours 3 tapes toujours actif.</div></div>
+        <div class="switch" id="braceletReqSwitch"><div class="knob"></div></div>
+      </div>
     </div>
     <div class="set-cat"><h4>Générer mes QR codes</h4>
       <div class="sub">Génère, puis prends une photo ou une capture d'écran pour les imprimer/afficher.</div>
       <div id="qrGenList"></div>
     </div>
     <div class="set-note">🔒 Tes QR sont uniques à ton installation : personne ne peut les reproduire sans les tiens. Garde une capture de secours.</div>
+
+    <div class="set-cat" style="margin-top:14px;padding-top:12px;border-top:2px solid var(--line)">
+      <h4>📶 Tags NFC (optionnel)</h4>
+      <div class="sub">Programme tes tags NFC avec le même identifiant que tes QR. Ensuite tu valides en approchant le tag, sans ouvrir la caméra.</div>
+      <div id="nfcSupport" class="set-note"></div>
+      <div id="nfcWriteList" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"></div>
+      <div class="set-note" id="nfcWriteResult"></div>
+    </div>
+
+    <div class="set-cat" style="margin-top:14px;padding-top:12px;border-top:2px solid var(--line)">
+      <button class="settings-toggle-btn" id="qrGuideToggle" style="width:100%">📖 Guide de setup — afficher / masquer</button>
+      <div id="qrGuide" style="display:none;margin-top:12px;font-size:13px;line-height:1.6;color:var(--ink)">
+
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:6px 0 4px">1. Le principe</div>
+        Scanner un QR à un endroit précis <b>prouve physiquement</b> que tu as fait l'action (te lever, aller au tapis de change, etc.). Au lieu de valider depuis ton canapé, tu dois te déplacer et scanner. Ça ancre le programme dans le réel.
+
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">2. Choisir les actions à scanner</div>
+        Dans <b>« Actions à valider par scan »</b> ci-dessus, coche celles qui demanderont une preuve (changes piliers, tous les changes, biberons, coucher). En mode intensif, le « valider sans preuve » disparaît.
+
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">3. Générer et imprimer tes QR</div>
+        Dans <b>« Générer mes QR codes »</b>, chaque action et le bracelet ont leur QR unique. Fais une <b>capture d'écran</b>, puis :
+        • Imprime-les (ou affiche-les sur un vieux téléphone/tablette).<br>
+        • <b>Colle chaque QR à l'endroit logique</b> : celui du change sur le tapis à langer, celui du biberon près du frigo, celui du coucher sur la porte de la chambre.<br>
+        • Plastifie-les ou mets-les sous adhésif transparent : ils s'abîment sinon.
+
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">4. Valider une action</div>
+        Quand une action cochée arrive, Foxy propose <b>« 📷 Scanner »</b>. Tu vas au bon endroit, tu vises le QR, c'est validé. Le mauvais QR est refusé.
+
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">5. Déverrouillage par bracelet (option)</div>
+        Active <b>« Déverrouiller par QR »</b> : à l'ouverture, l'appli reste sur un écran neutre jusqu'à ce que tu scannes le QR de ton bracelet. <b>Secours indispensable</b> : 3 tapes rapides sur le titre débloquent si tu perds le bracelet ou si la caméra flanche. <b>Garde toujours une capture de tes QR + un export de sauvegarde</b> pour ne jamais rester bloqué dehors.
+
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">6. Les tags NFC (hybride)</div>
+        Le NFC est actif : tu peux valider en <b>approchant un tag</b> au lieu de scanner un QR — plus rapide et plus discret.<br>
+        • Achète des tags <b>NTAG213 ou NTAG215</b> (lot de quelques euros) et un <b>bracelet NFC</b>.<br>
+        • Dans la section <b>Tags NFC</b> ci-dessus, clique sur ce que tu veux écrire, puis approche un tag vierge du dos du téléphone.<br>
+        • Colle les tags aux mêmes endroits que tes QR (tapis de change, frigo, porte).<br>
+        • <b>Les deux fonctionnent ensemble</b> : quand un scan est demandé, l'appli écoute le NFC ET la caméra. Le premier qui répond valide. Garde donc tes QR imprimés en secours.
+
+        <div style="background:#FBF3E0;border:1px solid #ecd9a8;border-radius:10px;padding:10px 12px;margin-top:14px;font-size:12px;font-weight:700;color:#8a6a30">
+          ⚠️ Compatibilité : le scan caméra fonctionne sur <b>Android / Chrome</b>. Pas sur iPhone (Safari ne l'autorise pas en PWA).
+        </div>
+      </div>
+    </div>
+
+    <div class="set-cat" style="margin-top:14px;padding-top:12px;border-top:2px solid var(--line)">
+      <button class="settings-toggle-btn" id="qrRulesToggle" style="width:100%">📕 Règles du dispositif IoT — afficher / masquer</button>
+      <div id="qrRules" style="display:none;margin-top:12px;font-size:13px;line-height:1.6;color:var(--ink)">
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:6px 0 4px">📡 Le capteur de couche</div>
+        • Il enregistre ton état en autonomie, même appli fermée.<br>
+        • <b>Règle</b> : synchronise-le au moins à chaque ouverture (menu Capteur → Connecter). Le statut devient alors automatique.<br>
+        • Foxy commente ce qu'il a enregistré à la synchro.
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">📷 Les QR de validation</div>
+        • Certaines actions (que tu choisis) exigent un scan physique comme preuve.<br>
+        • <b>Règle</b> : les QR sont collés aux bons endroits (tapis de change, frigo, porte). Pour valider, tu dois t\'y rendre et scanner.<br>
+        • En mode intensif, la validation « sans preuve » disparaît.
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">🔒 Le bracelet obligatoire</div>
+        Quand l\'option <b>« Bracelet obligatoire »</b> est activée :<br>
+        • Tu <b>dois porter ton bracelet</b> en permanence pendant le programme.<br>
+        • L\'appli vérifie sa présence <b>à chaque ouverture</b> ET lors de <b>contrôles surprises</b> (moments aléatoires).<br>
+        • À chaque vérif, l\'appli se <b>verrouille</b> : tu dois scanner ton bracelet pour continuer. Sans scan, elle reste bloquée.<br>
+        • <b>Secours anti-blocage</b> : 3 tapes rapides sur le titre de l\'écran de verrouillage débloquent toujours (bracelet perdu, abîmé, caméra en panne). Garde une capture de tes QR + un export de sauvegarde.
+        <div style="background:#FBF3E0;border:1px solid #ecd9a8;border-radius:10px;padding:10px 12px;margin-top:14px;font-size:12px;font-weight:700;color:#8a6a30">
+          ⚠️ L\'appli ne peut pas vérifier que le bracelet est à ton poignet — seulement que tu peux le scanner. Le port réel reste ton engagement.
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="card" id="saveCard" style="display:none">
@@ -468,5 +615,9 @@
 
 <script src="jsQR.js"></script>
 <script src="qrcode-gen.js"></script>
+<script src="nfc.js"></script>
 <script src="qr.js"></script>
+<script src="sensor.js"></script>
+<script src="lock.js"></script>
+<script src="wardrobe.js"></script>
 <script src="app.js"></script>
