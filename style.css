@@ -153,14 +153,6 @@
     position:relative; z-index:2; margin-top:20px; font-family:inherit; font-size:14.5px; font-weight:800;
     padding:12px 24px; border:none; border-radius:13px; background:#fff; color:#1c1c1e; cursor:pointer;
   }
-  #qrLock {
-    position:fixed; inset:0; z-index:9998; background:#f7f7f8;
-    display:flex; align-items:center; justify-content:center;
-  }
-  .qrlock-inner { text-align:center; padding:24px; }
-  .qrlock-title { font-size:30px; font-weight:800; color:#1c1c1e; user-select:none; }
-  .qrlock-sub { font-size:14px; color:#8a8a8e; margin:4px 0 24px; }
-  #qrUnlockBtn { font-family:inherit; font-size:15px; font-weight:800; padding:14px 22px; border:none; border-radius:14px; background:#d9743a; color:#fff; cursor:pointer; }
   /* génération QR */
   .qrgen-item { display:flex; align-items:center; gap:12px; padding:10px 0; border-top:1px solid var(--line); }
   .qrgen-item:first-child { border-top:none; }
@@ -191,17 +183,7 @@
   /* ===== Façade neutre du mode pause ===== */
   #pauseFacade { display:none; position:fixed; inset:0; z-index:9999; background:#f7f7f8; }
   body.paused #pauseFacade { display:block; }
-  .facade-inner { max-width:640px; margin:0 auto; padding:24px 18px; font-family:system-ui,-apple-system,sans-serif; }
-  .facade-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
-  .facade-title { font-size:30px; font-weight:800; color:#1c1c1e; cursor:default; user-select:none; }
-  .facade-plus { font-size:28px; color:#c7a008; font-weight:400; }
-  .facade-note {
-    width:100%; min-height:120px; border:1px solid #e2e2e6; border-radius:12px; padding:14px;
-    font-size:15px; font-family:inherit; color:#1c1c1e; background:#fff; resize:none; margin-bottom:16px;
-  }
   .facade-note:focus { outline:none; border-color:#c7c7cc; }
-  .facade-list { display:flex; flex-direction:column; gap:1px; background:#e2e2e6; border-radius:12px; overflow:hidden; }
-  .facade-item { background:#fff; padding:15px 14px; font-size:16px; color:#1c1c1e; }
 
   /* barre d'onglets du reporting */
   .tabbar { display:flex; gap:7px; margin-bottom:16px; }
@@ -554,7 +536,7 @@
   /* ===== Mode immersif : conversation plein cadre ===== */
   body.immersive { background: linear-gradient(180deg,#F5EEF6,#EEF0FA) !important; }
   /* on masque tout le reporting */
-  body.immersive .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard):not(#questCard):not(#saveCard):not(#sensorCard):not(#qrCard):not(#lockCard):not(#wardrobeCard):not(#qrCard) { display:none !important; }
+  body.immersive .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard):not(#questCard):not(#saveCard):not(#sensorCard):not(#qrCard):not(#lockCard):not(#wardrobeCard):not(#missionsCard):not(#qrCard) { display:none !important; }
   body.immersive #verBadge { opacity:0.5; }
 
   #imChat { display:none; }
@@ -651,3 +633,119 @@
   body.foxy #imActions { border-top:none; background:transparent; padding:6px 16px 16px; }
   body.foxy #imActions button { border-color:#e6c0a0; }
 body.report.hardmode .head h1::after { content:" 🔥"; }
+
+/* Navigation des paramètres : bouton de section actif */
+.set-nav { text-align: left; }
+.set-nav.on { background: #c86b3a; color: #fff; border-color: #c86b3a; }
+
+
+/* ===== Écran de verrouillage Habitrain (assumé, avec Foxy) ===== */
+#qrLock {
+  position: fixed; inset: 0; z-index: 10050;
+  display: flex; align-items: center; justify-content: center;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(255,214,170,.35), transparent 60%),
+    linear-gradient(160deg, #2c1e14 0%, #4a3020 45%, #6b4526 100%);
+  padding: 26px;
+}
+.qrlock-inner {
+  width: 100%; max-width: 360px; text-align: center; color: #fff;
+  animation: lockIn .45s ease-out;
+}
+@keyframes lockIn { from { opacity:0; transform: translateY(14px);} to {opacity:1; transform:none;} }
+
+.qrlock-clock {
+  font-family: 'Fraunces', serif; font-weight: 500;
+  font-size: 62px; line-height: 1; letter-spacing: -1px;
+  color: #fff; text-shadow: 0 2px 14px rgba(0,0,0,.35);
+}
+.qrlock-date {
+  font-size: 13.5px; font-weight: 700; text-transform: capitalize;
+  color: rgba(255,255,255,.72); margin-top: 4px; margin-bottom: 26px;
+}
+
+.qrlock-foxy {
+  width: 168px; height: 168px; margin: 0 auto 18px;
+  border-radius: 32px;
+  background-repeat: no-repeat; background-color: rgba(255,245,235,.1);
+  border: 3px solid rgba(255,200,150,.45);
+  box-shadow: 0 12px 40px rgba(0,0,0,.4), inset 0 0 30px rgba(255,190,130,.15);
+}
+
+.qrlock-title {
+  font-family: 'Fraunces', serif; font-weight: 600;
+  font-size: 26px; color: #ffd9b0; letter-spacing: .5px;
+}
+.qrlock-greet {
+  font-size: 14px; font-weight: 700; color: rgba(255,255,255,.8);
+  margin-top: 5px; margin-bottom: 28px;
+}
+
+#qrUnlockBtn {
+  width: 100%; padding: 16px; border: none; border-radius: 18px;
+  font-family: inherit; font-size: 16px; font-weight: 800; cursor: pointer;
+  background: linear-gradient(135deg, #e8894a, #d9743a);
+  color: #fff; box-shadow: 0 8px 26px rgba(217,116,58,.45);
+}
+#qrUnlockBtn:active { transform: scale(.98); }
+
+.qrlock-hint {
+  margin-top: 14px; font-size: 12px; font-weight: 700;
+  color: rgba(255,255,255,.55); line-height: 1.5;
+}
+
+
+
+
+/* ===== Écran de connexion (façade de pause) ===== */
+#pauseFacade {
+  display: none; position: fixed; inset: 0; z-index: 9999;
+  background: #f2f3f5;
+  align-items: center; justify-content: center; padding: 24px;
+}
+body.paused #pauseFacade { display: flex; }
+.facade-inner {
+  width: 100%; max-width: 330px; text-align: center;
+  font-family: system-ui, -apple-system, sans-serif; color: #1c1c1e;
+}
+.facade-logo {
+  font-size: 40px; color: #5b6b7c; margin-bottom: 10px;
+  cursor: default; user-select: none;
+}
+.facade-app { font-size: 21px; font-weight: 600; letter-spacing: -.2px; }
+.facade-sub { font-size: 13.5px; color: #8e8e93; margin-top: 3px; margin-bottom: 26px; }
+
+#facadePass {
+  width: 100%; padding: 14px 15px; font-size: 16px;
+  font-family: inherit; color: #1c1c1e; background: #fff;
+  border: 1px solid #d8dade; border-radius: 12px; margin-bottom: 10px;
+}
+#facadePass:focus { outline: none; border-color: #5b6b7c; }
+
+#facadeLogin {
+  width: 100%; padding: 14px; font-size: 15.5px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+  background: #4a5866; color: #fff; border: none; border-radius: 12px;
+}
+#facadeLogin:active { background: #3b4753; }
+
+.facade-or {
+  position: relative; margin: 20px 0 14px; font-size: 12.5px; color: #8e8e93;
+}
+.facade-or::before {
+  content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: #dcdee2;
+}
+.facade-or span { position: relative; background: #f2f3f5; padding: 0 12px; }
+
+.facade-alt { display: flex; gap: 9px; }
+.facade-alt button {
+  flex: 1; padding: 12px 8px; font-size: 13.5px; font-weight: 500;
+  font-family: inherit; cursor: pointer; color: #3c4450;
+  background: #fff; border: 1px solid #d8dade; border-radius: 12px;
+}
+.facade-alt button:active { background: #e9ebee; }
+
+.facade-err {
+  min-height: 18px; margin-top: 14px;
+  font-size: 12.5px; font-weight: 500; color: #c0392b;
+}

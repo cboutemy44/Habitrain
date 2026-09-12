@@ -141,6 +141,6 @@
   // expose l'API
   window.HabitrainQR = {
     QR_ACTIONS, getQrPrefs, saveQrPrefs, actionRequiresScan,
-    payloadFor, drawQR, startScan, stopScan, getSecret
+    payloadFor, drawQR, startScan, stopScan, getSecret, parsePayloadPublic: parsePayload
   };
 })();

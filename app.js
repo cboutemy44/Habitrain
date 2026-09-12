@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '11.8';
+  const APP_VERSION = '12.8';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1070,6 +1070,26 @@
         await startIntrospection(m);
         return;
       }
+      // 4pentes) Foxy annonce les missions du jour
+      try {
+        if (window.HabitrainMissions && (m.key === 'reveil' || m.key === 'matin')) {
+          let mDate = null;
+          try { const r = await window.storage.get('missannounce:last'); if (r && r.value) mDate = JSON.parse(r.value); } catch(e) {}
+          if (mDate !== todayStr()) {
+            await window.HabitrainMissions.ensureDaily(todayStr());
+            const stM = await window.HabitrainMissions.getState();
+            const noms = (stM.daily||[]).map(id => { const d = window.HabitrainMissions.dailyById(id); return d ? d.name : null; }).filter(Boolean);
+            if (noms.length) {
+              try { await window.storage.set('missannounce:last', JSON.stringify(todayStr())); } catch(e) {}
+              await imSay(broOn()
+                ? 'Tes missions du jour : ' + noms.join(', ') + '. Tu les feras, on est d\'accord.'
+                : 'Tes missions du jour : ' + noms.join(', ') + ' ! On s\'y met ensemble ? 🎯🦊', 950, 'cheer');
+              await imOfferHelp(m);
+              return;
+            }
+          }
+        }
+      } catch(e) {}
       // 4quater) Alerte stock de couches (une fois par jour)
       try {
         if (window.HabitrainWardrobe) {
@@ -2770,7 +2790,140 @@
     return '<span class="lbl">🔑 Prochain change dans</span> ' + rem + ' <span class="lbl">(' + next.label + ' à ' + at + ' ' + dayLabel + ')</span>';
   }
   // met à jour le compteur régulièrement
-  setInterval(() => { renderSince(); renderTimeline(); maybeRedirectBilan(); checkLockAlerts(); }, 60000);
+  setInterval(() => { renderSince(); renderTimeline(); maybeRedirectBilan(); checkLockAlerts(); foxyPing(); foxyMilestones(); }, 60000);
+
+  /* ============================================================
+     FOXY T'INTERPELLE — il prend l'initiative dans la journée
+     Notifications spontanées avec sa voix, à des moments choisis.
+     Jamais la nuit, jamais en pause, espacées d'au moins 90 min.
+     ============================================================ */
+  const PING_POOLS = {
+    // petites pensées sans objet précis
+    pensee: [
+      { t:'Je pense à toi', b:'Comme ça, sans raison. J\'espère que ta couche te tient bien au chaud. 🦊' },
+      { t:'Coucou !', b:'Je m\'ennuyais un peu. Tu fais quoi, toi ?' },
+      { t:'Petit rappel', b:'Tu es exactement là où tu dois être. Laisse-toi porter. 💛' },
+      { t:'Une pensée', b:'Je me disais que t\'es plutôt courageux de faire ce chemin. Voilà, c\'est dit.' },
+      { t:'Hey', b:'T\'as pensé à te détendre depuis tout à l\'heure ? Relâche les épaules, respire.' }
+    ],
+    // encouragement lié au cadre
+    cadre: [
+      { t:'Tu bois assez ?', b:'Un petit verre ou un biberon, ça se tente là non ?' },
+      { t:'Comment tu te sens ?', b:'Prends deux secondes pour écouter ton corps. Tout va bien ?' },
+      { t:'Petit check', b:'Ta couche, elle en est où ? Pense à vérifier, sans stress.' },
+      { t:'Détends-toi', b:'Si tu te crispes, tu luttes. Et lutter, ça sert à rien, tu le sais. 🦊' }
+    ],
+    // interpellations du mode grand frère
+    bro: [
+      { t:'Je pense à toi', b:'Où que tu sois, tu portes ta couche. Tu ne peux pas l\'oublier. C\'est bien.' },
+      { t:'Écoute-moi', b:'Relâche. Maintenant. Tu n\'as rien à contrôler, je m\'occupe de tout.' },
+      { t:'Petit rappel', b:'Tu m\'appartiens un peu, ces jours-ci. Laisse-toi faire, c\'est plus simple.' },
+      { t:'Hey', b:'Tu te crispes encore, je le sens d\'ici. Respire et abandonne-toi.' }
+    ]
+  };
+
+  // Feedback automatique : Foxy te notifie quand un cap est franchi
+  async function foxyMilestones() {
+    try {
+      if (paused || notifPermState() !== 'granted') return;
+      if (notifPrefs.milestone === false) return; // désactivable dans les réglages
+      const h = new Date().getHours();
+      if (h < 8 || h >= 22) return;
+      let seen = {};
+      try { const r = await window.storage.get('milestones:seen'); if (r && r.value) seen = JSON.parse(r.value); } catch(e) {}
+
+      // 1) série de jours
+      const entries = await getAll();
+      const byDate = {}; entries.forEach(e => { if (e && e.date) byDate[e.date] = true; });
+      let streak = 0;
+      for (let i = 0; ; i++) {
+        const d = new Date(); d.setDate(d.getDate()-i);
+        const k = d.toISOString().slice(0,10);
+        if (byDate[k]) streak++; else { if (i===0) continue; break; }
+      }
+      for (const cap of [3,7,10,14,21,30,45,60]) {
+        const key = 'streak'+cap;
+        if (streak >= cap && !seen[key]) {
+          seen[key] = true;
+          await showLocalNotif('🔥 ' + cap + ' jours !',
+            broOn() ? cap + ' jours d\'affilée. Tu ne t\'arrêtes plus — c\'est devenu plus fort que toi.'
+                    : cap + ' jours d\'affilée, tu te rends compte ? Je suis super fier de toi ! 🦊',
+            'ping');
+          try { await window.storage.set('milestones:seen', JSON.stringify(seen)); } catch(e) {}
+          return;
+        }
+      }
+
+      // 2) mission de période accomplie (notification immédiate)
+      if (window.HabitrainMissions) {
+        const st = await window.HabitrainMissions.getState();
+        if (st.activePeriod) {
+          const m = window.HabitrainMissions.periodById(st.activePeriod.id);
+          const ev = await evalPeriod(m, st.activePeriod);
+          const key = 'mission_' + m.id;
+          if (ev.done && !seen[key]) {
+            seen[key] = true;
+            await showLocalNotif('🏆 Mission accomplie !',
+              '« ' + m.name + ' » est terminée. Viens la valider, je t\'attends !', 'ping');
+            try { await window.storage.set('milestones:seen', JSON.stringify(seen)); } catch(e) {}
+            return;
+          }
+        }
+        // 3) toutes les missions du jour faites
+        const stM = await window.HabitrainMissions.getState();
+        if (stM.daily && stM.daily.length) {
+          let toutes = true;
+          for (const id of stM.daily) {
+            const dm = window.HabitrainMissions.dailyById(id);
+            if (!dm) continue;
+            const ev = await evalDaily(dm);
+            if (!ev.done) { toutes = false; break; }
+          }
+          const key = 'daily_' + todayStr();
+          if (toutes && !seen[key]) {
+            seen[key] = true;
+            await showLocalNotif('✅ Journée parfaite !',
+              broOn() ? 'Toutes tes missions du jour sont faites. C\'est ce que j\'attendais de toi.'
+                      : 'Toutes tes missions du jour sont faites ! T\'es en feu aujourd\'hui. 🎯🦊',
+              'ping');
+            try { await window.storage.set('milestones:seen', JSON.stringify(seen)); } catch(e) {}
+          }
+        }
+      }
+    } catch(e) {}
+  }
+
+  async function foxyPing() {
+    try {
+      if (paused) return;
+      if (notifPermState() !== 'granted') return;
+      if (notifPrefs.ping === false) return;     // désactivable dans les réglages
+      const now = new Date();
+      const h = now.getHours();
+      if (h < 8 || h >= 22) return;              // jamais la nuit : il dort
+      // espacement minimum de 90 min, et max 4 par jour
+      let last = 0, count = 0, day = null;
+      try {
+        const r = await window.storage.get('ping:state');
+        if (r && r.value) { const st = JSON.parse(r.value); last = st.last||0; count = st.count||0; day = st.day||null; }
+      } catch(e) {}
+      if (day !== todayStr()) { count = 0; }
+      if (count >= 4) return;
+      if (Date.now() - last < 90*60000) return;
+      // probabilité modérée pour que ça reste une surprise
+      if (Math.random() > 0.18) return;
+      // pas pendant un créneau de change (il a déjà ses rappels)
+      const nowMin = h*60 + now.getMinutes();
+      const PIL = [9*60, 16*60, 22*60+30, 11*60+30, 13*60+30, 19*60+30];
+      if (PIL.some(m => Math.abs(nowMin - m) <= 20)) return;
+
+      const pool = broOn() ? PING_POOLS.bro
+                 : (Math.random() < 0.5 ? PING_POOLS.pensee : PING_POOLS.cadre);
+      const msg = pool[Math.floor(Math.random()*pool.length)];
+      await showLocalNotif(msg.t, msg.b, 'ping');
+      try { await window.storage.set('ping:state', JSON.stringify({ last:Date.now(), count:count+1, day:todayStr() })); } catch(e) {}
+    } catch(e) {}
+  }
 
   // ===== Veille des serrures : fenêtre qui approche/se ferme, quota bientôt épuisé =====
   let lockAlertSent = {};
@@ -4105,7 +4258,9 @@
       { id:'diner', n:'Dîner', d:'19h30', m:19*60+30, body:'🍽️ Dîner — check si mouillé.' }
     ]},
     { cat:'Vérifs surprises', items:[
-      { id:'surprise', n:'Vérif surprise à l\'ouverture', d:'aléatoire', m:null, body:null }
+      { id:'surprise', n:'Vérif surprise à l\'ouverture', d:'aléatoire', m:null, body:null },
+      { id:'ping', n:'Foxy m\'interpelle dans la journée', d:'spontané', m:null, body:null },
+      { id:'milestone', n:'Félicitations et caps franchis', d:'automatique', m:null, body:null }
     ]}
   ];
 
@@ -4255,11 +4410,48 @@
     } catch(e) {}
   }
 
+  // ===== Navigation des paramètres (sections dépliables) =====
+  const SETTINGS_RENDER = {
+    wardrobeCard: async () => { await renderWardrobe(); await renderStock(); },
+    qrCard:       async () => { await renderQrConfig(); await renderNfcWriter(); },
+    sensorCard:   async () => { renderSensorGuide(); },
+    lockCard:     async () => { await renderLockList(); renderLockGuide(); },
+    debugCard:    async () => { await loadFoxyOutfit(); renderDebugOutfits(); }
+  };
+  document.querySelectorAll('.set-nav').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.target;
+      const el = document.getElementById(id);
+      if (!el) return;
+      const opening = el.style.display === 'none' || !el.style.display;
+      // referme les autres sections
+      document.querySelectorAll('.set-nav').forEach(b => {
+        const o = document.getElementById(b.dataset.target);
+        if (o && b !== btn) { o.style.display = 'none'; b.classList.remove('on'); }
+      });
+      el.style.display = opening ? '' : 'none';
+      btn.classList.toggle('on', opening);
+      if (opening) {
+        if (SETTINGS_RENDER[id]) { try { await SETTINGS_RENDER[id](); } catch(e) {} }
+        el.scrollIntoView({behavior:'smooth', block:'start'});
+      }
+    });
+  });
+
   document.getElementById('openSettings').addEventListener('click', () => {
     const card = document.getElementById('settingsCard');
     const show = card.style.display === 'none';
     card.style.display = show ? '' : 'none';
     if (show) { renderSettings(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+    else {
+      // en fermant les paramètres, on referme toutes les sections
+      document.querySelectorAll('.set-nav').forEach(b => {
+        const o = document.getElementById(b.dataset.target);
+        if (o) o.style.display = 'none';
+        b.classList.remove('on');
+      });
+      const sn = document.getElementById('secNotif'); if (sn) sn.style.display = 'none';
+    }
   });
   document.getElementById('permBtn').addEventListener('click', async () => {
     try {
@@ -4342,7 +4534,7 @@
     }
   }
 
-  document.getElementById('openDebug').addEventListener('click', async () => {
+  (document.getElementById('openDebug')||{addEventListener(){}}).addEventListener('click', async () => {
     const card = document.getElementById('debugCard');
     const show = card.style.display === 'none';
     card.style.display = show ? '' : 'none';
@@ -4375,14 +4567,74 @@
   async function loadPause() {
     try { const r = await window.storage.get('pref:paused'); if (r && r.value) paused = JSON.parse(r.value); } catch(e) {}
     document.body.classList.toggle('paused', paused);
+    if (paused) fillFacade();
   }
+  // ---- Écran de connexion (façade de pause) ----
+  async function getPausePass() {
+    try { const r = await window.storage.get('pref:pausepass'); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
+    return null;
+  }
+  async function setPausePass(v) {
+    try { await window.storage.set('pref:pausepass', JSON.stringify(v)); } catch(e) {}
+  }
+  function facadeError(msg) {
+    const e = document.getElementById('facadeErr');
+    if (e) { e.textContent = msg; setTimeout(() => { if (e.textContent === msg) e.textContent = ''; }, 3000); }
+  }
+  async function tryFacadeLogin() {
+    const inp = document.getElementById('facadePass');
+    const saisi = (inp ? inp.value : '').trim();
+    if (!saisi) { facadeError('Saisis ton mot de passe.'); return; }
+    const attendu = await getPausePass();
+    if (!attendu) {
+      // aucun mot de passe défini : on l'accepte et on le mémorise
+      await setPausePass(saisi);
+      if (inp) inp.value = '';
+      await exitPause();
+      return;
+    }
+    if (saisi === attendu) { if (inp) inp.value = ''; await exitPause(); }
+    else facadeError('Mot de passe incorrect.');
+  }
+  function fillFacade() {
+    const inp = document.getElementById('facadePass');
+    if (inp) inp.value = '';
+    const e = document.getElementById('facadeErr');
+    if (e) e.textContent = '';
+  }
+  function fillFacadeOld() {
+    try {
+      const now = new Date();
+      const d = document.getElementById('facadeDay');
+      if (d) { try { d.textContent = now.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' }); } catch(e) {} }
+      const box = document.getElementById('facadeHours');
+      if (box) {
+        const icones = ['☀️','🌤️','⛅','☁️','🌤️','⛅'];
+        let html = '';
+        for (let i = 0; i < 6; i++) {
+          const h = (now.getHours() + i) % 24;
+          const t = 18 + Math.round(Math.sin((h - 6) / 24 * Math.PI * 2) * 4);
+          html += '<div class="facade-h"><div class="hh">' + (i === 0 ? 'Maint.' : String(h).padStart(2,'0') + 'h') + '</div>' +
+                  '<div class="ic">' + icones[i % icones.length] + '</div>' +
+                  '<div class="tt">' + t + '°</div></div>';
+        }
+        box.innerHTML = html;
+      }
+      const tmp = document.getElementById('facadeTemp');
+      if (tmp) {
+        const h = now.getHours();
+        tmp.textContent = (18 + Math.round(Math.sin((h - 6) / 24 * Math.PI * 2) * 4)) + '°';
+      }
+    } catch(e) {}
+  }
+
   async function doEnterPause() {
     paused = true;
     document.body.classList.add('paused');
     try { await window.storage.set('pref:paused', JSON.stringify(true)); } catch(e) {}
     try { await window.storage.set('pause:start', JSON.stringify(Date.now())); } catch(e) {}
     const ov = document.getElementById('overlay'); if (ov) ov.classList.remove('show');
-    const n = document.querySelector('.facade-note'); if (n) n.value = '';
+    fillFacade();
   }
   function enterPause() {
     try { foxyPopHide(); } catch(e) {}
@@ -4428,8 +4680,13 @@
         ]);
         return;
       }
-      foxyPopShow('Te revoilà ! Courte absence, on reprend le fil tranquillement. Tu es prêt ?', 'joy', [
+      foxyPopShow('Te revoilà ! Courte absence, on reprend le fil tranquillement. Tu es toujours en couche ?', 'joy', [
         { label:'🤗 Oui, on replonge !', onClick: async () => { foxyPopHide(); if (voiceMode !== 'foxy') { await setVoiceMode('foxy'); } else { try { await imRunMoment(); } catch(e){} } }},
+        { label:'👕 Non, je dois me remettre en couche', onClick: async () => {
+          foxyPopHide();
+          if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e){} }
+          try { await runReentryProtocol('court'); } catch(e) {}
+        }},
         { soft:true, label:'Pas tout de suite', onClick: async () => {
           foxyPopShow('D\'accord... je t\'attends. Reviens vite. 🦊💛', 'concern', [
             { label:'À très vite', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
@@ -4479,15 +4736,161 @@
     foxyPopShow(msg1, 'concern', [
       { label:'Je t\'écoute...', onClick: async () => {
         foxyPopShow(msg2, niveau === 'tres_long' ? 'surprised' : 'concern', [
-          { label:'🦊 On fait le change de reprise', onClick: async () => {
+          { label:'🦊 Comment je reprends ?', onClick: async () => {
             foxyPopHide();
             if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e){} }
-            try { startChange('pilier'); } catch(e) {}
+            try { await runReentryProtocol(niveau); } catch(e) {}
           }}
         ]);
       }}
     ]);
   }
+
+  /* ============================================================
+     PROTOCOLE DE REMISE EN COUCHE — après une pause, tu n'es PAS
+     en couche : Foxy explique la marche à suivre étape par étape,
+     tire les tenues du jour et te remet dans le programme.
+     ============================================================ */
+  async function runReentryProtocol(niveau) {
+    imClear();
+    const now = new Date();
+    const h = now.getHours();
+    const periode = (h >= 22 || h < 8) ? 'nuit' : 'jour';
+
+    // --- Accueil chaleureux : retour à la maison ---
+    const ACCUEIL = broOn() ? [
+      'Te revoilà chez toi. Tu peux poser tout ce que tu portais dehors — ici, ça ne te sert à rien.',
+      'Respire. Tu es rentré. Ta vie d\'adulte reste à la porte, elle t\'attendra bien.',
+      'Ici, tu n\'as plus de décisions à prendre. C\'est moi qui m\'occupe de tout. Laisse-toi aller.'
+    ] : [
+      'Te revoilàààà ! 🦊💛 Bienvenue à la maison, tu m\'as tellement manqué !',
+      'Ahhh, ça fait du bien de te retrouver ! Allez, pose tout ça : ici tu peux laisser ta vie d\'adulte dehors.',
+      'Tu es rentré ! Ici, pas de responsabilités, pas de pression — juste toi, moi, et plein de douceur. 💛'
+    ];
+    for (const a of ACCUEIL) { await imSay(a, 950, broOn() ? 'calm' : 'comfort'); }
+    await imSay(broOn()
+      ? 'Maintenant, on te remet dans ton état normal. Tu n\'as pas porté de couche pendant ton absence — on repart du début.'
+      : 'Bon, on va te remettre bien comme il faut ! Tu n\'as pas porté de couche pendant ta pause, alors on repart du début. Je t\'explique tout, suis-moi. 🦊', 1000, 'calm');
+
+    // 1) tirage automatique des tenues
+    let tenues = null;
+    try { tenues = drawOutfit(); } catch(e) {}
+    // 2) modèle de couche selon le moment
+    let modele = null;
+    try {
+      if (window.HabitrainWardrobe) {
+        const dispo = (await window.HabitrainWardrobe.modelsFor(periode)).filter(x => x.qty > 0);
+        modele = dispo.length ? dispo[0] : null;
+      }
+    } catch(e) {}
+
+    const tenueDuMoment = tenues ? (periode === 'nuit' ? tenues.nuit : tenues.jour) : null;
+
+    await imSay('J\'ai tiré ta tenue pour toi — tu ne choisis pas, ça fait partie du retour dans le cadre.', 900, 'proud');
+    let recap = '👕 Tenue de ' + periode + ' : ' + (tenueDuMoment || 'ta tenue habituelle');
+    if (modele) recap += '\n🍼 Couche : ' + modele.name + ' (' + modele.qty + ' en stock)';
+    else recap += '\n🍼 Couche : prends ce que tu as en stock';
+    if (tenues) recap += '\n😴 Pour la sieste : ' + tenues.sieste;
+    // accessoires et dispositifs à remettre
+    let access = [];
+    try {
+      if (window.HabitrainWardrobe) {
+        const w = await window.HabitrainWardrobe.getWardrobe();
+        access = (w.access || []).slice();
+      }
+    } catch(e) {}
+    if (access.length) recap += '\n🧸 Accessoires : ' + access.join(', ');
+    // bracelet / QR / NFC si le verrouillage est actif
+    let braceletActif = false;
+    try {
+      if (window.HabitrainQR) {
+        const prefs = await window.HabitrainQR.getQrPrefs();
+        braceletActif = !!(prefs.braceletRequired || prefs.unlock);
+      }
+    } catch(e) {}
+    if (braceletActif) recap += '\n🔒 Ton bracelet (QR/NFC) : à remettre au poignet — obligatoire.';
+    await imSay(recap, 1100, 'explain');
+
+    // 3) la marche à suivre
+    await imSay('Voilà la marche à suivre, dans l\'ordre :', 850, 'teach');
+    const etapes = [
+      '1. Va à ton espace de change et prépare tout : couche, crème, lingettes.',
+      '2. Déshabille-toi complètement. On repart de zéro.',
+      '3. Vérifie ta peau avant de commencer — elle doit être propre et sèche.',
+      '4. Applique la crème barrière, généreusement.',
+      '5. Mets ta couche en suivant le guide des 4 languettes.',
+      '6. Enfile la tenue que je t\'ai tirée.',
+      braceletActif ? '7. Remets ton bracelet au poignet — sans lui, l\'appli restera verrouillée.' : null,
+      access.length ? '8. Reprends tes accessoires : ' + access.join(', ') + '.' : null,
+      '9. Si tu utilises le capteur, reclipse-le et reconnecte-le dans le menu 📡.',
+      niveau === 'tres_long'
+        ? '7. Et prends un moment pour te réhabituer. Ton corps a perdu le réflexe, c\'est normal — ne force pas, laisse revenir.'
+        : '7. Reprends ton rythme normal : le prochain créneau te sera rappelé.'
+    ];
+    const liste = etapes.filter(Boolean).map((t, i) => t.replace(/^\d+\./, (i+1) + '.'));
+    for (const e of liste) { await imSay(e, 800, 'explain'); }
+
+    if (niveau === 'long' || niveau === 'tres_long') {
+      await imSay('Et n\'oublie pas : contention douce sur ta prochaine fenêtre de régression, et je te surveille de près pour le reste de la journée.', 950, 'calm');
+    }
+
+    imSetActions([
+      { label:'🦊 C\'est fait, je suis en couche', onClick: async () => {
+        imAddMe('C\'est fait, je suis en couche.');
+        // enregistre la remise en couche comme un change effectif
+        try { await finishChange(); } catch(e) {}
+        await imSay(broOn()
+          ? 'Bien. Te revoilà où tu dois être, comme il faut. Maintenant tu ne ressors plus du cadre — laisse-toi porter, c\'est tout ce que tu as à faire.'
+          : 'Voilààà ! Te revoilà tout bien installé. 🦊 Tu es à la maison, en sécurité, et je m\'occupe de tout maintenant. Content de t\'avoir retrouvé, vraiment. 💛', 1000, 'proud');
+        try { await imRunMoment(); } catch(e) {}
+      }},
+      { soft:true, label:'Répète-moi les étapes', onClick: async () => { await runReentryProtocol(niveau); } }
+    ]);
+  }
+  // --- câblage de l'écran de connexion ---
+  (function(){
+    const btn = document.getElementById('facadeLogin');
+    const inp = document.getElementById('facadePass');
+    if (btn) btn.addEventListener('click', tryFacadeLogin);
+    if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') tryFacadeLogin(); });
+    const q = document.getElementById('facadeQr');
+    if (q) q.addEventListener('click', () => {
+      if (!window.HabitrainQR) { facadeError('Scan indisponible sur cet appareil.'); return; }
+      window.HabitrainQR.startScan('unlock', async (kind) => {
+        if (kind === 'unlock') await exitPause();
+        else facadeError('QR non reconnu.');
+      });
+    });
+    const n = document.getElementById('facadeNfc');
+    if (n) n.addEventListener('click', async () => {
+      const NFC = window.HabitrainNFC;
+      if (!NFC || !NFC.supported()) { facadeError('NFC non disponible sur cet appareil.'); return; }
+      facadeError('Approche ton tag…');
+      try {
+        await NFC.startScan(async (payload) => {
+          try {
+            const kind = await window.HabitrainQR.parsePayloadPublic(payload);
+            if (kind === 'unlock') { NFC.stopScan(); await exitPause(); }
+            else facadeError('Tag non reconnu.');
+          } catch(e) { facadeError('Tag non reconnu.'); }
+        });
+      } catch(e) { facadeError('Lecture NFC impossible.'); }
+    });
+  })();
+
+  (function(){
+    const b = document.getElementById('pausePassSave');
+    if (b) b.addEventListener('click', async () => {
+      const i = document.getElementById('pausePassInput');
+      const v = (i ? i.value : '').trim();
+      if (!v) return;
+      await setPausePass(v);
+      if (i) i.value = '';
+      const f = document.getElementById('pausePassFlash');
+      if (f) { f.textContent = '🔑 Mot de passe enregistré'; setTimeout(()=>f.textContent='', 2200); }
+    });
+  })();
+
   document.getElementById('pauseBtn').addEventListener('click', enterPause);
   // reprise par geste discret : 3 tapes rapides sur le titre "Notes"
   (function(){
@@ -4503,7 +4906,7 @@
   })();
 
   // ---- Menu Sauvegarde (export / import) ----
-  document.getElementById('openSave').addEventListener('click', () => {
+  (document.getElementById('openSave')||{addEventListener(){}}).addEventListener('click', () => {
     const card = document.getElementById('saveCard');
     const show = card.style.display === 'none';
     card.style.display = show ? '' : 'none';
@@ -4512,7 +4915,7 @@
 
   // ==== Menu QR codes ====
   const QR = window.HabitrainQR;
-  document.getElementById('openQr').addEventListener('click', async () => {
+  (document.getElementById('openQr')||{addEventListener(){}}).addEventListener('click', async () => {
     const card = document.getElementById('qrCard');
     const show = card.style.display === 'none';
     card.style.display = show ? '' : 'none';
@@ -4570,9 +4973,214 @@
     });
   })();
 
+  // ===== Missions =====
+  const MS = window.HabitrainMissions;
+
+  // Évalue une mission JOURNALIÈRE sur les données du jour
+  async function evalDaily(m) {
+    const date = todayStr();
+    const checks = await getChecks(date);
+    const cnt = r => checks.filter(c => c.result === r).length;
+    try {
+      switch (m.kind) {
+        case 'bib': {
+          const e = (await getAll()).find(x => x.date === date);
+          return { done: e && (e.bib||0) >= m.target, progress: e ? (e.bib||0) : 0, total:m.target };
+        }
+        case 'pillars': {
+          const r = await window.storage.get('slotdone:'+date);
+          const d = (r && r.value) ? JSON.parse(r.value) : {};
+          const n = ['c0900','c1600','c2230'].filter(k => d[k]).length;
+          return { done: n >= m.target, progress:n, total:m.target };
+        }
+        case 'nobreach': {
+          const r = await window.storage.get('breach:'+date);
+          const b = (r && r.value) ? JSON.parse(r.value) : {};
+          const n = Object.keys(b).filter(k => b[k]).length;
+          return { done: n === 0, progress: n === 0 ? 1 : 0, total:1 };
+        }
+        case 'countResult': { const n = cnt(m.result); return { done:n >= m.target, progress:n, total:m.target }; }
+        case 'checks': return { done: checks.length >= m.target, progress:checks.length, total:m.target };
+        case 'report': { const e = (await getAll()).find(x => x.date === date); return { done: !!(e && e.skin), progress: e&&e.skin?1:0, total:1 }; }
+        case 'journalToday': {
+          const q = await getQuest();
+          const n = (q.journal||[]).filter(j => (j.t||'').slice(0,10) === date).length;
+          return { done:n >= m.target, progress:n, total:m.target };
+        }
+        case 'skinToday': { const e = (await getAll()).find(x => x.date === date); return { done: e && e.skin === m.skin, progress: e&&e.skin===m.skin?1:0, total:1 }; }
+        case 'introspect': { const r = await window.storage.get('introspect:last'); const v = (r&&r.value)?JSON.parse(r.value):null; return { done:v===date, progress:v===date?1:0, total:1 }; }
+        case 'nap': { const n = cnt('aprem_sieste'); return { done:n>0, progress:n?1:0, total:1 }; }
+        case 'scan': { const n = checks.filter(c => c.result === 'change_fait' && c.type && c.type.indexOf('preuve')>=0).length + cnt('change_fait_scan'); return { done:n>0, progress:n?1:0, total:1 }; }
+        case 'ritual': { const q = await getQuest(); return { done: q.ritualDoneDate === date, progress: q.ritualDoneDate===date?1:0, total:1 }; }
+        case 'nolockemg': { const n = cnt('lock_emergency'); return { done:n===0, progress:n===0?1:0, total:1 }; }
+      }
+    } catch(e) {}
+    return { done:false, progress:0, total:1 };
+  }
+
+  // Évalue une mission de PÉRIODE
+  async function evalPeriod(m, active) {
+    try {
+      const entries = await getAll();
+      const since = active ? new Date(active.start) : null;
+      const inRange = d => !since || new Date(d) >= since;
+      switch (m.kind) {
+        case 'streak': {
+          const byDate = {}; entries.forEach(e => { if (e && e.date) byDate[e.date]=true; });
+          let n=0; for (let i=0;;i++){const d=new Date();d.setDate(d.getDate()-i);const k=d.toISOString().slice(0,10);
+            if (byDate[k]) n++; else { if(i===0) continue; break; } }
+          return { done:n>=m.target, progress:n, total:m.target };
+        }
+        case 'noBreachStreak': {
+          let n=0;
+          for (let i=0;;i++){
+            const d=new Date(); d.setDate(d.getDate()-i); const k=d.toISOString().slice(0,10);
+            const r = await window.storage.get('breach:'+k);
+            const b = (r&&r.value)?JSON.parse(r.value):{};
+            const has = Object.keys(b).some(x=>b[x]);
+            const filled = entries.some(e=>e&&e.date===k);
+            if (!filled && i===0) continue;
+            if (filled && !has) n++; else break;
+            if (i>60) break;
+          }
+          return { done:n>=m.target, progress:n, total:m.target };
+        }
+        case 'countResult': {
+          let n=0;
+          for (const e of entries) {
+            if (!e || !e.date || !inRange(e.date)) continue;
+            const cs = await getChecks(e.date);
+            n += cs.filter(c=>c.result===m.result).length;
+          }
+          return { done:n>=m.target, progress:n, total:m.target };
+        }
+        case 'countSkin': {
+          const n = entries.filter(e=>e&&e.skin===m.skin&&inRange(e.date)).length;
+          return { done:n>=m.target, progress:n, total:m.target };
+        }
+        case 'stage': {
+          const r = await window.storage.get('queststage');
+          const st = (r&&r.value)?JSON.parse(r.value):0;
+          return { done:st>=m.target, progress:st, total:m.target };
+        }
+        case 'journal': { const q=await getQuest(); const n=(q.journal||[]).length; return { done:n>=m.target, progress:n, total:m.target }; }
+        case 'confidences': { const q=await getQuest(); const n=(q.confidences||[]).length; return { done:n>=m.target, progress:n, total:m.target }; }
+        case 'hardStreak': {
+          const r = await window.storage.get('hardstreak');
+          const n = (r&&r.value)?JSON.parse(r.value):0;
+          return { done:n>=m.target, progress:n, total:m.target };
+        }
+      }
+    } catch(e) {}
+    return { done:false, progress:0, total:m.target||1 };
+  }
+
+  function missBar(pr, tot) {
+    const pct = tot ? Math.min(100, Math.round(pr/tot*100)) : 0;
+    return '<div style="height:8px;background:#efe4d2;border-radius:6px;overflow:hidden;margin-top:5px">'+
+           '<div style="height:100%;width:'+pct+'%;background:var(--green)"></div></div>';
+  }
+
+  document.getElementById('openMissions').addEventListener('click', async () => {
+    const card = document.getElementById('missionsCard');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) { await renderMissions(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
+
+  async function renderMissions() {
+    if (!MS) return;
+    await MS.ensureDaily(todayStr());
+    const st = await MS.getState();
+
+    // niveaux
+    const lv = document.getElementById('missLevels');
+    lv.innerHTML = '';
+    MS.LEVELS.forEach(l => {
+      const b = document.createElement('button');
+      b.className = 'settings-toggle-btn';
+      b.textContent = (st.level===l.id?'✅ ':'') + l.label + ' (' + l.count + ')';
+      b.addEventListener('click', async () => { await MS.setLevel(l.id); await renderMissions(); });
+      lv.appendChild(b);
+    });
+
+    // mission de période
+    const pbox = document.getElementById('missPeriod');
+    pbox.innerHTML = '';
+    if (st.activePeriod) {
+      const m = MS.periodById(st.activePeriod.id);
+      const ev = await evalPeriod(m, st.activePeriod);
+      const left = MS.daysLeft(st.activePeriod);
+      const div = document.createElement('div');
+      div.style.cssText = 'border:1.5px solid var(--line);border-radius:14px;padding:12px';
+      div.innerHTML = '<div style="font-family:\'Fraunces\',serif;font-size:16px;font-weight:600;color:#5a4326">'+m.name+'</div>'+
+        '<div style="font-size:12.5px;font-weight:600;color:var(--ink);margin:3px 0">'+m.desc+'</div>'+
+        '<div style="font-size:11.5px;font-weight:800;color:var(--muted)">'+ev.progress+' / '+ev.total+' · '+left+' jour(s) restant(s)</div>'+
+        missBar(ev.progress, ev.total)+
+        '<div style="display:flex;gap:8px;margin-top:10px">'+
+          (ev.done ? '<button class="settings-toggle-btn ms-claim">🏆 Valider la mission</button>' : '')+
+          '<button class="settings-toggle-btn ms-abandon" style="color:#a8543b">Abandonner</button></div>';
+      if (ev.done) div.querySelector('.ms-claim').addEventListener('click', async () => {
+        await MS.completePeriod(m.id);
+        if (voiceMode === 'foxy') { try { await imSay('Mission « '+m.name+' » accomplie ! Je savais que tu y arriverais. 🏆🦊', 900, 'proud'); } catch(e){} }
+        await renderMissions();
+      });
+      div.querySelector('.ms-abandon').addEventListener('click', async () => { await MS.abandonPeriod(); await renderMissions(); });
+      pbox.appendChild(div);
+    } else {
+      const dispo = MS.PERIOD_MISSIONS.filter(m => !st.doneP.includes(m.id));
+      if (!dispo.length) {
+        pbox.innerHTML = '<div class="set-note">🏆 Toutes les missions de période sont accomplies. Bravo !</div>';
+      } else {
+        pbox.innerHTML = '<div class="sub" style="margin-bottom:10px">Aucune mission en cours. Foxy va t\'en tirer une au sort parmi les ' + dispo.length + ' restantes — tu ne choisis pas, c\'est le jeu.</div>';
+        const b = document.createElement('button');
+        b.className = 'settings-toggle-btn';
+        b.style.cssText = 'width:100%';
+        b.textContent = '🎲 Tirer ma prochaine mission';
+        b.addEventListener('click', async () => {
+          const m = await MS.startPeriod();
+          if (m && voiceMode === 'foxy') {
+            try {
+              await imSay(broOn()
+                ? 'Ta nouvelle mission, tirée au sort : « ' + m.name +' ». ' + m.desc + ' Tu as ' + m.days + ' jours. Tu ne la choisis pas, tu l\'accomplis.'
+                : 'Et le sort a parlé ! Ta mission : « ' + m.name + ' ». ' + m.desc + ' Tu as ' + m.days + ' jours — on y va ensemble ! 🎲🦊', 950, 'cheer');
+            } catch(e){}
+          }
+          await renderMissions();
+        });
+        pbox.appendChild(b);
+      }
+    }
+
+    // missions du jour
+    const dbox = document.getElementById('missDaily');
+    dbox.innerHTML = '';
+    for (const id of (st.daily||[])) {
+      const m = MS.dailyById(id); if (!m) continue;
+      const ev = await evalDaily(m);
+      const div = document.createElement('div');
+      div.style.cssText = 'border-top:1px solid var(--line);padding:9px 0';
+      div.innerHTML = '<div style="display:flex;align-items:center;gap:8px">'+
+        '<span style="font-size:17px">'+(ev.done?'✅':'⬜')+'</span>'+
+        '<div style="flex:1"><div style="font-size:13.5px;font-weight:800;color:'+(ev.done?'var(--green)':'var(--ink)')+'">'+m.name+'</div>'+
+        '<div style="font-size:12px;font-weight:600;color:var(--muted)">'+m.desc+'</div></div>'+
+        '<span style="font-size:12px;font-weight:800;color:var(--muted)">'+ev.progress+'/'+ev.total+'</span></div>'+
+        (ev.total>1 ? missBar(ev.progress, ev.total) : '');
+      dbox.appendChild(div);
+    }
+
+    // accomplies
+    const done = document.getElementById('missDone');
+    if (st.doneP && st.doneP.length) {
+      done.innerHTML = st.doneP.map(id => { const m = MS.periodById(id); return m ? '<div style="font-size:12.5px;font-weight:700;color:var(--green);padding:3px 0">🏆 '+m.name+'</div>' : ''; }).join('');
+    } else {
+      done.innerHTML = '<div class="set-note">Aucune mission de période accomplie pour l\'instant.</div>';
+    }
+  }
+
   // ===== Garde-robe & stock =====
   const WB = window.HabitrainWardrobe;
-  document.getElementById('openWardrobe').addEventListener('click', async () => {
+  (document.getElementById('openWardrobe')||{addEventListener(){}}).addEventListener('click', async () => {
     const card = document.getElementById('wardrobeCard');
     const show = card.style.display === 'none';
     card.style.display = show ? '' : 'none';
@@ -4679,7 +5287,7 @@
 
   // ===== Serrures (multi) =====
   const LK = window.HabitrainLock;
-  document.getElementById('openLock').addEventListener('click', async () => {
+  (document.getElementById('openLock')||{addEventListener(){}}).addEventListener('click', async () => {
     const card = document.getElementById('lockCard');
     const show = card.style.display === 'none';
     card.style.display = show ? '' : 'none';
@@ -4899,7 +5507,7 @@
   // ===== Capteur de couche (BLE) =====
   const SENSOR_LABELS = { sec:'☀️ Sèche', mouille:'💧 Mouillée', sature:'🌊 Saturée' };
   let lastSensorState = null;
-  document.getElementById('openSensor').addEventListener('click', () => {
+  (document.getElementById('openSensor')||{addEventListener(){}}).addEventListener('click', () => {
     const card = document.getElementById('sensorCard');
     const show = card.style.display === 'none';
     card.style.display = show ? '' : 'none';
@@ -4918,7 +5526,15 @@
     if (!S || !S.supported()) { statusEl.textContent = 'Non supporté (Android/Chrome requis)'; return; }
     statusEl.textContent = 'Connexion...';
     S.onState((state) => onSensorState(state));
-    S.onRaw((n) => { const r = document.getElementById('sensorRaw'); if (r) r.textContent = n; });
+    S.onRaw((d) => {
+      const r = document.getElementById('sensorRaw');
+      if (!r) return;
+      if (typeof d === 'object' && d !== null) {
+        const base = (d.baseRH > 0) ? (' · base ' + d.baseRH.toFixed(1) + '% / ' + d.baseT.toFixed(1) + '°') : ' · calibration…';
+        r.innerHTML = d.rh.toFixed(1) + '% <span style="font-size:15px">HR</span> · ' + d.t.toFixed(1) + '°C' +
+                      '<div style="font-size:11px;font-weight:700;color:var(--muted)">' + base + '</div>';
+      } else { r.textContent = d; }
+    });
     S.onLog((events) => onSensorLog(events));
     try {
       await S.connect();
@@ -4991,19 +5607,19 @@
     g.innerHTML =
       '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:6px 0 4px">Matériel (~15-20 €)</div>'+
       '• 1 carte <b>ESP32-C3 mini</b> (LOLIN C3 Mini ou équivalent)<br>'+
-      '• 1 <b>capteur d\'humidité capacitif</b> (type sonde sol capacitive) OU 2 fils-électrodes inox<br>'+
+      '• 1 <b>capteur SHTC3</b> (humidité + température, I²C) — <b>non invasif</b>, il se pose sur la couche<br>'+
       '• 1 <b>batterie LiPo 3.7V</b> (~400-500 mAh) avec connecteur, ou alim USB<br>'+
       '• Un petit boîtier, du fil, fer à souder<br>'+
       '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">1. Préparer l\'IDE Arduino</div>'+
       'Installe l\'IDE Arduino (gratuit). Dans Préférences → URL de gestionnaire de cartes, ajoute l\'URL ESP32 d\'Espressif, puis installe le paquet "esp32" dans le gestionnaire de cartes. Choisis la carte <b>ESP32C3 Dev Module</b>.'+
       '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">2. Câbler le capteur</div>'+
-      'Relie la sortie analogique du capteur à <b>GPIO0</b> de l\'ESP32-C3, son + au 3V3, son − au GND. (Le fichier firmware utilise GPIO0.)'+
+      'SHTC3 en I²C : <b>SDA → GPIO8</b>, <b>SCL → GPIO9</b>, VIN → 3V3, GND → GND. Installe la bibliothèque <b>SparkFun SHTC3</b> dans l\'IDE Arduino.'+
       '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">3. Flasher le firmware</div>'+
       'Ouvre le fichier <b>habitrain-capteur-couche.ino</b> (fourni), branche l\'ESP32 en USB, sélectionne le bon port, et clique Téléverser.'+
       '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">4. Calibrer</div>'+
-      'Reviens ici, clique <b>Connecter</b>. Regarde la <b>valeur brute</b> : note-la couche sèche, puis mouillée, puis saturée. Reporte ces valeurs dans le firmware (SEUIL_MOUILLE et SEUIL_SATURE), re-flashe une fois. C\'est réglé.'+
+      'Le capteur se calibre <b>tout seul</b> : il fige une ligne de base 2 min après l\'allumage, et la refait après chaque change. Regarde l\'écart entre la valeur en direct et la base quand tu te mouilles : si la détection est trop/pas assez sensible, ajuste SEUIL_RH_MOUILLE et SEUIL_RH_SATURE dans le firmware.'+
       '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">5. Monter sur la couche</div>'+
-      'Clipse le capteur à l\'extérieur de la couche, à l\'avant-bas (zone qui se mouille en premier). Boîtier + batterie fixés à la ceinture ou dans une poche du body.'+
+      '<b>Pose non invasive</b> : glisse le capteur entre la couche et ton vêtement, à l\'avant-bas, enveloppé dans un tissu fin respirant. Il ne touche ni ta peau ni le liquide — il lit l\'air confiné. Une grenouillère fermée donne de meilleures lectures qu\'un vêtement ouvert.'+
       '<div style="background:#FBF3E0;border:1px solid #ecd9a8;border-radius:10px;padding:10px 12px;margin-top:14px;font-size:12px;font-weight:700;color:#8a6a30">'+
       '🔋 Sécurité : batterie LiPo basse tension, aucun risque électrique. Garde l\'électronique au sec (le capteur détecte l\'humidité, mais la carte reste protégée). Nettoie les électrodes régulièrement.'+
       '</div>';
@@ -5068,14 +5684,50 @@
     showQrLock();
   }
   let sessionUnlocked = false;
+  let lockClockTimer = null;
   function showQrLock(isSurprise) {
     const lock = document.getElementById('qrLock');
     lock.style.display = 'flex';
-    const sub = document.getElementById('qrLockSub');
-    if (sub) sub.textContent = isSurprise ? 'Contrôle : scanne ton bracelet pour continuer.' : 'Scanne ton bracelet pour déverrouiller.';
+
+    // --- horloge en direct ---
+    const majHeure = () => {
+      const n = new Date();
+      const c = document.getElementById('qrLockClock');
+      const d = document.getElementById('qrLockDate');
+      if (c) c.textContent = String(n.getHours()).padStart(2,'0') + ':' + String(n.getMinutes()).padStart(2,'0');
+      if (d) {
+        try { d.textContent = n.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' }); }
+        catch(e) { d.textContent = ''; }
+      }
+    };
+    majHeure();
+    if (lockClockTimer) clearInterval(lockClockTimer);
+    lockClockTimer = setInterval(majHeure, 20000);
+
+    // --- portrait de Foxy, dans sa tenue et son humeur du jour ---
+    try {
+      const f = document.getElementById('qrLockFoxy');
+      const h = new Date().getHours();
+      const expr = (h >= 22 || h < 7) ? 'sleep' : (isSurprise ? 'curious' : 'comfort');
+      positionFoxyCell(f, expr, 168);
+    } catch(e) {}
+
+    // --- message d'accueil selon l'heure et le contexte ---
+    const greet = document.getElementById('qrLockGreet');
+    if (greet) {
+      const h = new Date().getHours();
+      let g;
+      if (isSurprise) g = 'Contrôle surprise — montre-moi ton bracelet';
+      else if (h < 7) g = 'Chut... Foxy dort encore';
+      else if (h < 12) g = 'Foxy t\'attend pour commencer la journée';
+      else if (h < 18) g = 'Foxy t\'attend';
+      else if (h < 22) g = 'La soirée commence, Foxy est là';
+      else g = 'Il est tard... Foxy veille sur toi';
+      greet.textContent = g;
+    }
     document.getElementById('qrUnlockBtn').onclick = () => {
       QR.startScan('unlock', (kind) => {
-        if (kind === 'unlock') { sessionUnlocked = true; lock.style.display = 'none'; }
+        if (kind === 'unlock') { sessionUnlocked = true; lock.style.display = 'none'; if (lockClockTimer) { clearInterval(lockClockTimer); lockClockTimer = null; } }
       });
     };
     // secours discret : 3 tapes sur le titre (TOUJOURS actif, anti-blocage)

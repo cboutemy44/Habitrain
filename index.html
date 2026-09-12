@@ -17,15 +17,10 @@
     <h1>Journal de suivi</h1>
     <p>Immersion 24/7 · 2 min matin & soir</p>
     <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-      <button class="settings-toggle-btn" id="openSettings">⚙️ Réglages</button>
+      <button class="settings-toggle-btn" id="openSettings">⚙️ Paramètres</button>
       <button class="settings-toggle-btn" id="toggleVoice">🦊 Mode Foxy</button>
       <button class="settings-toggle-btn" id="openQuest">🗺️ Notre aventure</button>
-      <button class="settings-toggle-btn" id="openSave">💾 Sauvegarde</button>
-      <button class="settings-toggle-btn" id="openQr">📷 QR codes</button>
-      <button class="settings-toggle-btn" id="openWardrobe">👕 Garde-robe & stock</button>
-      <button class="settings-toggle-btn" id="openSensor">📡 Capteur couche</button>
-      <button class="settings-toggle-btn" id="openLock">🔐 Serrure placard</button>
-      <button class="settings-toggle-btn" id="openDebug">🐞 Debug</button>
+      <button class="settings-toggle-btn" id="openMissions">🎯 Missions</button>
       <button class="settings-toggle-btn" id="pauseBtn">⏸️ Pause</button>
     </div>
   </div>
@@ -40,9 +35,16 @@
 
   <div id="qrLock" style="display:none">
     <div class="qrlock-inner">
-      <div class="qrlock-title" id="qrLockTitle">Notes</div>
-      <div class="qrlock-sub">Verrouillé</div>
-      <button id="qrUnlockBtn">📷 Scanner pour déverrouiller</button>
+      <div class="qrlock-clock" id="qrLockClock">--:--</div>
+      <div class="qrlock-date" id="qrLockDate"></div>
+
+      <div class="qrlock-foxy" id="qrLockFoxy"></div>
+
+      <div class="qrlock-title" id="qrLockTitle">Habitrain</div>
+      <div class="qrlock-greet" id="qrLockGreet">Foxy t'attend</div>
+
+      <button id="qrUnlockBtn">🔓 Scanner mon bracelet</button>
+      <div class="qrlock-hint" id="qrLockHint">Approche ton tag NFC ou scanne ton QR</div>
     </div>
   </div>
 
@@ -56,20 +58,23 @@
 
   <div id="pauseFacade">
     <div class="facade-inner">
-      <div class="facade-head">
-        <span class="facade-title" id="facadeTitle">Notes</span>
-        <span class="facade-plus">+</span>
+      <div class="facade-logo" id="facadeTitle">◈</div>
+      <div class="facade-app">Habitrain</div>
+      <div class="facade-sub">Session verrouillée</div>
+
+      <input type="password" id="facadePass" placeholder="Mot de passe" autocomplete="off" inputmode="text">
+      <button id="facadeLogin">Se connecter</button>
+
+      <div class="facade-or"><span>ou</span></div>
+
+      <div class="facade-alt">
+        <button id="facadeQr">📷 QR code</button>
+        <button id="facadeNfc">📶 Tag NFC</button>
       </div>
-      <textarea class="facade-note" placeholder="Écris une note…"></textarea>
-      <div class="facade-list">
-        <div class="facade-item">Liste de courses</div>
-        <div class="facade-item">Idées cadeaux</div>
-        <div class="facade-item">À faire ce week-end</div>
-      </div>
+
+      <div class="facade-err" id="facadeErr"></div>
     </div>
   </div>
-
-  <div id="storeWarn" style="display:none; background:#FBEBE5; border:1.5px solid var(--coral); color:#a8543b; border-radius:13px; padding:11px 13px; font-size:12.5px; font-weight:700; margin-bottom:15px; line-height:1.45;"></div>
 
   <div class="tabbar" id="tabbar">
     <button class="tab" data-tabname="maintenant">🍼 Maintenant</button>
@@ -78,6 +83,16 @@
   </div>
 
   <div class="card" id="settingsCard" style="display:none">
+    <div id="settingsNav" style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px">
+      <button class="settings-toggle-btn set-nav" data-target="secNotif">🔔 Notifications &amp; rythme</button>
+      <button class="settings-toggle-btn set-nav" data-target="wardrobeCard">👕 Garde-robe &amp; stock</button>
+      <button class="settings-toggle-btn set-nav" data-target="qrCard">📷 QR, NFC &amp; bracelet</button>
+      <button class="settings-toggle-btn set-nav" data-target="sensorCard">📡 Capteur de couche</button>
+      <button class="settings-toggle-btn set-nav" data-target="lockCard">🔐 Serrures</button>
+      <button class="settings-toggle-btn set-nav" data-target="saveCard">💾 Sauvegarde</button>
+      <button class="settings-toggle-btn set-nav" data-target="debugCard">🐞 Debug</button>
+    </div>
+    <div id="secNotif" class="set-section" style="display:none">
     <div class="collapse-head open" style="cursor:default">
       <h2 style="margin:0">Réglages · Notifications</h2>
       <span class="chev" style="transform:none">⚙️</span>
@@ -92,6 +107,17 @@
     <div id="setGroups"></div>
 
     <div class="set-cat" style="margin-top:16px;padding-top:12px;border-top:2px solid var(--line)">
+      <h4>🔑 Verrouillage</h4>
+      <div class="set-row">
+        <div class="info"><div class="n">Mot de passe de pause</div><div class="d">Pour déverrouiller l'écran de connexion</div></div>
+        <input type="password" id="pausePassInput" placeholder="•••••" style="width:110px;padding:8px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-weight:700">
+      </div>
+      <button class="settings-toggle-btn" id="pausePassSave">💾 Enregistrer le mot de passe</button>
+      <div class="saved-flash" id="pausePassFlash"></div>
+      <div class="set-note">Si aucun mot de passe n'est défini, le premier que tu saisiras sur l'écran de connexion deviendra le tien. Secours anti-blocage : 3 tapes rapides sur le logo ◈.</div>
+    </div>
+
+    <div class="set-cat">
       <h4>🔥 Mode intensif</h4>
       <div class="set-row">
         <div class="info"><div class="n">Activer le mode intensif</div><div class="d">Cadre strict, Foxy exigeant, preuve obligatoire, streak strict, pause verrouillée, contention douce imposée (alerte 5h, plafond 6h30)</div></div>
@@ -106,6 +132,28 @@
     </div>
 
     <div class="set-note" id="setNote">Rappel : une appli web ne garantit pas les notifications quand elle est complètement fermée. Pour les rappels critiques, garde tes alarmes système.</div>
+    </div>
+  </div>
+
+  <div class="card" id="missionsCard" style="display:none">
+    <h2>🎯 Missions</h2>
+    <div class="sub">Des objectifs de fond sur plusieurs jours, et des défis renouvelés chaque matin.</div>
+
+    <div class="set-cat"><h4>Niveau de difficulté</h4>
+      <div id="missLevels" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+
+    <div class="set-cat"><h4>🏔️ Mission de période</h4>
+      <div id="missPeriod"></div>
+    </div>
+
+    <div class="set-cat"><h4>📅 Missions du jour</h4>
+      <div id="missDaily"></div>
+    </div>
+
+    <div class="set-cat"><h4>🏆 Accomplies</h4>
+      <div id="missDone"></div>
+    </div>
   </div>
 
   <div class="card" id="wardrobeCard" style="display:none">
@@ -620,4 +668,5 @@
 <script src="sensor.js"></script>
 <script src="lock.js"></script>
 <script src="wardrobe.js"></script>
+<script src="missions.js"></script>
 <script src="app.js"></script>
