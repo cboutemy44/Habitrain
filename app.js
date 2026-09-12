@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '12.8';
+  const APP_VERSION = '13.0';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -3174,7 +3174,8 @@
     const first = new Date(dates[0] + 'T12:00:00');
     const today = new Date(todayStr() + 'T12:00:00');
     const dayNum = Math.min(30, Math.round((today - first) / 86400000) + 1);
-    const ageScore = Math.min(1, dayNum / 25); // ~plateau vers J25
+    // L'ancienneté ne rapporte plus de points : elle sert uniquement de plafond.
+    // Le temps qui passe n'est pas un mérite.
 
     // --- Régularité : série de jours consécutifs remplis en remontant depuis aujourd'hui ---
     let streak = 0;
@@ -3194,7 +3195,9 @@
     }
     const spanDays = Math.round((today - first) / 86400000) + 1;
     const fillRate = spanDays ? filledTotal / spanDays : 1;
-    const regScore = Math.min(1, (Math.min(1, streak / 10) * 0.6) + (fillRate * 0.4));
+    // Régularité exigeante : série sur 14 jours, et l'assiduité pèse lourd.
+    // Un trou dans le suivi fait vraiment chuter le score.
+    const regScore = Math.min(1, (Math.min(1, streak / 14) * 0.5) + (Math.pow(fillRate, 1.5) * 0.5));
 
     // --- "À corriger" : tendance récente vs début ---
     async function flagRateFor(dateList) {
@@ -3212,11 +3215,12 @@
     const early = await flagRateFor(dates.slice(0, Math.min(7, dates.length)));
 
     // score "réflexes" : peu de flags récents = bon ; bonus si baisse vs début
+    // Réflexes : aucun cadeau au départ. Sans vérifs, on ne peut rien prouver.
     let reflexScore;
-    if (recent.rate === null) reflexScore = 0.7; // pas encore de vérifs : neutre-positif
+    if (recent.tot < 5) reflexScore = 0;            // trop peu de données : rien d'acquis
     else {
-      reflexScore = 1 - recent.rate; // moins de flags = mieux
-      if (early.rate !== null && recent.rate < early.rate) reflexScore = Math.min(1, reflexScore + 0.15); // bonus tendance à la baisse
+      reflexScore = Math.max(0, 1 - recent.rate * 2);  // les anomalies coûtent double
+      if (early.rate !== null && recent.rate < early.rate) reflexScore = Math.min(1, reflexScore + 0.1);
     }
 
     // tendance texte
@@ -3229,27 +3233,51 @@
       trendTxt = (recent.flags || 0) + '';
     }
 
+    // --- Lâcher-prise : le cœur de l'habituation ---
+    // Une couche MOUILLÉE prouve le relâchement ; une couche SÈCHE prouve la rétention.
+    let mouille = 0, sec = 0, nuitsMouillees = 0, nuitsSeches = 0;
+    for (const d of last7) {
+      const list = await getChecks(d);
+      mouille += list.filter(c => ['etat_mouille','mouille','etat_sature','sature'].includes(c.result)).length;
+      sec     += list.filter(c => ['etat_sec','sec'].includes(c.result)).length;
+      nuitsMouillees += list.filter(c => c.result === 'reveil_mouille').length;
+      nuitsSeches    += list.filter(c => c.result === 'reveil_sec').length;
+    }
+    let letGoScore = 0;
+    const totEtats = mouille + sec;
+    if (totEtats >= 5) {
+      letGoScore = mouille / totEtats;                       // part de relâchement
+      const totNuits = nuitsMouillees + nuitsSeches;
+      if (totNuits >= 2) {
+        // les nuits comptent davantage : c'est là que le lâcher-prise est le plus dur
+        letGoScore = letGoScore * 0.55 + (nuitsMouillees / totNuits) * 0.45;
+      }
+    }
+
     // --- Pénalité entorses : moyenne des 7 derniers jours ---
     let breachPen = 0;
     for (const d of last7) { breachPen += await breachPenalty(d); }
     breachPen = breachPen / last7.length; // moyenne (0-40)
 
-    // --- Score d'habituation : régularité 35 + réflexes 35 + ancienneté 30, moins entorses ---
-    const rawScore = regScore*35 + reflexScore*35 + ageScore*30;
+    // --- Score d'habituation : lâcher-prise 45 + régularité 30 + réflexes 25, moins entorses ---
+    // Le lâcher-prise domine : c'est l'objectif réel du programme.
+    const rawScore = letGoScore*45 + regScore*30 + reflexScore*25;
     const score = Math.max(0, Math.round(rawScore - breachPen));
 
     // --- Palier : bridé par l'ancienneté (l'habituation prend du temps) ---
     // étape par le score (qualité) et étape par les jours écoulés ; on prend la plus basse.
+    // Paliers exigeants : il faut vraiment démontrer l'habituation.
     let stageByScore;
-    if (score >= 80) stageByScore = 3;
-    else if (score >= 55) stageByScore = 2;
-    else if (score >= 30) stageByScore = 1;
+    if (score >= 88) stageByScore = 3;
+    else if (score >= 70) stageByScore = 2;
+    else if (score >= 48) stageByScore = 1;
     else stageByScore = 0;
 
+    // Plafond par l'ancienneté : l'habituation ne peut pas être instantanée.
     let stageByDay;
-    if (dayNum >= 21) stageByDay = 3;
-    else if (dayNum >= 11) stageByDay = 2;
-    else if (dayNum >= 5) stageByDay = 1;
+    if (dayNum >= 28) stageByDay = 3;
+    else if (dayNum >= 16) stageByDay = 2;
+    else if (dayNum >= 8) stageByDay = 1;
     else stageByDay = 0;
 
     const stage = Math.min(stageByScore, stageByDay);
@@ -4879,6 +4907,16 @@
   })();
 
   (function(){
+    const b0 = document.getElementById('obRestart');
+    if (b0) b0.addEventListener('click', async () => {
+      try { await window.storage.delete('ob:done'); } catch(e) {}
+      obIndex = 0;
+      document.body.classList.add('onboarding');
+      await renderOnboard();
+    });
+  })();
+
+  (function(){
     const b = document.getElementById('pausePassSave');
     if (b) b.addEventListener('click', async () => {
       const i = document.getElementById('pausePassInput');
@@ -4972,6 +5010,192 @@
       if (g) g.style.display = g.style.display === 'none' ? '' : 'none';
     });
   })();
+
+  /* ============================================================
+     ONBOARDING — guide du premier lancement
+     Foxy accueille, explique, et vérifie que tout est en place.
+     ============================================================ */
+  let obIndex = 0;
+
+  // Vérifications automatiques : ce que l'appli peut constater seule
+  async function obChecks() {
+    const out = {};
+    // notifications autorisées
+    out.notif = (notifPermState() === 'granted');
+    // stock de couches renseigné
+    try {
+      if (window.HabitrainWardrobe) {
+        const st = await window.HabitrainWardrobe.categoryStatus();
+        out.stock = (st.jour.total > 0 || st.nuit.total > 0);
+      }
+    } catch(e) { out.stock = false; }
+    // garde-robe personnalisée (au moins une tenue)
+    try {
+      if (window.HabitrainWardrobe) {
+        const w = await window.HabitrainWardrobe.getWardrobe();
+        out.wardrobe = ((w.jour||[]).length > 0 && (w.nuit||[]).length > 0);
+      }
+    } catch(e) { out.wardrobe = false; }
+    // mot de passe de pause défini
+    try { out.pass = !!(await getPausePass()); } catch(e) { out.pass = false; }
+    // export de sauvegarde déjà fait
+    try { const r = await window.storage.get('ob:exported'); out.export = !!(r && r.value); } catch(e) { out.export = false; }
+    // QR générés au moins une fois
+    try { const r = await window.storage.get('ob:qrdone'); out.qr = !!(r && r.value); } catch(e) { out.qr = false; }
+    // niveau de missions choisi
+    try { if (window.HabitrainMissions) { const st = await window.HabitrainMissions.getState(); out.missions = !!st.level; } } catch(e) { out.missions = false; }
+    return out;
+  }
+
+  // Étapes de l'onboarding
+  function obSteps() {
+    return [
+      {
+        expr:'comfort', titre:'Bienvenue à la maison 🦊',
+        texte:'Salut ! Moi c\'est Foxy, je serai ton compagnon tout au long de ton programme. Avant qu\'on commence, on va vérifier ensemble que tout est bien en place. Ça prend deux minutes.',
+        items:null, suivant:'On y va !'
+      },
+      {
+        expr:'explain', titre:'Ce que je fais pour toi',
+        texte:'Je te rappelle tes changes, je suis ta peau et ton hydratation, je te propose des missions, et je suis là pour discuter. Tu peux me parler librement, ou utiliser les boutons.',
+        items:null, suivant:'Compris'
+      },
+      {
+        expr:'curious', titre:'L\'essentiel à configurer',
+        texte:'Voici ce qu\'il faut mettre en place. Je coche tout seul ce qui est déjà fait — tape sur une ligne pour aller la régler.',
+        items:[
+          { k:'notif',    t:'Autoriser les notifications', s:'Sinon je ne pourrai pas te rappeler tes créneaux', go:'settingsCard' },
+          { k:'wardrobe', t:'Vérifier ta garde-robe',      s:'Paramètres → Garde-robe & stock',                 go:'wardrobeCard' },
+          { k:'stock',    t:'Renseigner ton stock de couches', s:'Quantités par modèle, jour et nuit',          go:'wardrobeCard' },
+          { k:'missions', t:'Choisir ton niveau de missions', s:'De Doux à Intense',                            go:'missionsCard' }
+        ],
+        suivant:'Suite'
+      },
+      {
+        expr:'calm', titre:'Sécurité et sauvegarde',
+        texte:'Deux choses à ne pas négliger — elles t\'éviteront de gros ennuis.',
+        items:[
+          { k:'pass',   t:'Définir un mot de passe de pause', s:'Pour déverrouiller l\'écran de connexion', go:'settingsCard' },
+          { k:'export', t:'Faire un premier export',          s:'Tes données ne vivent que sur ce téléphone', go:'saveCard' }
+        ],
+        suivant:'Suite'
+      },
+      {
+        expr:'proud', titre:'Options avancées',
+        texte:'Ces éléments sont facultatifs. Tu peux les activer maintenant ou plus tard, quand tu auras le matériel.',
+        items:[
+          { k:'qr', t:'Générer et coller tes QR codes', s:'Tapis de change, frigo, porte, bracelet', go:'qrCard' }
+        ],
+        suivant:'Suite'
+      },
+      {
+        expr:'reassure', titre:'Trois réflexes à garder',
+        texte:'⚠️ Garde une capture de tes QR si tu actives le bracelet bloquant.\n\n⚠️ Le secours anti-blocage : 3 tapes rapides sur le logo de l\'écran de connexion.\n\n⚠️ Refais un export de sauvegarde de temps en temps.',
+        items:null, suivant:'C\'est noté'
+      },
+      {
+        expr:'cheer', titre:'On est prêts !',
+        texte:'Voilà, tout est en place. Je serai là à chaque moment de ta journée. Prends soin de toi, et laisse-toi porter — je m\'occupe du reste. 💛',
+        items:null, suivant:'Commencer mon programme'
+      }
+    ];
+  }
+
+  async function renderOnboard() {
+    const steps = obSteps();
+    const st = steps[obIndex];
+    if (!st) { await finishOnboard(); return; }
+    try { await loadFoxyOutfit(); } catch(e) {}
+    try { positionFoxyCell(document.getElementById('obFoxy'), st.expr, 130); } catch(e) {}
+    document.getElementById('obStep').textContent = 'Étape ' + (obIndex+1) + ' / ' + steps.length;
+    document.getElementById('obTitle').textContent = st.titre;
+    document.getElementById('obText').textContent = st.texte;
+
+    const list = document.getElementById('obList');
+    list.innerHTML = '';
+    if (st.items) {
+      const checks = await obChecks();
+      st.items.forEach(it => {
+        const fait = !!checks[it.k];
+        const d = document.createElement('div');
+        d.className = 'ob-item' + (fait ? ' ok' : '');
+        d.innerHTML = '<span class="mark">' + (fait ? '✅' : '⬜') + '</span>' +
+          '<span class="lbl"><b>' + it.t + '</b><span class="sub">' + it.s + '</span></span>';
+        d.addEventListener('click', async () => {
+          // ferme l'onboarding et ouvre l'écran concerné
+          document.body.classList.remove('onboarding');
+          const card = document.getElementById(it.go);
+          if (card) {
+            if (it.go !== 'settingsCard' && it.go !== 'missionsCard') {
+              const sc = document.getElementById('settingsCard');
+              if (sc) { sc.style.display = ''; renderSettings(); }
+            }
+            card.style.display = '';
+            if (SETTINGS_RENDER && SETTINGS_RENDER[it.go]) { try { await SETTINGS_RENDER[it.go](); } catch(e) {} }
+            if (it.go === 'missionsCard') { try { await renderMissions(); } catch(e) {} }
+            if (it.go === 'saveCard') { /* rien à rendre */ }
+            card.scrollIntoView({behavior:'smooth', block:'start'});
+          }
+          // bouton de retour à l'onboarding
+          showObResume();
+        });
+        list.appendChild(d);
+      });
+    }
+
+    const acts = document.getElementById('obActs');
+    acts.innerHTML = '';
+    const b = document.createElement('button');
+    b.textContent = st.suivant;
+    b.addEventListener('click', async () => { obIndex++; await renderOnboard(); });
+    acts.appendChild(b);
+    if (obIndex > 0) {
+      const p = document.createElement('button');
+      p.className = 'soft'; p.textContent = 'Retour';
+      p.addEventListener('click', async () => { obIndex = Math.max(0, obIndex-1); await renderOnboard(); });
+      acts.appendChild(p);
+    }
+    if (obIndex < steps.length - 1) {
+      const sk = document.createElement('button');
+      sk.className = 'soft'; sk.textContent = 'Passer le guide';
+      sk.addEventListener('click', async () => { await finishOnboard(); });
+      acts.appendChild(sk);
+    }
+  }
+
+  // petit bouton flottant pour revenir au guide après être allé régler quelque chose
+  function showObResume() {
+    if (document.getElementById('obResume')) return;
+    const b = document.createElement('button');
+    b.id = 'obResume';
+    b.textContent = '🦊 Reprendre le guide';
+    b.style.cssText = 'position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:9000;' +
+      'padding:13px 20px;border:none;border-radius:16px;font-family:inherit;font-size:14.5px;font-weight:800;' +
+      'background:#d9743a;color:#fff;box-shadow:0 6px 20px rgba(217,116,58,.45);cursor:pointer';
+    b.addEventListener('click', async () => {
+      b.remove();
+      document.body.classList.add('onboarding');
+      await renderOnboard();
+    });
+    document.body.appendChild(b);
+  }
+
+  async function finishOnboard() {
+    document.body.classList.remove('onboarding');
+    const r = document.getElementById('obResume'); if (r) r.remove();
+    try { await window.storage.set('ob:done', JSON.stringify(true)); } catch(e) {}
+  }
+
+  async function maybeStartOnboard() {
+    try {
+      const r = await window.storage.get('ob:done');
+      if (r && r.value) return false;
+      obIndex = 0;
+      document.body.classList.add('onboarding');
+      await renderOnboard();
+      return true;
+    } catch(e) { return false; }
+  }
 
   // ===== Missions =====
   const MS = window.HabitrainMissions;
@@ -5670,6 +5894,7 @@
       wrap.appendChild(cv); wrap.appendChild(lbl);
       gl.appendChild(wrap);
     }
+    try { await window.storage.set('ob:qrdone', JSON.stringify(true)); } catch(e) {}
   }
   // annulation du scan
   document.getElementById('qrScanCancel').addEventListener('click', () => { if (QR) QR.stopScan(); });
@@ -5780,6 +6005,7 @@
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       saveFlash('✅ Sauvegarde téléchargée (' + Object.keys(data).length + ' entrées)');
+      try { await window.storage.set('ob:exported', JSON.stringify(true)); } catch(e) {}
     } catch(e) { saveFlash('Échec de l\'export, réessaie.', false); }
   });
   document.getElementById('saveImportBtn').addEventListener('click', () => {
@@ -6016,7 +6242,11 @@
       } catch(e) {}
     }
 
-    if (paused) { /* mode pause : aucune sollicitation */ }
+    // premier lancement : guide d'installation
+    let obLance = false;
+    try { obLance = await maybeStartOnboard(); } catch(e) {}
+    if (obLance) { /* on laisse le guide tranquille */ }
+    else if (paused) { /* mode pause : aucune sollicitation */ }
     else if (dueSlot && !alreadyDone) {
       // affiche le rappel "c'est l'heure" puis lance le flux guidé.
       // Le créneau n'est PAS marqué ici : "Plus tard" doit le laisser réapparaître.

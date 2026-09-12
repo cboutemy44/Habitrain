@@ -749,3 +749,58 @@ body.paused #pauseFacade { display: flex; }
   min-height: 18px; margin-top: 14px;
   font-size: 12.5px; font-weight: 500; color: #c0392b;
 }
+
+/* ===== Onboarding premier lancement ===== */
+#onboard {
+  position: fixed; inset: 0; z-index: 10100;
+  display: none; align-items: center; justify-content: center; padding: 22px;
+  background: linear-gradient(160deg, #3a2718 0%, #5c3a22 55%, #7a4f2c 100%);
+  overflow-y: auto;
+}
+body.onboarding #onboard { display: flex; }
+.ob-inner {
+  width: 100%; max-width: 380px; text-align: center; color: #fff;
+  animation: obIn .35s ease-out; padding: 20px 0;
+}
+@keyframes obIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:none} }
+.ob-foxy {
+  width: 130px; height: 130px; margin: 0 auto 14px; border-radius: 26px;
+  background-repeat: no-repeat; background-color: rgba(255,245,235,.1);
+  border: 3px solid rgba(255,200,150,.45);
+  box-shadow: 0 10px 32px rgba(0,0,0,.38);
+}
+.ob-step {
+  font-size: 11.5px; font-weight: 800; letter-spacing: .06em;
+  text-transform: uppercase; color: rgba(255,210,170,.75); margin-bottom: 6px;
+}
+.ob-title {
+  font-family: 'Fraunces', serif; font-weight: 600; font-size: 23px;
+  color: #ffd9b0; line-height: 1.25; margin-bottom: 10px;
+}
+.ob-text {
+  font-size: 14.5px; font-weight: 600; line-height: 1.55;
+  color: rgba(255,255,255,.88); margin-bottom: 16px;
+}
+.ob-list { text-align: left; margin-bottom: 18px; }
+.ob-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.13);
+  border-radius: 13px; padding: 11px 13px; margin-bottom: 8px;
+  font-size: 13.5px; font-weight: 600; color: rgba(255,255,255,.9);
+  cursor: pointer;
+}
+.ob-item.ok { background: rgba(120,200,140,.16); border-color: rgba(120,200,140,.45); }
+.ob-item .mark { font-size: 16px; flex: none; line-height: 1.2; }
+.ob-item .lbl b { color: #ffd9b0; }
+.ob-item .sub { display: block; font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,.6); margin-top: 3px; }
+.ob-acts { display: flex; flex-direction: column; gap: 9px; }
+.ob-acts button {
+  width: 100%; padding: 14px; border: none; border-radius: 15px;
+  font-family: inherit; font-size: 15px; font-weight: 800; cursor: pointer;
+  background: linear-gradient(135deg,#e8894a,#d9743a); color: #fff;
+  box-shadow: 0 7px 22px rgba(217,116,58,.4);
+}
+.ob-acts button.soft {
+  background: rgba(255,255,255,.12); color: rgba(255,255,255,.85);
+  box-shadow: none; border: 1px solid rgba(255,255,255,.2);
+}

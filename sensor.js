@@ -61,6 +61,10 @@
   async function ackLog() {
     try { if (charCtrl) await charCtrl.writeValue(new TextEncoder().encode('ACK')); } catch (e) {}
   }
+  // Signale un change au capteur : il refait sa ligne de base.
+  async function recalibrate() {
+    try { if (charCtrl) await charCtrl.writeValue(new TextEncoder().encode('CALIB')); } catch (e) {}
+  }
   async function requestSync() {
     try { if (charCtrl) await charCtrl.writeValue(new TextEncoder().encode('SYNC')); } catch (e) {}
   }
@@ -86,8 +90,11 @@
       charRaw = await service.getCharacteristic(CHAR_RAW_UUID);
       await charRaw.startNotifications();
       charRaw.addEventListener('characteristicvaluechanged', (ev) => {
-        const n = parseInt(decode(ev.target.value), 10);
-        if (!isNaN(n) && onRawCb) onRawCb(n);
+        // format SHTC3 : "RH|T|baseRH|baseT"
+        const parts = decode(ev.target.value).split('|').map(parseFloat);
+        if (parts.length >= 2 && onRawCb) {
+          onRawCb({ rh: parts[0], t: parts[1], baseRH: parts[2], baseT: parts[3] });
+        }
       });
     } catch (e) {}
 
@@ -121,6 +128,7 @@
     connect,
     disconnect,
     sync: requestSync,
+    recalibrate,
     onState: (cb) => { onStateCb = cb; },   // état temps réel (appli ouverte)
     onRaw:   (cb) => { onRawCb = cb; },      // valeur brute (calibration)
     onLog:   (cb) => { onLogCb = cb; }       // journal recalé [{t: ISO, state}]
