@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '13.0';
+  const APP_VERSION = '13.5';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1081,9 +1081,22 @@
             const noms = (stM.daily||[]).map(id => { const d = window.HabitrainMissions.dailyById(id); return d ? d.name : null; }).filter(Boolean);
             if (noms.length) {
               try { await window.storage.set('missannounce:last', JSON.stringify(todayStr())); } catch(e) {}
+              // Foxy explique pourquoi certaines missions sont là
+              let pourquoi = '';
+              try {
+                const diag = await window.HabitrainMissions.getDiagnostic();
+                if (diag && (diag.faibles||[]).length) {
+                  const NOMS = { letgo:'ton lâcher-prise', spont:'ta spontanéité', port:'ta durée de port',
+                                 reg:'ta régularité', refl:'tes réflexes', ponct:'ta ponctualité', hydra:'ton hydratation' };
+                  const n1 = NOMS[diag.faibles[0]];
+                  if (n1) pourquoi = broOn()
+                    ? ' J\'en ai choisi une exprès pour travailler ' + n1 + '. Ce n\'est pas un hasard.'
+                    : ' J\'en ai glissé une spécialement pour t\'aider sur ' + n1 + ' — c\'est là que tu peux le plus progresser !';
+                }
+              } catch(e) {}
               await imSay(broOn()
-                ? 'Tes missions du jour : ' + noms.join(', ') + '. Tu les feras, on est d\'accord.'
-                : 'Tes missions du jour : ' + noms.join(', ') + ' ! On s\'y met ensemble ? 🎯🦊', 950, 'cheer');
+                ? 'Tes missions du jour : ' + noms.join(', ') + '.' + pourquoi + ' Tu les feras, on est d\'accord.'
+                : 'Tes missions du jour : ' + noms.join(', ') + ' !' + pourquoi + ' On s\'y met ensemble ? 🎯🦊', 1000, 'cheer');
               await imOfferHelp(m);
               return;
             }
@@ -2475,7 +2488,7 @@
   function labelResult(res) {
     if (!res) return '';
     const map = {
-      ok:'couche en place', adj:'couche réajustée', miss:'sans couche', fixed:'remise en couche',
+      ok:'couche en place', adj:'couche réajustée', miss:'sans couche', fixed:'couche remise',
       sec:'sèche', mouille:'mouillée', sature:'saturée',
       etat_sec:'sèche', etat_mouille:'mouillée', etat_sature:'saturée',
       change_fait:'change effectué',
@@ -2735,6 +2748,33 @@
     const hours = (now - last) / 3600000;
     const h = Math.floor(hours), min = Math.floor((hours - h) * 60);
     const isNight = now.getHours() >= 23 || now.getHours() < 7;
+    // --- Anomalie : durée de port invraisemblable (> 14h) ---
+    // C'est le symptôme d'un change non enregistré, ou d'une couche
+    // jamais remise. On le signale clairement plutôt que d'afficher un chiffre faux.
+    if (hours > 14) {
+      positionFoxyCell(portrait, 'alarmed', 88);
+      timeEl.className = 'since-time long';
+      timeEl.textContent = (h > 48 ? Math.round(hours/24) + ' j' : h + 'h' + (min<10?'0'+min:min));
+      sayEl.innerHTML = '⚠️ <b>Durée invraisemblable.</b> Soit un change n\'a pas été enregistré, ' +
+        'soit tu n\'as pas ta couche (tu n\'es pas allé au bout la dernière fois).' +
+        '<div style="margin-top:8px"><button id="sinceFix" class="settings-toggle-btn" style="font-size:12.5px;padding:8px 12px">🦊 Je me remets en couche</button>' +
+        '<button id="sinceOk" class="settings-toggle-btn" style="font-size:12.5px;padding:8px 12px;margin-left:6px">J\'ai changé, enregistre</button></div>';
+      if (nextEl) nextEl.innerHTML = '';
+      setTimeout(() => {
+        const f = document.getElementById('sinceFix');
+        if (f) f.onclick = async () => {
+          if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e){} }
+          try { await runReentryProtocol('moyen'); } catch(e) {}
+        };
+        const o = document.getElementById('sinceOk');
+        if (o) o.onclick = async () => {
+          try { await window.storage.delete('reentry:pending'); } catch(e) {}
+          try { await finishChange(); } catch(e) {}
+        };
+      }, 60);
+      return;
+    }
+
     const ctx = await pillarContext();
     ctx.state = await currentDiaperState(last);
     const c = sinceComment(hours, isNight, ctx);
@@ -3254,15 +3294,113 @@
       }
     }
 
+    // --- Durée de port : tenir longtemps SANS y penser = habituation ---
+    // On mesure les intervalles entre changes successifs sur 7 jours.
+    let portScore = 0, dureeMoy = 0;
+    try {
+      const stamps = [];
+      for (const d of last7) {
+        const list = await getChecks(d);
+        list.filter(c => c.result === 'change_fait' && c.t).forEach(c => stamps.push(new Date(c.t).getTime()));
+      }
+      stamps.sort((a,b) => a-b);
+      const intervalles = [];
+      for (let i = 1; i < stamps.length; i++) {
+        const h = (stamps[i] - stamps[i-1]) / 3600000;
+        if (h > 0.3 && h < 14) intervalles.push(h);   // on ignore le bruit
+      }
+      if (intervalles.length >= 3) {
+        dureeMoy = intervalles.reduce((a,b)=>a+b,0) / intervalles.length;
+        // fourchette saine : 2h30 à 5h. Trop court = compulsif, trop long = risque peau.
+        if (dureeMoy >= 2.5 && dureeMoy <= 5) portScore = 1;
+        else if (dureeMoy < 2.5) portScore = Math.max(0, dureeMoy / 2.5);
+        else portScore = Math.max(0, 1 - (dureeMoy - 5) / 3);
+      }
+    } catch(e) {}
+
+    // --- Spontanéité : délai entre une couche fraîche et la première miction ---
+    // Court = relâchement immédiat. Long = rétention.
+    let spontScore = 0, delaiMoy = 0;
+    try {
+      const evts = [];
+      for (const d of last7) {
+        const list = await getChecks(d);
+        list.filter(c => c.t).forEach(c => evts.push({ t:new Date(c.t).getTime(), r:c.result }));
+      }
+      evts.sort((a,b) => a.t - b.t);
+      const delais = [];
+      let dernierChange = null;
+      for (const e of evts) {
+        if (e.r === 'change_fait') { dernierChange = e.t; }
+        else if (dernierChange && ['etat_mouille','mouille','etat_sature','sature'].includes(e.r)) {
+          const h = (e.t - dernierChange) / 3600000;
+          if (h > 0 && h < 10) delais.push(h);
+          dernierChange = null;   // on ne compte que la première miction après le change
+        }
+      }
+      if (delais.length >= 3) {
+        delaiMoy = delais.reduce((a,b)=>a+b,0) / delais.length;
+        // relâchement sous 1h30 = excellent ; au-delà de 4h = forte rétention
+        if (delaiMoy <= 1.5) spontScore = 1;
+        else spontScore = Math.max(0, 1 - (delaiMoy - 1.5) / 2.5);
+      }
+    } catch(e) {}
+
+    // --- Ponctualité : les piliers sont-ils faits à l'heure ? ---
+    let ponctScore = 0, pilFaits = 0, pilTotal = 0;
+    try {
+      for (const d of last7) {
+        const r = await window.storage.get('slotdone:'+d);
+        const done = (r && r.value) ? JSON.parse(r.value) : {};
+        ['c0900','c1600','c2230'].forEach(k => { pilTotal++; if (done[k]) pilFaits++; });
+      }
+      if (pilTotal) ponctScore = pilFaits / pilTotal;
+    } catch(e) {}
+
+    // --- Hydratation : conditionne tout le reste ---
+    // Peu boire fausse le lâcher-prise (moins d'urine ≠ moins de rétention).
+    let hydraScore = 0, bibMoy = 0;
+    try {
+      const bibs = last7.map(d => byDate[d]).filter(Boolean).map(e => e.bib || 0);
+      if (bibs.length >= 3) {
+        bibMoy = bibs.reduce((a,b)=>a+b,0) / bibs.length;
+        hydraScore = Math.min(1, bibMoy / 3);   // objectif : 3 biberons/jour
+      }
+    } catch(e) {}
+
+    // --- Progression : les 7 derniers jours vs les 7 précédents ---
+    let progScore = 0.5, tendanceTxt = 'stable';
+    try {
+      const prev7 = [];
+      for (let i = 13; i >= 7; i--) { const d = new Date(); d.setDate(d.getDate()-i); prev7.push(d.toISOString().slice(0,10)); }
+      let mA = 0, sA = 0;
+      for (const d of prev7) {
+        const list = await getChecks(d);
+        mA += list.filter(c => ['etat_mouille','mouille','etat_sature','sature','reveil_mouille'].includes(c.result)).length;
+        sA += list.filter(c => ['etat_sec','sec','reveil_sec'].includes(c.result)).length;
+      }
+      if (mA + sA >= 5 && mouille + sec >= 5) {
+        const avant = mA / (mA + sA);
+        const apres = mouille / (mouille + sec);
+        if (apres > avant + 0.05) { progScore = 1; tendanceTxt = 'en progrès'; }
+        else if (apres < avant - 0.05) { progScore = 0; tendanceTxt = 'en recul'; }
+        else { progScore = 0.5; tendanceTxt = 'stable'; }
+      }
+    } catch(e) {}
+
     // --- Pénalité entorses : moyenne des 7 derniers jours ---
     let breachPen = 0;
     for (const d of last7) { breachPen += await breachPenalty(d); }
     breachPen = breachPen / last7.length; // moyenne (0-40)
 
-    // --- Score d'habituation : lâcher-prise 45 + régularité 30 + réflexes 25, moins entorses ---
-    // Le lâcher-prise domine : c'est l'objectif réel du programme.
-    const rawScore = letGoScore*45 + regScore*30 + reflexScore*25;
-    const score = Math.max(0, Math.round(rawScore - breachPen));
+    // --- Score d'habituation, 7 critères ---
+    // Lâcher-prise 30 · Spontanéité 15 · Durée de port 15 · Régularité 15
+    // Réflexes 10 · Ponctualité 8 · Hydratation 7 — puis progression en bonus/malus.
+    let rawScore = letGoScore*30 + spontScore*15 + portScore*15 + regScore*15
+                 + reflexScore*10 + ponctScore*8 + hydraScore*7;
+    // la progression module légèrement (±4 pts)
+    rawScore += (progScore - 0.5) * 8;
+    const score = Math.max(0, Math.min(100, Math.round(rawScore - breachPen)));
 
     // --- Palier : bridé par l'ancienneté (l'habituation prend du temps) ---
     // étape par le score (qualité) et étape par les jours écoulés ; on prend la plus basse.
@@ -3280,7 +3418,13 @@
     else if (dayNum >= 8) stageByDay = 1;
     else stageByDay = 0;
 
-    const stage = Math.min(stageByScore, stageByDay);
+    // La peau plafonne le palier : la santé prime sur la performance.
+    let stageBySkin = 3;
+    const surveillerRecent = last7.map(d=>byDate[d]).filter(e => e && e.skin === 'surveiller').length;
+    if (treatRecent > 0) stageBySkin = 1;            // peau à traiter : palier 1 maximum
+    else if (surveillerRecent >= 3) stageBySkin = 2; // peau à surveiller souvent : palier 2 max
+
+    const stage = Math.min(stageByScore, stageByDay, stageBySkin);
     try { window.storage.set('queststage', JSON.stringify(stage)); } catch(e) {}
     const STAGE_LABELS = ['Découverte', "Ça s'installe", 'Automatisme', 'Seconde nature'];
     const STAGE_CLS = ['none', 'mid', 'good', 'good'];
@@ -3294,20 +3438,120 @@
     const greenPct = skinFilled.length ? Math.round(skinFilled.filter(e=>e.skin==='verte').length / skinFilled.length * 100) : 0;
     const treatRecent = last7.map(d=>byDate[d]).filter(e=>e && e.skin==='traiter').length;
 
-    // --- Appréciation ---
+    // --- Appréciation personnalisée : constat + clés concrètes ---
     let appr = [];
-    if (dayNum <= 4) appr.push('<b>Phase de découverte.</b> C\'est normal d\'y penser beaucoup et d\'avoir des ajustements — l\'automatisme vient plutôt vers J5-J7.');
-    else if (stage === 3) appr.push('<b>Le port est devenu une seconde nature.</b> Régularité tenue et réflexes installés : l\'habituation est là.');
-    else if (stage === 2) appr.push('<b>L\'automatisme s\'installe.</b> Tu penses de moins en moins au cadre, c\'est exactement la trajectoire recherchée.');
-    else appr.push('<b>Le régime commence à s\'ancrer.</b> Continue à remplir chaque jour, c\'est la régularité qui fait basculer vers l\'automatisme.');
 
-    if (streak >= 3) appr.push('Série de <b>'+streak+' jours consécutifs</b> suivis.');
-    if (recent.rate !== null && early.rate !== null && recent.rate < early.rate && dates.length >= 5)
-      appr.push('Les situations à corriger <b>diminuent</b> vs le début — les réflexes rentrent.');
-    else if (recent.flags > 0)
-      appr.push(recent.flags + ' situation'+(recent.flags>1?'s':'')+' à corriger cette semaine : regarde à quels moments ça décroche.');
-    if (treatRecent > 0) appr.push('⚠️ Peau <b>à traiter</b> récemment : côté santé, resserre changes et crème — indépendamment de l\'habituation.');
-    if (breachPen >= 1) appr.push('📋 Entorses déclarées récemment : elles pèsent sur ta note (−'+Math.round(breachPen)+' pts en moyenne). L\'honnêteté du suivi compte autant que la performance.');
+    // 1) Où en es-tu (constat honnête)
+    if (dayNum <= 4) {
+      appr.push('<b>Phase de découverte.</b> Normal d\'y penser beaucoup : l\'habituation ne se mesure vraiment qu\'à partir de J8.');
+    } else if (stage === 3) {
+      appr.push('<b>Seconde nature atteinte.</b> Lâcher-prise installé, cadre tenu, réflexes acquis. C\'est exactement le but du programme.');
+    } else if (stage === 2) {
+      appr.push('<b>L\'automatisme est là.</b> Tu relâches sans y penser et tu tiens ton rythme.');
+    } else if (stage === 1) {
+      appr.push('<b>Ça commence à s\'ancrer.</b> Les bases sont posées, il reste à consolider.');
+    } else {
+      appr.push('<b>Encore au début du chemin.</b> Ne te décourage pas : c\'est le score qui doit rattraper la réalité, pas l\'inverse.');
+    }
+
+    // 2) Identifier LE point faible dominant et donner la clé correspondante
+    const composantes = [
+      { k:'letgo', v: letGoScore,  poids: 30, nom:'le lâcher-prise' },
+      { k:'spont', v: spontScore,  poids: 15, nom:'la spontanéité' },
+      { k:'port',  v: portScore,   poids: 15, nom:'la durée de port' },
+      { k:'reg',   v: regScore,    poids: 15, nom:'la régularité' },
+      { k:'refl',  v: reflexScore, poids: 10, nom:'les réflexes' },
+      { k:'ponct', v: ponctScore,  poids: 8,  nom:'la ponctualité' },
+      { k:'hydra', v: hydraScore,  poids: 7,  nom:'l\'hydratation' }
+    ];
+    // manque à gagner en points pour chaque composante
+    composantes.forEach(c => c.perte = (1 - c.v) * c.poids);
+    composantes.sort((a,b) => b.perte - a.perte);
+    const faible = composantes[0];
+    // publie le diagnostic : les missions s'en serviront pour cibler ta progression
+    try {
+      await window.storage.set('diagnostic', JSON.stringify({
+        date: todayStr(),
+        faibles: composantes.filter(c => c.perte >= 4).map(c => c.k),
+        scores: { letgo:letGoScore, spont:spontScore, port:portScore, reg:regScore,
+                  refl:reflexScore, ponct:ponctScore, hydra:hydraScore },
+        stage
+      }));
+    } catch(e) {}
+
+    if (faible.perte >= 6) {
+      appr.push('<br><br>🎯 <b>Ton principal levier : ' + faible.nom + '</b> (−' + Math.round(faible.perte) + ' pts).');
+      if (faible.k === 'letgo') {
+        const partSec = (sec + mouille) ? Math.round(sec / (sec + mouille) * 100) : 0;
+        appr.push('Sur la semaine, <b>' + partSec + '% de tes couches étaient encore sèches</b> au moment du check — c\'est le réflexe de retenue qui persiste.');
+        appr.push('<br>→ <b>Ne va plus aux toilettes pour uriner</b>, même quand l\'envie est nette : c\'est le cœur du travail.');
+        appr.push('<br>→ Quand l\'envie vient, <b>respire et détends le ventre</b> au lieu de te crisper. Le relâchement est physique avant d\'être mental.');
+        if (nuitsSeches > nuitsMouillees) {
+          appr.push('<br>→ Tes <b>nuits restent sèches</b> : bois normalement jusqu\'à 20h, et couche-toi sans "vider" avant — laisse la nuit faire son travail.');
+        }
+      } else if (faible.k === 'reg') {
+        if (fillRate < 0.85) {
+          appr.push('Tu as rempli <b>' + Math.round(fillRate*100) + '% des jours</b> depuis le début : les trous pèsent lourd.');
+          appr.push('<br>→ <b>Remplis ton bilan du soir chaque jour</b>, même une journée moyenne. Un jour non renseigné compte comme un jour perdu.');
+        }
+        if (streak < 7) {
+          appr.push('<br>→ Ta série est de <b>' + streak + ' jour(s)</b>. Vise 14 jours d\'affilée : c\'est là que le score de régularité sature.');
+        }
+      } else if (faible.k === 'refl') {
+        if (recent.tot < 5) {
+          appr.push('Tu n\'as fait que <b>' + recent.tot + ' vérification(s)</b> cette semaine — sans données, rien ne peut être validé.');
+          appr.push('<br>→ <b>Fais tes checks aux créneaux prévus</b> (11h30, 13h30, 19h30).');
+        } else {
+          appr.push('<b>' + recent.flags + ' anomalie(s)</b> sur ' + recent.tot + ' vérifications.');
+          appr.push('<br>→ Les anomalies coûtent double. Regarde <b>à quels moments ça décroche</b>.');
+        }
+      } else if (faible.k === 'spont') {
+        appr.push('Tu mets en moyenne <b>' + delaiMoy.toFixed(1) + 'h</b> avant de mouiller une couche fraîche — le réflexe de retenue tient encore.');
+        appr.push('<br>→ Après un change, <b>ne cherche pas à "tenir"</b>. Laisse venir dès que ça se présente.');
+        appr.push('<br>→ Bois un verre juste après le change : ça aide le corps à repartir naturellement.');
+      } else if (faible.k === 'port') {
+        if (dureeMoy > 0 && dureeMoy < 2.5) {
+          appr.push('Tu changes toutes les <b>' + dureeMoy.toFixed(1) + 'h</b> en moyenne : c\'est court, signe que tu y penses beaucoup.');
+          appr.push('<br>→ <b>Vise 3 à 4h entre deux changes.</b> Garder sans y penser, c\'est ça l\'habituation.');
+        } else if (dureeMoy > 5) {
+          appr.push('Tes ports durent <b>' + dureeMoy.toFixed(1) + 'h</b> en moyenne : c\'est trop long pour ta peau.');
+          appr.push('<br>→ <b>Resserre à 4h maximum.</b> Tenir longtemps n\'est pas un objectif, le confort sain l\'est.');
+        } else {
+          appr.push('Pas encore assez de changes enregistrés pour évaluer ta durée de port.');
+          appr.push('<br>→ <b>Valide tes changes dans l\'appli</b> : c\'est ce qui alimente ce critère.');
+        }
+      } else if (faible.k === 'ponct') {
+        appr.push('Tu as validé <b>' + pilFaits + ' piliers sur ' + pilTotal + '</b> cette semaine.');
+        appr.push('<br>→ <b>Les 3 changes obligatoires</b> (9h, 16h, 22h30) sont la colonne vertébrale du programme. Mets des alarmes si besoin.');
+      } else if (faible.k === 'hydra') {
+        appr.push('Tu bois <b>' + bibMoy.toFixed(1) + ' biberon(s)</b> par jour en moyenne, pour un objectif de 3.');
+        appr.push('<br>→ <b>Bois davantage</b> : peu boire fausse tout le reste. Moins d\'urine ne veut pas dire plus de lâcher-prise.');
+      }
+    } else if (score >= 88) {
+      appr.push('<br><br>✨ <b>Aucun point faible marqué.</b> Tiens ce niveau, c\'est déjà l\'objectif.');
+    }
+
+    // 2bis) Tendance sur deux semaines
+    if (tendanceTxt === 'en progrès') appr.push('<br><br>📈 Ton lâcher-prise est <b>en progrès</b> par rapport à la semaine précédente.');
+    else if (tendanceTxt === 'en recul') appr.push('<br><br>📉 Ton lâcher-prise <b>recule</b> par rapport à la semaine précédente — regarde ce qui a changé.');
+
+    // 2ter) Plafond santé
+    if (stageBySkin < stageByScore && stageBySkin < stageByDay) {
+      appr.push('<br><br>🩹 <b>Ton palier est plafonné par l\'état de ta peau.</b> Tant qu\'elle n\'est pas au vert, la progression est bloquée — et c\'est normal : la santé passe avant le score.');
+    }
+
+    // 3) Ce qui est acquis (renforcer le positif)
+    const forts = composantes.filter(c => c.v >= 0.8).map(c => c.nom);
+    if (forts.length) appr.push('<br><br>✅ Acquis : <b>' + forts.join(' et ') + '</b>.');
+    if (streak >= 7) appr.push(' Série de <b>' + streak + ' jours</b> consécutifs.');
+
+    // 4) Alertes prioritaires (santé d'abord)
+    if (treatRecent > 0) {
+      appr.push('<br><br>⚠️ <b>Peau à traiter récemment.</b> Priorité absolue, avant tout objectif de score : resserre les changes, crème généreusement, et laisse respirer si besoin.');
+    }
+    if (breachPen >= 3) {
+      appr.push('<br><br>📋 Les entorses te coûtent <b>−' + Math.round(breachPen) + ' pts</b> en moyenne. Déclarer reste la bonne attitude : l\'honnêteté du suivi vaut mieux qu\'un score flatteur.');
+    }
 
     setDash(cls, score+'%', label, since,
       score+'%', 'Habituation',
@@ -3443,7 +3687,7 @@
   ];
 
   const RESULT_LABEL = {
-    ok: 'en place', adj: 'réajustée', miss: 'sans couche', fixed: 'remise en couche',
+    ok: 'en place', adj: 'réajustée', miss: 'sans couche', fixed: 'couche remise',
     sec: 'sèche', mouille: 'mouillée', sature: 'saturée',
     tet_ok: 'tétine en bouche', tet_prise: 'tétine reprise', tet_miss: 'tétine absente'
   };
@@ -4710,7 +4954,7 @@
       }
       foxyPopShow('Te revoilà ! Courte absence, on reprend le fil tranquillement. Tu es toujours en couche ?', 'joy', [
         { label:'🤗 Oui, on replonge !', onClick: async () => { foxyPopHide(); if (voiceMode !== 'foxy') { await setVoiceMode('foxy'); } else { try { await imRunMoment(); } catch(e){} } }},
-        { label:'👕 Non, je dois me remettre en couche', onClick: async () => {
+        { label:'👕 Non, je dois remettre ma couche', onClick: async () => {
           foxyPopHide();
           if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e){} }
           try { await runReentryProtocol('court'); } catch(e) {}
@@ -4764,7 +5008,7 @@
     foxyPopShow(msg1, 'concern', [
       { label:'Je t\'écoute...', onClick: async () => {
         foxyPopShow(msg2, niveau === 'tres_long' ? 'surprised' : 'concern', [
-          { label:'🦊 Comment je reprends ?', onClick: async () => {
+          { label:'🦊 Qu\'est-ce que je fais ?', onClick: async () => {
             foxyPopHide();
             if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e){} }
             try { await runReentryProtocol(niveau); } catch(e) {}
@@ -4775,11 +5019,42 @@
   }
 
   /* ============================================================
-     PROTOCOLE DE REMISE EN COUCHE — après une pause, tu n'es PAS
-     en couche : Foxy explique la marche à suivre étape par étape,
-     tire les tenues du jour et te remet dans le programme.
+     REMETTRE SA COUCHE — après une pause, tu ne la portes plus :
+     Foxy t'explique la marche à suivre étape par étape, tire tes
+     tenues du jour et te remet dans le programme.
      ============================================================ */
+  // Foxy signale que la couche n'a jamais été remise jusqu'au bout
+  function showReentryReminder(heures, niveau) {
+    const dur = heures < 1 ? 'moins d\'une heure'
+              : heures < 24 ? Math.round(heures) + ' heures'
+              : Math.round(heures/24) + ' jour(s)';
+    foxyPopShow(
+      broOn()
+        ? 'Attends. Tu as commencé à remettre ta couche il y a ' + dur + ', et tu n\'es jamais allé au bout. Tu n\'as donc rien sur toi. Ça, ça ne va pas.'
+        : 'Hé... 🦊 Tu avais commencé à remettre ta couche il y a ' + dur + ', mais on n\'a jamais fini ! Du coup tu n\'as rien sur toi, et ton suivi est faussé.',
+      'concern',
+      [
+        { label:'🦊 Je la remets maintenant', onClick: async () => {
+          foxyPopHide();
+          if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e){} }
+          try { await runReentryProtocol(niveau || 'moyen'); } catch(e) {}
+        }},
+        { soft:true, label:'J\'ai déjà ma couche', onClick: async () => {
+          foxyPopHide();
+          try { await window.storage.delete('reentry:pending'); } catch(e) {}
+          try { await finishChange(); } catch(e) {}
+          if (voiceMode === 'foxy') {
+            try { await imSay('Ah, d\'accord ! Je note ton change alors. Comme ça ton suivi repart juste. 🦊', 850, 'happy'); } catch(e) {}
+          }
+        }},
+        { soft:true, label:'Plus tard', onClick: () => foxyPopHide() }
+      ]
+    );
+  }
+
   async function runReentryProtocol(niveau) {
+    // on note que la couche est en train d'être remise, mais pas encore confirmée
+    try { await window.storage.set('reentry:pending', JSON.stringify({ start: Date.now(), niveau })); } catch(e) {}
     imClear();
     const now = new Date();
     const h = now.getHours();
@@ -4797,8 +5072,8 @@
     ];
     for (const a of ACCUEIL) { await imSay(a, 950, broOn() ? 'calm' : 'comfort'); }
     await imSay(broOn()
-      ? 'Maintenant, on te remet dans ton état normal. Tu n\'as pas porté de couche pendant ton absence — on repart du début.'
-      : 'Bon, on va te remettre bien comme il faut ! Tu n\'as pas porté de couche pendant ta pause, alors on repart du début. Je t\'explique tout, suis-moi. 🦊', 1000, 'calm');
+      ? 'Maintenant tu vas remettre ta couche. Tu ne l\'avais pas pendant ton absence — on repart du début.'
+      : 'Allez, on va te remettre bien comme il faut ! Tu n\'avais pas ta couche pendant ta pause, alors on repart du début. Je t\'explique tout, viens. 🦊', 1000, 'calm');
 
     // 1) tirage automatique des tenues
     let tenues = null;
@@ -4843,10 +5118,10 @@
     await imSay('Voilà la marche à suivre, dans l\'ordre :', 850, 'teach');
     const etapes = [
       '1. Va à ton espace de change et prépare tout : couche, crème, lingettes.',
-      '2. Déshabille-toi complètement. On repart de zéro.',
+      '2. Enlève ce que tu portes. On repart de zéro.',
       '3. Vérifie ta peau avant de commencer — elle doit être propre et sèche.',
       '4. Applique la crème barrière, généreusement.',
-      '5. Mets ta couche en suivant le guide des 4 languettes.',
+      '5. Mets ta couche bien en place, en suivant le guide des 4 languettes.',
       '6. Enfile la tenue que je t\'ai tirée.',
       braceletActif ? '7. Remets ton bracelet au poignet — sans lui, l\'appli restera verrouillée.' : null,
       access.length ? '8. Reprends tes accessoires : ' + access.join(', ') + '.' : null,
@@ -4863,9 +5138,11 @@
     }
 
     imSetActions([
-      { label:'🦊 C\'est fait, je suis en couche', onClick: async () => {
-        imAddMe('C\'est fait, je suis en couche.');
-        // enregistre la remise en couche comme un change effectif
+      { label:'🦊 Ça y est, j\'ai remis ma couche', onClick: async () => {
+        imAddMe('Ça y est, j\'ai remis ma couche.');
+        // protocole mené à son terme
+        try { await window.storage.delete('reentry:pending'); } catch(e) {}
+        // on compte ça comme un change effectif
         try { await finishChange(); } catch(e) {}
         await imSay(broOn()
           ? 'Bien. Te revoilà où tu dois être, comme il faut. Maintenant tu ne ressors plus du cadre — laisse-toi porter, c\'est tout ce que tu as à faire.'
@@ -5237,6 +5514,37 @@
         case 'scan': { const n = checks.filter(c => c.result === 'change_fait' && c.type && c.type.indexOf('preuve')>=0).length + cnt('change_fait_scan'); return { done:n>0, progress:n?1:0, total:1 }; }
         case 'ritual': { const q = await getQuest(); return { done: q.ritualDoneDate === date, progress: q.ritualDoneDate===date?1:0, total:1 }; }
         case 'nolockemg': { const n = cnt('lock_emergency'); return { done:n===0, progress:n===0?1:0, total:1 }; }
+        case 'holdTime': {
+          // au moins un intervalle entre changes >= target heures
+          const st = checks.filter(c => c.result === 'change_fait' && c.t).map(c => new Date(c.t).getTime()).sort((a,b)=>a-b);
+          let best = 0;
+          for (let i=1;i<st.length;i++) best = Math.max(best, (st[i]-st[i-1])/3600000);
+          return { done: best >= m.target, progress: Math.min(m.target, Math.round(best*10)/10), total:m.target };
+        }
+        case 'noQuickChange': {
+          const st = checks.filter(c => c.result === 'change_fait' && c.t).map(c => new Date(c.t).getTime()).sort((a,b)=>a-b);
+          let court = 0;
+          for (let i=1;i<st.length;i++) if ((st[i]-st[i-1])/3600000 < 2) court++;
+          return { done: court === 0 && st.length > 0, progress: court === 0 ? 1 : 0, total:1 };
+        }
+        case 'quickWet': {
+          // une miction survenue moins de target heures après un change
+          const evts = checks.filter(c => c.t).map(c => ({t:new Date(c.t).getTime(), r:c.result})).sort((a,b)=>a.t-b.t);
+          let ok = false, dernier = null;
+          for (const e of evts) {
+            if (e.r === 'change_fait') dernier = e.t;
+            else if (dernier && ['etat_mouille','mouille','etat_sature','sature'].includes(e.r)) {
+              if ((e.t - dernier)/3600000 <= m.target) ok = true;
+              dernier = null;
+            }
+          }
+          return { done: ok, progress: ok?1:0, total:1 };
+        }
+        case 'noDrySlot': {
+          const secs = checks.filter(c => ['etat_sec','sec','reveil_sec'].includes(c.result)).length;
+          const tot = checks.filter(c => ['etat_sec','sec','reveil_sec','etat_mouille','mouille','etat_sature','sature','reveil_mouille'].includes(c.result)).length;
+          return { done: tot >= 2 && secs === 0, progress: (tot>=2 && secs===0)?1:0, total:1 };
+        }
       }
     } catch(e) {}
     return { done:false, progress:0, total:1 };
@@ -5382,11 +5690,17 @@
     for (const id of (st.daily||[])) {
       const m = MS.dailyById(id); if (!m) continue;
       const ev = await evalDaily(m);
+      let ciblee = false;
+      try {
+        const diag = await MS.getDiagnostic();
+        ciblee = !!(diag && m.cible && (diag.faibles||[]).includes(m.cible));
+      } catch(e) {}
       const div = document.createElement('div');
       div.style.cssText = 'border-top:1px solid var(--line);padding:9px 0';
       div.innerHTML = '<div style="display:flex;align-items:center;gap:8px">'+
         '<span style="font-size:17px">'+(ev.done?'✅':'⬜')+'</span>'+
-        '<div style="flex:1"><div style="font-size:13.5px;font-weight:800;color:'+(ev.done?'var(--green)':'var(--ink)')+'">'+m.name+'</div>'+
+        '<div style="flex:1"><div style="font-size:13.5px;font-weight:800;color:'+(ev.done?'var(--green)':'var(--ink)')+'">'+m.name+
+        (ciblee ? ' <span style="font-size:10px;font-weight:800;background:#f0d9c0;color:#a85a2a;padding:1px 6px;border-radius:20px;vertical-align:middle">🎯 ciblée</span>' : '')+'</div>'+
         '<div style="font-size:12px;font-weight:600;color:var(--muted)">'+m.desc+'</div></div>'+
         '<span style="font-size:12px;font-weight:800;color:var(--muted)">'+ev.progress+'/'+ev.total+'</span></div>'+
         (ev.total>1 ? missBar(ev.progress, ev.total) : '');
@@ -6241,6 +6555,16 @@
         alreadyDone = !!done[dueSlot.key];
       } catch(e) {}
     }
+
+    // --- Détection : couche commencée à remettre, mais jamais terminée ---
+    try {
+      const r = await window.storage.get('reentry:pending');
+      if (r && r.value) {
+        const p = JSON.parse(r.value);
+        const heures = (Date.now() - p.start) / 3600000;
+        setTimeout(() => showReentryReminder(heures, p.niveau), 900);
+      }
+    } catch(e) {}
 
     // premier lancement : guide d'installation
     let obLance = false;
