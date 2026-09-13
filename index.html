@@ -21,6 +21,7 @@
       <button class="settings-toggle-btn" id="toggleVoice">🦊 Mode Foxy</button>
       <button class="settings-toggle-btn" id="openQuest">🗺️ Notre aventure</button>
       <button class="settings-toggle-btn" id="openMissions">🎯 Missions</button>
+      <button class="settings-toggle-btn" id="openBadges">🏆 Hauts faits</button>
       <button class="settings-toggle-btn" id="pauseBtn">⏸️ Pause</button>
     </div>
   </div>
@@ -152,6 +153,13 @@
     </div>
   </div>
 
+  <div class="card" id="badgesCard" style="display:none">
+    <h2>🏆 Hauts faits</h2>
+    <div class="sub">Ta collection de récompenses, à débloquer tout au long de ton habituation.</div>
+    <div id="badgesProg" style="margin:12px 0"></div>
+    <div id="badgesList"></div>
+  </div>
+
   <div class="card" id="missionsCard" style="display:none">
     <h2>🎯 Missions</h2>
     <div class="sub">Des objectifs de fond sur plusieurs jours, et des défis renouvelés chaque matin.</div>
@@ -177,6 +185,13 @@
     <h2>👕 Garde-robe &amp; stock</h2>
     <div class="sub">Personnalise tes vêtements et accessoires par catégorie, et gère ton stock de couches par modèle.</div>
     <div id="wardrobeCats"></div>
+
+    <div class="set-cat" style="margin-top:16px;padding-top:12px;border-top:2px solid var(--line)">
+      <h4>🏷️ QR des tenues</h4>
+      <div class="sub">Un QR par vêtement : colle-le à l'intérieur (col ou ceinture) et scanne-le en t'habillant. Foxy vérifie que tu portes bien la tenue tirée.</div>
+      <button class="settings-toggle-btn" id="outfitQrGen" style="width:100%;margin-top:8px">🏷️ Générer les QR de mes tenues</button>
+      <div id="outfitQrList" style="display:flex;flex-wrap:wrap;gap:14px;margin-top:12px"></div>
+    </div>
 
     <div class="set-cat" style="margin-top:16px;padding-top:12px;border-top:2px solid var(--line)">
       <h4>🍼 Stock de couches</h4>
@@ -263,6 +278,12 @@
         <div class="switch" id="braceletReqSwitch"><div class="knob"></div></div>
       </div>
     </div>
+    <div class="set-cat"><h4>👕 QR de mes vêtements</h4>
+      <div class="sub">Un QR par tenue, à coller ou coudre à l'intérieur (col, ceinture). Scanne-le à chaque fois que tu t'habilles : Foxy saura ce que tu portes.</div>
+      <button class="settings-toggle-btn" id="qrClothesGen">👕 Générer les QR de mes tenues</button>
+      <div id="qrClothesList" style="margin-top:10px"></div>
+    </div>
+
     <div class="set-cat"><h4>Générer mes QR codes</h4>
       <div class="sub">Génère, puis prends une photo ou une capture d'écran pour les imprimer/afficher.</div>
       <div id="qrGenList"></div>
@@ -421,6 +442,28 @@
     </div>
   </div>
 
+  <div class="card tabcard" id="discCard" data-tab="maintenant" style="display:none;border:2px solid #c86b3a;background:#FBF0E8">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="font-size:30px">🔒</div>
+      <div style="flex:1">
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:17px;color:#a8543b">Session de discipline</div>
+        <div id="discTxt" style="font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.45;margin-top:2px"></div>
+        <div id="discProg" style="font-size:12px;font-weight:800;color:#a8543b;margin-top:5px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card tabcard" id="dayMoodCard" data-tab="maintenant">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div id="dmEmoji" style="font-size:34px">🌱</div>
+      <div style="flex:1">
+        <div id="dmNom" style="font-family:'Fraunces',serif;font-weight:600;font-size:18px;color:#5a4326"></div>
+        <div id="dmIntro" style="font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.45;margin-top:2px"></div>
+        <div id="dmAct" style="font-size:12px;font-weight:700;color:var(--muted);margin-top:5px"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="card tabcard" id="sinceCard" data-tab="maintenant">
     <h2>Ta couche du moment</h2>
     <div class="since-card">
@@ -523,6 +566,12 @@
         <div class="sup-note" id="supOnce" style="display:none;font-style:italic">🔒 Un seul tirage par jour — l'équipement du jour est fixé.</div>
       </div>
     </div>
+  </div>
+
+  <div class="card tabcard" id="autoBreachCard" data-tab="suivi" style="display:none">
+    <h2>🔍 Entorses détectées</h2>
+    <div class="sub">Foxy a repéré ces écarts dans tes données. Confirme ceux qui sont justifiés, écarte les autres.</div>
+    <div id="autoBreachList"></div>
   </div>
 
   <div class="card breach-card tabcard" id="breachCard" data-tab="suivi">
@@ -686,4 +735,6 @@
 <script src="lock.js"></script>
 <script src="wardrobe.js"></script>
 <script src="missions.js"></script>
+<script src="badges.js"></script>
+<script src="outfit-scan.js"></script>
 <script src="app.js"></script>

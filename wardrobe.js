@@ -216,7 +216,38 @@
     return out;
   }
 
+  // --- Identifiant stable d'un vêtement (sert de clé pour son QR) ---
+  function itemId(cat, name) {
+    let h = 0;
+    const str = cat + '|' + name;
+    for (let i = 0; i < str.length; i++) { h = ((h << 5) - h + str.charCodeAt(i)) | 0; }
+    return 'wb' + Math.abs(h).toString(36);
+  }
+  // Retrouve un vêtement à partir de son identifiant
+  async function findByItemId(id) {
+    const w = await getWardrobe();
+    for (const c of CATEGORIES) {
+      for (const n of (w[c.id] || [])) {
+        if (itemId(c.id, n) === id) return { cat: c.id, name: n, label: c.label };
+      }
+    }
+    return null;
+  }
+
+  // --- Journal des tenues portées (scans) ---
+  async function getWornLog(dateKey) {
+    try { const r = await window.storage.get('worn:' + dateKey); if (r && r.value) return JSON.parse(r.value); } catch (e) {}
+    return [];
+  }
+  async function logWorn(dateKey, cat, name) {
+    const list = await getWornLog(dateKey);
+    list.push({ t: new Date().toISOString(), cat, name });
+    try { await window.storage.set('worn:' + dateKey, JSON.stringify(list)); } catch (e) {}
+    return list;
+  }
+
   window.HabitrainWardrobe = {
+    itemId, findByItemId, getWornLog, logWorn,
     CATEGORIES, getWardrobe, saveWardrobe, addItem, renameItem, removeItem,
     getStock, saveStock, addModel, updateModel, removeModel,
     modelsFor, consume, lowStock, getThresholds, setThresholds, totalFor, categoryStatus

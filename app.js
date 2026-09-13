@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '13.5';
+  const APP_VERSION = '14.3';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -1040,7 +1040,7 @@
           await imOfferHelp(m);
         }}
       ];
-      if (!hardMode) {
+      if (!hardMode && !discActive()) {
         ritualBtns.push({ soft:true, label:'Une autre fois', onClick: async () => {
           imAddMe('Une autre fois.');
           await imSay('Pas de souci, à ton rythme. On est deux sur la même route, y\'a pas de pression.', 700, 'neutral');
@@ -1070,6 +1070,25 @@
         await startIntrospection(m);
         return;
       }
+      // 4zéro) Foxy annonce le caractère de la journée
+      try {
+        if (m.key === 'reveil' || m.key === 'matin') {
+          let dmDate = null;
+          try { const r = await window.storage.get('dmannounce:last'); if (r && r.value) dmDate = JSON.parse(r.value); } catch(e) {}
+          if (dmDate !== todayStr()) {
+            try { await window.storage.set('dmannounce:last', JSON.stringify(todayStr())); } catch(e) {}
+            const d = dm();
+            await imSay(d.emoji + ' <b>' + d.nom + '</b>', 850, d.surprise ? 'playful' : 'happy');
+            await imSay(d.intro, 950, d.surprise ? 'joy' : mood().expr);
+            const act = pick(d.activites);
+            await imSay(broOn()
+              ? 'Pour aujourd\'hui, je te propose ça : ' + act + '. Tu verras, ça te fera du bien.'
+              : 'Idée du jour : ' + act + ' ! Ça te tente ? 🦊', 900, 'cheer');
+            await imOfferHelp(m);
+            return;
+          }
+        }
+      } catch(e) {}
       // 4pentes) Foxy annonce les missions du jour
       try {
         if (window.HabitrainMissions && (m.key === 'reveil' || m.key === 'matin')) {
@@ -1336,6 +1355,11 @@
       ...(isFoxy ? [{ label:'💬 Foxy, on discute ?', onClick: async () => {
         imAddMe('Foxy, on discute ?');
         await startIntrospection(m);
+      }}] : []),
+      ...(isFoxy ? [{ label:'👕 Je viens de m\'habiller', onClick: async () => {
+        imAddMe('Je viens de m\'habiller.');
+        await imSay(broOn() ? 'Montre-moi. Scanne l\'étiquette de ta tenue.' : 'Fais voir ! Scanne le QR de ta tenue. 🦊', 800, 'curious');
+        try { await scanTenue(); } catch(e) {}
       }}] : []),
       ...(isFoxy ? [{ label:'✍️ Écrire dans mon carnet', onClick: async () => {
         imAddMe('Je veux écrire dans mon carnet.');
@@ -2634,6 +2658,8 @@
     await renderWear();
     await renderSince();
     renderTimeline();
+    renderDayMood();
+    renderDiscipline();
   }
 
   // Depuis combien de temps la couche actuelle est portée (dernier change enregistré)
@@ -2709,7 +2735,7 @@
     if (prev != null) {
       const since = nowMin - prev.m;
       // vigilance renforcée (après une pause longue) → tolérance réduite de moitié
-      let tol = hardMode ? HARD.overdueMin : 15;
+      let tol = (hardMode || discActive()) ? HARD.overdueMin : 15;
       try {
         const rv = await window.storage.get('vigilance:until');
         if (rv && rv.value && Date.now() < JSON.parse(rv.value)) tol = Math.max(2, Math.round(tol/2));
@@ -2922,6 +2948,7 @@
           const key = 'daily_' + todayStr();
           if (toutes && !seen[key]) {
             seen[key] = true;
+            try { await flagBadge('perfectDay'); } catch(e) {}
             await showLocalNotif('✅ Journée parfaite !',
               broOn() ? 'Toutes tes missions du jour sont faites. C\'est ce que j\'attendais de toi.'
                       : 'Toutes tes missions du jour sont faites ! T\'es en feu aujourd\'hui. 🎯🦊',
@@ -3134,7 +3161,14 @@
     { id:'pause_moyenne',     n:'Pause de plusieurs heures',            grav:'legere',  w:3 },
     { id:'pause_longue',      n:'Pause de 1 à 3 jours',                 grav:'moyenne', w:7 },
     { id:'pause_tres_longue', n:'Désertion du programme (+3 jours)',    grav:'grave',   w:12 },
-    { id:'lock_emergency',    n:'Ouverture de serrure en urgence',       grav:'legere',  w:3 }
+    { id:'lock_emergency',    n:'Ouverture de serrure en urgence',       grav:'legere',  w:3 },
+    { id:'b_pilier_c0900',    n:'Change du matin manqué',                grav:'moyenne', w:7 },
+    { id:'b_pilier_c1600',    n:'Change de sieste manqué',               grav:'moyenne', w:7 },
+    { id:'b_pilier_c2230',    n:'Change de nuit manqué',                 grav:'moyenne', w:7 },
+    { id:'b_portlong',        n:'Port trop long',                        grav:'moyenne', w:7 },
+    { id:'b_sature',          n:'Couche saturée gardée',                 grav:'grave',   w:12 },
+    { id:'b_tenue',           n:'Aucune tenue scannée',                  grav:'legere',  w:3 },
+    { id:'b_urgence',         n:'Serrure ouverte en urgence',            grav:'legere',  w:3 }
   ];
   const GRAV_LABEL = { grave:'Grave', moyenne:'Moyenne', legere:'Légère' };
 
@@ -3426,6 +3460,7 @@
 
     const stage = Math.min(stageByScore, stageByDay, stageBySkin);
     try { window.storage.set('queststage', JSON.stringify(stage)); } catch(e) {}
+    try { window.storage.set('lastscore', JSON.stringify(score)); } catch(e) {}
     const STAGE_LABELS = ['Découverte', "Ça s'installe", 'Automatisme', 'Seconde nature'];
     const STAGE_CLS = ['none', 'mid', 'good', 'good'];
     const label = STAGE_LABELS[stage];
@@ -4089,6 +4124,114 @@
 
   /* ---- Guide d'activité : le déroulé de la journée type ---- */
   // Chaque bloc : minute de début (depuis minuit), icône, activité, détail.
+  /* ============================================================
+     CARACTÈRE DES JOURNÉES
+     Le cadre ne bouge JAMAIS (piliers 9h/16h/22h30, checks,
+     hydratation). Seuls l'ambiance, la durée des temps calmes et
+     les activités suggérées changent selon le jour.
+     ============================================================ */
+  const DAY_MOODS = {
+    1: { nom:'Lundi reprise', emoji:'🌱',
+         blocMatin:'Remise en route douce', detMatin:'On reprend tranquillement : rangement léger, organisation de la semaine.',
+         blocAprem:'Bloc tranquille', detAprem:'Rien d\'intense. Occupe-toi calmement, sans forcer.',
+         intro:'On repart en douceur. Pas de pression, on se remet dans le rythme tranquillement.',
+         regression:'courte', sieste:'normale',
+         activites:['ranger un peu ton espace','écouter de la musique calme','préparer ta semaine','feuilleter un livre'] },
+    2: { nom:'Mardi actif', emoji:'⚡',
+         blocMatin:'Bloc énergie', detMatin:'Le vrai pic de la semaine : sortie, marche, sport léger, tâches qui demandent du jus.',
+         blocAprem:'Bloc actif', detAprem:'On enchaîne : courses, ménage, ou une activité qui bouge.',
+         intro:'Journée énergique ! On bouge, on sort, on profite du pic d\'énergie.',
+         regression:'courte', sieste:'courte',
+         activites:['une vraie sortie','du sport léger','une tâche que tu repousses','marcher dehors'] },
+    3: { nom:'Mercredi cocon', emoji:'🧸',
+         blocMatin:'Bloc cocon', detMatin:'Sous la couverture, au calme. Dessin animé, doudou, rien d\'exigeant.',
+         blocAprem:'Deuxième cocon', detAprem:'Encore un temps blotti. C\'est la journée pour ça.',
+         intro:'Aujourd\'hui on se blottit. Grosse sieste, deux fenêtres pour se laisser aller.',
+         regression:'longue', sieste:'longue',
+         activites:['rester sous la couverture','un dessin animé','câlins avec ton doudou','ne rien faire, vraiment'] },
+    4: { nom:'Jeudi cadré', emoji:'🎯',
+         blocMatin:'Bloc appliqué', detMatin:'Activité manuelle, rangement de ton matériel, quelque chose de soigné.',
+         blocAprem:'Bloc concentré', detAprem:'Un jeu de patience, un inventaire, une tâche précise.',
+         intro:'Journée rythmée, on tient le cadre au cordeau. J\'attends le meilleur de toi.',
+         regression:'normale', sieste:'normale',
+         activites:['une activité manuelle','ranger ton matériel','faire l\'inventaire de ton stock','un jeu de patience'] },
+    5: { nom:'Vendredi détente', emoji:'🌙',
+         blocMatin:'Bloc léger', detMatin:'On lève le pied. Musique douce, choses agréables, rien d\'obligatoire.',
+         blocAprem:'Glissement vers le week-end', detAprem:'Bain tiède, préparatifs du week-end, plaisir simple.',
+         intro:'On relâche progressivement. La semaine se termine, laisse-toi glisser vers le week-end.',
+         regression:'longue', sieste:'normale',
+         activites:['un bain tiède','de la musique douce','préparer ton week-end','te faire plaisir'] },
+    6: { nom:'Samedi lent', emoji:'🐌',
+         blocMatin:'Matinée sans horloge', detMatin:'Traîne autant que tu veux. Aucune obligation avant midi.',
+         blocAprem:'Bloc plaisir', detAprem:'Film sous plaid, cuisine, ou rien du tout. À toi de voir.',
+         intro:'Journée sans horloge dans la tête. Tu peux traîner, prendre ton temps, savourer.',
+         regression:'longue', sieste:'longue',
+         activites:['grasse matinée prolongée','un film sous plaid','cuisiner quelque chose','ne rien planifier'] },
+    0: { nom:'Dimanche doux', emoji:'☁️',
+         blocMatin:'Bloc contemplatif', detMatin:'Écrire, regarder par la fenêtre, laisser la tête se poser.',
+         blocAprem:'Temps pour nous', detAprem:'Un moment rien qu\'à toi — ou avec moi, si tu veux parler.',
+         intro:'Journée contemplative. On prend le temps de se parler, toi et moi.',
+         regression:'longue', sieste:'longue',
+         activites:['écrire dans ton carnet','regarder par la fenêtre','un moment rien qu\'à toi','penser à ta semaine'] }
+  };
+
+  // Journées surprises : tirées occasionnellement, elles remplacent le caractère du jour
+  const SURPRISE_DAYS = [
+    { nom:'Journée pyjama', emoji:'🛏️', proba:0.04,
+      blocMatin:'Bloc pyjama', detMatin:'Tu restes en tenue de nuit. Lit, canapé, rien d\'autre.',
+      blocAprem:'Encore en pyjama', detAprem:'Toujours pas habillé. C\'est la règle du jour.',
+      intro:'Surprise ! Aujourd\'hui tu restes en tenue de nuit toute la journée. Même en journée. C\'est comme ça.',
+      regression:'longue', sieste:'longue',
+      activites:['ne pas t\'habiller','rester au lit le plus possible','siester quand tu veux'] },
+    { nom:'Journée silence', emoji:'🤫', proba:0.025,
+      blocMatin:'Bloc silencieux', detMatin:'Pas d\'écran si tu peux. Lecture, respiration, sons autour de toi.',
+      blocAprem:'Silence continué', detAprem:'On garde le calme. Écoute ce qui se passe en toi.',
+      intro:'Aujourd\'hui, journée calme absolue. Pas d\'écran si tu peux, pas de bruit. Juste toi.',
+      regression:'longue', sieste:'normale',
+      activites:['lire en silence','respirer longuement','écouter les sons autour de toi'] },
+    { nom:'Journée câlins', emoji:'🤗', proba:0.035,
+      blocMatin:'Bloc tendresse', detMatin:'Doudou dans les bras, blottissement obligatoire.',
+      blocAprem:'Encore des câlins', detAprem:'On continue. Je suis d\'humeur affectueuse aujourd\'hui.',
+      intro:'Journée tendresse ! Doudou obligatoire, câlins à volonté. Je suis d\'humeur affectueuse.',
+      regression:'longue', sieste:'longue',
+      activites:['garder ton doudou toute la journée','te blottir souvent','me parler beaucoup'] },
+    { nom:'Journée défi', emoji:'🔥', proba:0.03,
+      blocMatin:'Bloc exigeant', detMatin:'Cadre serré, chaque créneau à l\'heure. Montre-moi ce que tu vaux.',
+      blocAprem:'On ne relâche pas', detAprem:'Tiens le rythme jusqu\'au bout. Aucune entorse.',
+      intro:'Aujourd\'hui je te pousse un peu. Tenue tirée non négociable, cadre serré. Montre-moi ce que tu vaux.',
+      regression:'courte', sieste:'courte',
+      activites:['tenir chaque créneau à l\'heure','aucune entorse','aller au bout de tes missions'] }
+  ];
+
+  let dayMood = null;
+
+  async function loadDayMood() {
+    const date = todayStr();
+    try {
+      const r = await window.storage.get('daymood:'+date);
+      if (r && r.value) { dayMood = JSON.parse(r.value); return; }
+    } catch(e) {}
+    // tirage : une surprise l'emporte parfois sur le caractère du jour
+    let choisi = null;
+    for (const sp of SURPRISE_DAYS) {
+      if (Math.random() < sp.proba) { choisi = Object.assign({ surprise:true }, sp); break; }
+    }
+    if (!choisi) choisi = Object.assign({ surprise:false }, DAY_MOODS[new Date().getDay()]);
+    dayMood = choisi;
+    try { await window.storage.set('daymood:'+date, JSON.stringify(dayMood)); } catch(e) {}
+  }
+  function dm() { return dayMood || DAY_MOODS[new Date().getDay()]; }
+
+  // Durées des temps calmes selon le caractère du jour (le cadre, lui, ne bouge pas)
+  function dureeRegression() {
+    const d = dm();
+    return d.regression === 'longue' ? '1h30 à 2h' : (d.regression === 'courte' ? '30 à 45 min' : '1h environ');
+  }
+  function dureeSieste() {
+    const d = dm();
+    return d.sieste === 'longue' ? '1h30 à 2h' : (d.sieste === 'courte' ? '45 min' : '1h à 1h15');
+  }
+
   const SCHEDULE = [
     { m: 7*60,      ic:'☀️', act:'Réveil en tenue de nuit',        det:'Grenouillère + couche de nuit, grand verre d\'eau, réveil doux.' },
     { m: 8*60,      ic:'🥣', act:'Petit-déjeuner',                 det:'En grenouillère de nuit. Fibres + eau. Tu gardes la couche de nuit.' },
@@ -4111,6 +4254,33 @@
     return h + 'h' + (m ? String(m).padStart(2,'0') : '');
   }
 
+  // Bandeau de session de discipline
+  function renderDiscipline() {
+    const card = document.getElementById('discCard');
+    if (!card) return;
+    if (!discActive()) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    const restant = Math.max(0, Math.ceil((discSession.fin - Date.now()) / 86400000));
+    const t = document.getElementById('discTxt');
+    const p = document.getElementById('discProg');
+    if (t) t.textContent = 'Le cadre est resserré : tous les créneaux sont obligatoires, les tolérances réduites, et je suis plus exigeant. Ça va passer — laisse-toi porter.';
+    if (p) p.textContent = discSession.joursPropres + ' / ' + discSession.objectif + ' journée(s) sans écart · ' + restant + ' jour(s) restant(s)';
+  }
+
+  // Carte du caractère de la journée
+  function renderDayMood() {
+    const d = dm();
+    const e = document.getElementById('dmEmoji');
+    const n = document.getElementById('dmNom');
+    const i = document.getElementById('dmIntro');
+    const a = document.getElementById('dmAct');
+    if (!n) return;
+    if (e) e.textContent = d.emoji;
+    n.textContent = d.nom + (d.surprise ? ' ✨' : '');
+    if (i) i.textContent = d.intro;
+    if (a) a.innerHTML = '💡 Idées du jour : ' + (d.activites || []).slice(0,3).join(' · ');
+  }
+
   // Frise chronologique dynamique de la journée
   function renderTimeline() {
     const box = document.getElementById('timeline');
@@ -4127,6 +4297,16 @@
       const kind = s.kind || '';
       const item = document.createElement('div');
       item.className = 'tl-item ' + kind + (past ? ' past' : '') + (isNow ? ' now' : '');
+      // les blocs d'activité prennent le contenu du jour
+      const d = dm();
+      let acte = s.act, det = s.det;
+      if (s.act === 'Bloc activité') {
+        const matin = s.m < 13*60;
+        acte = (matin ? d.blocMatin : d.blocAprem) || s.act;
+        det  = (matin ? d.detMatin  : d.detAprem)  || s.det;
+      }
+      if (s.act.indexOf('régression') >= 0) det += ' (' + dureeRegression() + ' aujourd\'hui)';
+      if (s.act.indexOf('Sieste') >= 0) det += ' (' + dureeSieste() + ' aujourd\'hui)';
       const dotGlyph = kind === 'pilier' ? '🔑' : (kind === 'check' ? '✓' : '');
       const tag = kind === 'pilier' ? '<span class="tl-tag pilier">Pilier</span>'
                 : (kind === 'check' ? '<span class="tl-tag check">Check</span>' : '');
@@ -4134,8 +4314,8 @@
         '<div class="tl-rail"><div class="tl-dot">'+dotGlyph+'</div><div class="tl-line"></div></div>'+
         '<div class="tl-body">'+
           '<div class="tl-time">'+fmtTime(s.m)+'</div>'+
-          '<div class="tl-act">'+s.ic+' '+s.act+tag+'</div>'+
-          '<div class="tl-det">'+s.det+'</div>'+
+          '<div class="tl-act">'+s.ic+' '+acte+tag+'</div>'+
+          '<div class="tl-det">'+det+'</div>'+
         '</div>';
       box.appendChild(item);
     });
@@ -4161,15 +4341,25 @@
       next = SCHEDULE[idx+1] || null;
     }
 
+    // les blocs d'activité prennent le contenu du jour
+    const dj = dm();
+    const adapte = (b) => {
+      if (!b || b.act !== 'Bloc activité') return { act: b ? b.act : '', det: b ? b.det : '' };
+      const matin = b.m < 13*60;
+      return { act: (matin ? dj.blocMatin : dj.blocAprem) || b.act,
+               det: (matin ? dj.detMatin  : dj.detAprem)  || b.det };
+    };
+    const curA = adapte(cur), nextA = adapte(next);
+
     let html = '<div class="now">'
       + '<div class="ic">'+cur.ic+'</div>'
       + '<div class="body">'
       + '<div class="k">En ce moment' + (cur.m!==undefined ? ' · depuis '+fmtTime(cur.m) : '') + '</div>'
-      + '<div class="v">'+cur.act+'</div>'
-      + '<div class="t">'+cur.det+'</div>'
+      + '<div class="v">'+curA.act+'</div>'
+      + '<div class="t">'+curA.det+'</div>'
       + '</div></div>';
     if (next) {
-      html += '<div class="next"><span class="arrow">→</span> À '+fmtTime(next.m)+' : '+next.act+'</div>';
+      html += '<div class="next"><span class="arrow">→</span> À '+fmtTime(next.m)+' : '+nextA.act+'</div>';
     }
     guide.innerHTML = html;
   }
@@ -4550,7 +4740,9 @@
   }
   // ===== Foxy grand frère (ton dominateur bienveillant) =====
   let bigbro = false;
-  function broOn() { return hardMode && bigbro; } // nécessite le mode intensif
+  // Le registre « la résistance est vaine » s'applique en mode grand frère
+  // OU pendant une session de discipline.
+  function broOn() { return (hardMode && bigbro) || discActive(); }
   async function setBigbro(v) {
     bigbro = v;
     try { await window.storage.set('pref:bigbro', JSON.stringify(v)); } catch(e) {}
@@ -4936,6 +5128,7 @@
     let start = null;
     try { const r = await window.storage.get('pause:start'); if (r && r.value) start = JSON.parse(r.value); } catch(e) {}
     const hours = start ? (Date.now() - start) / 3600000 : 0;
+    try { if (hours >= 24) await flagBadge('comeback'); } catch(e) {}
     await runResumeProgram(hours);
   }
 
@@ -5236,6 +5429,92 @@
     card.style.display = show ? '' : 'none';
     if (show) { await renderQrConfig(); await renderNfcWriter(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
   });
+  // ===== QR des vêtements =====
+  (function(){
+    const b = document.getElementById('qrClothesGen');
+    if (b) b.addEventListener('click', async () => { await renderClothesQr(); });
+  })();
+
+  async function renderClothesQr() {
+    const WB = window.HabitrainWardrobe, QR = window.HabitrainQR;
+    const box = document.getElementById('qrClothesList');
+    if (!box || !WB || !QR) return;
+    box.innerHTML = '<div class="sub">Génération…</div>';
+    const w = await WB.getWardrobe();
+    box.innerHTML = '';
+    // on génère pour les tenues portées (nuit, jour, sieste) — pas les accessoires
+    for (const cat of ['nuit','jour','sieste']) {
+      const items = w[cat] || [];
+      if (!items.length) continue;
+      const titre = document.createElement('div');
+      titre.style.cssText = 'font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;margin:12px 0 6px';
+      titre.textContent = cat === 'nuit' ? '🌙 Nuit' : (cat === 'jour' ? '☀️ Jour' : '😴 Sieste');
+      box.appendChild(titre);
+      // on évite les doublons (une tenue peut être dans plusieurs catégories)
+      const vus = new Set();
+      for (const nom of items) {
+        const id = WB.itemId(cat, nom);
+        if (vus.has(nom)) continue;
+        vus.add(nom);
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line)';
+        const cv = document.createElement('canvas');
+        const txt = await QR.payloadFor(id);
+        QR.drawQR(cv, txt, 90);
+        const lbl = document.createElement('div');
+        lbl.style.cssText = 'flex:1;font-size:13px;font-weight:700;color:var(--ink)';
+        lbl.textContent = nom;
+        wrap.appendChild(cv); wrap.appendChild(lbl);
+        box.appendChild(wrap);
+      }
+    }
+    const note = document.createElement('div');
+    note.className = 'set-note';
+    note.textContent = 'Fais une capture, imprime et plastifie. Colle chaque QR à l\'intérieur du vêtement correspondant.';
+    box.appendChild(note);
+    try { await window.storage.set('ob:qrdone', JSON.stringify(true)); } catch(e) {}
+  }
+
+  // Scanner la tenue qu'on vient de mettre
+  async function scanTenue() {
+    const QR = window.HabitrainQR, WB = window.HabitrainWardrobe;
+    if (!QR || !WB) return;
+    QR.startScan(null, async (kind) => {
+      if (!kind) return;
+      const item = await WB.findByItemId(kind);
+      if (!item) {
+        if (voiceMode === 'foxy') { try { await imSay('Ce QR n\'est pas une de tes tenues. Réessaie ?', 800, 'puzzled'); } catch(e) {} }
+        return;
+      }
+      await WB.logWorn(todayStr(), item.cat, item.name);
+      // conformité avec la tenue tirée du jour
+      let attendue = null;
+      try {
+        const r = await window.storage.get('outfit:'+todayStr());
+        if (r && r.value) {
+          const o = JSON.parse(r.value);
+          const h = new Date().getHours();
+          attendue = (h >= 22 || h < 8) ? o.nuit : (h >= 14 && h < 16 ? o.sieste : o.jour);
+        }
+      } catch(e) {}
+      if (voiceMode === 'foxy') {
+        try {
+          if (attendue && attendue !== item.name) {
+            await imSay(broOn()
+              ? 'Ce n\'est pas la tenue que j\'avais tirée. J\'avais dit « ' + attendue + ' ». Tu le sais.'
+              : 'Hmm, j\'avais tiré « ' + attendue + ' » pour toi aujourd\'hui, pas celle-là ! 🦊', 900, 'puzzled');
+          } else {
+            await imSay(broOn()
+              ? 'Bien. « ' + item.name + ' », c\'est noté. Tu es habillé comme il faut.'
+              : 'Parfait, « ' + item.name + ' » ! Tu es tout beau. 🦊', 850, 'proud');
+          }
+          if (currentM) await imOfferHelp(currentM);
+        } catch(e) {}
+      }
+      try { await refresh(); } catch(e) {}
+    });
+  }
+
   // ===== Programmation des tags NFC =====
   async function renderNfcWriter() {
     const sup = document.getElementById('nfcSupport');
@@ -5472,6 +5751,503 @@
       await renderOnboard();
       return true;
     } catch(e) { return false; }
+  }
+
+  /* ============================================================
+     DÉTECTION AUTOMATIQUE DES ENTORSES
+     L'appli repère ce qu'elle peut constater factuellement, puis
+     Foxy te les PROPOSE : tu confirmes ou tu écartes. Rien n'est
+     imposé — seul toi connais le contexte.
+     ============================================================ */
+  async function detectBreaches(dateKey) {
+    const date = dateKey || todayStr();
+    const trouvees = [];
+    try {
+      const checks = await getChecks(date);
+      const entry = (await getAll()).find(e => e && e.date === date);
+      const now = new Date();
+      const finJournee = (date !== todayStr());   // jour passé : on juge tout
+      const nowMin = now.getHours()*60 + now.getMinutes();
+
+      // 1) Pilier manqué (fenêtre dépassée sans change)
+      const PIL = [{k:'c0900',m:540,n:'du matin'},{k:'c1600',m:960,n:'de sortie de sieste'},{k:'c2230',m:1350,n:'de nuit'}];
+      const r = await window.storage.get('slotdone:'+date);
+      const done = (r && r.value) ? JSON.parse(r.value) : {};
+      for (const p of PIL) {
+        const depasse = finJournee || nowMin > p.m + 120;
+        if (depasse && !done[p.k]) {
+          trouvees.push({ id:'b_pilier_'+p.k, n:'Change ' + p.n + ' manqué', grav:'moyenne',
+                          why:'Aucun change validé dans la fenêtre du pilier.' });
+        }
+      }
+
+      // 2) Port excessif
+      const stamps = checks.filter(c => c.result === 'change_fait' && c.t)
+                           .map(c => new Date(c.t).getTime()).sort((a,b)=>a-b);
+      let maxPort = 0;
+      for (let i=1;i<stamps.length;i++) maxPort = Math.max(maxPort, (stamps[i]-stamps[i-1])/3600000);
+      const plafond = hardMode ? HARD.wearCapH : 6.5;
+      if (maxPort > plafond) {
+        trouvees.push({ id:'b_portlong', n:'Port trop long (' + maxPort.toFixed(1) + 'h)', grav:'moyenne',
+                        why:'Un intervalle a dépassé ' + plafond + 'h — risque pour la peau.' });
+      }
+
+      // 3) Couche saturée laissée
+      const evts = checks.filter(c => c.t).map(c => ({t:new Date(c.t).getTime(), r:c.result})).sort((a,b)=>a.t-b.t);
+      for (let i=0;i<evts.length;i++) {
+        if (['etat_sature','sature'].includes(evts[i].r)) {
+          const suivant = evts.slice(i+1).find(e => e.r === 'change_fait');
+          const delai = suivant ? (suivant.t - evts[i].t)/3600000 : (finJournee ? 99 : (Date.now()-evts[i].t)/3600000);
+          if (delai > 1) {
+            trouvees.push({ id:'b_sature', n:'Couche saturée gardée', grav:'grave',
+                            why:'Plus d\'une heure sans change après une saturation.' });
+            break;
+          }
+        }
+      }
+
+      // 4) Hydratation négligée
+      if (finJournee || nowMin > 21*60) {
+        const bib = entry ? (entry.bib || 0) : 0;
+        if (bib < 2) {
+          trouvees.push({ id:'b_hydra', n:'Hydratation négligée (' + bib + '/3)', grav:'legere',
+                          why:'Moins de 2 biberons sur la journée.' });
+        }
+      }
+
+      // 5) Tenue non scannée
+      if (window.HabitrainWardrobe && (finJournee || nowMin > 20*60)) {
+        const worn = await window.HabitrainWardrobe.getWornLog(date);
+        if (!worn.length) {
+          trouvees.push({ id:'b_tenue', n:'Aucune tenue scannée', grav:'legere',
+                          why:'Pas de tenue ABDL enregistrée aujourd\'hui.' });
+        }
+      }
+
+      // 6) Ouverture d'urgence de serrure (factuel, déjà tracé)
+      if (checks.some(c => c.result === 'lock_emergency')) {
+        trouvees.push({ id:'b_urgence', n:'Ouverture de serrure en urgence', grav:'legere',
+                        why:'Le cadre a été contourné.' });
+      }
+    } catch(e) {}
+    return trouvees;
+  }
+
+  // Foxy propose les entorses détectées ; tu confirmes ou tu écartes
+  async function proposeBreaches() {
+    if (paused) return false;
+    let dejaVu = null;
+    try { const r = await window.storage.get('breachprop:last'); if (r && r.value) dejaVu = JSON.parse(r.value); } catch(e) {}
+    if (dejaVu === todayStr()) return false;
+    const trouvees = await detectBreaches();
+    if (!trouvees.length) return false;
+    try { await window.storage.set('breachprop:last', JSON.stringify(todayStr())); } catch(e) {}
+
+    await imSay(broOn()
+      ? 'J\'ai relevé des choses aujourd\'hui. On va les regarder ensemble, et tu me diras.'
+      : 'Dis, j\'ai remarqué deux-trois trucs aujourd\'hui... On regarde ensemble ? Tu me diras si c\'est justifié. 🦊', 950, 'pensive');
+
+    for (const t of trouvees) {
+      await imSay('• <b>' + t.n + '</b><br><span style="font-size:12px;color:var(--muted)">' + t.why + '</span>', 900, 'curious');
+      await new Promise(res => {
+        imSetActions([
+          { label:'Oui, c\'est une entorse', onClick: async () => {
+            try {
+              const rb = await window.storage.get('breach:'+todayStr());
+              const b = (rb && rb.value) ? JSON.parse(rb.value) : {};
+              b[t.id] = true;
+              await window.storage.set('breach:'+todayStr(), JSON.stringify(b));
+            } catch(e) {}
+            imAddMe('Oui, c\'est une entorse.');
+            await imSay(broOn() ? 'Noté. On ne recommence pas.' : 'C\'est noté, sans jugement. On repart proprement. 🦊', 750, 'calm');
+            res();
+          }},
+          { soft:true, label:'Non, j\'avais une raison', onClick: async () => {
+            imAddMe('Non, j\'avais une raison.');
+            await imSay(broOn() ? 'Bien. Je te fais confiance, cette fois.' : 'D\'accord, je te crois ! Je n\'en tiens pas compte alors. 💛', 750, 'happy');
+            res();
+          }}
+        ]);
+      });
+    }
+    await imSay(broOn() ? 'Voilà. Le suivi est juste maintenant.' : 'Voilà, c\'est fait ! Merci d\'avoir joué le jeu. 🦊', 850, 'proud');
+    if (currentM) await imOfferHelp(currentM);
+    return true;
+  }
+
+  /* ============================================================
+     SESSIONS DE DISCIPLINE
+     Quand les écarts s'accumulent, le cadre se resserre
+     automatiquement pendant quelques jours. Ce n'est pas une
+     punition : c'est une remise en structure. Les garde-fous
+     santé et le safeword restent intacts.
+     ============================================================ */
+  const DISC_SEUILS = { leger: 12, moyen: 20, fort: 30 };   // points d'écart cumulés sur 3 jours
+
+  async function getDiscipline() {
+    try { const r = await window.storage.get('discipline'); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
+    return null;
+  }
+  async function setDiscipline(d) {
+    try {
+      if (d) await window.storage.set('discipline', JSON.stringify(d));
+      else await window.storage.delete('discipline');
+    } catch(e) {}
+  }
+  function discActive() { return !!(discSession && discSession.active); }
+  let discSession = null;
+
+  async function loadDiscipline() {
+    discSession = await getDiscipline();
+    if (discSession && discSession.fin && Date.now() > discSession.fin) {
+      // la session a expiré sans être close explicitement
+      discSession = null;
+      await setDiscipline(null);
+    }
+  }
+
+  // Mesure du relâchement : poids des entorses sur les 3 derniers jours
+  async function mesurerEcarts() {
+    let total = 0, jours = 0;
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(); d.setDate(d.getDate()-i);
+      const k = d.toISOString().slice(0,10);
+      try {
+        const r = await window.storage.get('breach:'+k);
+        const b = (r && r.value) ? JSON.parse(r.value) : {};
+        let p = 0;
+        Object.keys(b).forEach(id => {
+          if (!b[id]) return;
+          const it = BREACHES.find(x => x.id === id);
+          p += it ? it.w : 5;
+        });
+        if (p > 0) jours++;
+        total += p;
+      } catch(e) {}
+    }
+    return { total, jours };
+  }
+
+  // Déclenchement automatique au seuil
+  async function checkDisciplineTrigger() {
+    if (paused || discActive()) return false;
+    // pas plus d'une session par semaine
+    try {
+      const r = await window.storage.get('disc:last');
+      if (r && r.value && (Date.now() - JSON.parse(r.value)) < 7*86400000) return false;
+    } catch(e) {}
+    const { total } = await mesurerEcarts();
+    let niveau = null, jours = 0, objectif = 0;
+    if (total >= DISC_SEUILS.fort)        { niveau = 'fort';  jours = 5; objectif = 3; }
+    else if (total >= DISC_SEUILS.moyen)  { niveau = 'moyen'; jours = 3; objectif = 2; }
+    else if (total >= DISC_SEUILS.leger)  { niveau = 'leger'; jours = 2; objectif = 2; }
+    if (!niveau) return false;
+
+    discSession = {
+      active: true, niveau, objectif,
+      debut: Date.now(), fin: Date.now() + jours*86400000,
+      joursPropres: 0, ecarts: total
+    };
+    await setDiscipline(discSession);
+    try { await window.storage.set('disc:last', JSON.stringify(Date.now())); } catch(e) {}
+    await annoncerDiscipline(niveau, jours, objectif, total);
+    return true;
+  }
+
+  async function annoncerDiscipline(niveau, jours, objectif, total) {
+    const intro = {
+      leger: 'Ça commence à déraper, je le vois bien.',
+      moyen: 'Les écarts s\'accumulent. Là, il faut qu\'on reprenne les choses en main.',
+      fort:  'Le cadre est en train de se défaire complètement. Je ne vais pas laisser faire.'
+    }[niveau];
+
+    await imSay(intro, 950, 'concern');
+    await imSay('Alors on entre en <b>session de discipline</b> pendant ' + jours + ' jours. Ce n\'est pas une punition — c\'est juste que tu as besoin d\'un cadre plus serré, et je vais te le donner.', 1050, 'calm');
+    await imSay('Tu peux trouver ça pesant au début. Mais tu sais déjà comment ça va finir : tu vas t\'y remettre, et tu te sentiras mieux. Résister n\'y changera rien.', 1050, 'calm');
+    await imSay('<b>Ce qui change :</b><br>• Tous les créneaux deviennent obligatoires<br>• Je serai plus présent et plus exigeant<br>• Rituels et missions non négociables<br>• Tolérances réduites', 1100, 'explain');
+    await imSay('<b>Pour en sortir :</b> ' + objectif + ' journées consécutives sans le moindre écart. Simple, net. Allez, on s\'y met.', 1000, 'proud');
+    if (currentM) await imOfferHelp(currentM);
+  }
+
+  // Progression : appelée en fin de journée
+  async function majDiscipline() {
+    if (!discActive()) return;
+    const hier = new Date(); hier.setDate(hier.getDate()-1);
+    const k = hier.toISOString().slice(0,10);
+    let propre = true;
+    try {
+      const r = await window.storage.get('breach:'+k);
+      const b = (r && r.value) ? JSON.parse(r.value) : {};
+      propre = !Object.keys(b).some(x => b[x]);
+    } catch(e) {}
+    // il faut aussi que la journée ait été renseignée
+    const entries = await getAll();
+    if (!entries.some(e => e && e.date === k)) propre = false;
+
+    if (propre) discSession.joursPropres++;
+    else discSession.joursPropres = 0;   // une entorse remet le compteur à zéro
+
+    if (discSession.joursPropres >= discSession.objectif) {
+      // session réussie
+      discSession = null;
+      await setDiscipline(null);
+      try { await flagBadge('discDone'); } catch(e) {}
+      if (voiceMode === 'foxy') {
+        await imSay('C\'est bon. Tu as tenu tes journées sans écart. La session de discipline est terminée.', 900, 'proud');
+        await imSay('Tu vois ? Je te l\'avais dit. Tu t\'y es remis, comme prévu. Je suis fier de toi, sincèrement. 🦊💛', 1000, 'moved');
+        if (currentM) await imOfferHelp(currentM);
+      }
+    } else {
+      await setDiscipline(discSession);
+    }
+  }
+
+  /* ============================================================
+     HAUTS FAITS — évaluation automatique des badges
+     ============================================================ */
+  const BG = window.HabitrainBadges;
+
+  // Agrège toutes les statistiques nécessaires, une seule fois
+  async function statsBadges() {
+    const st = { days:0, streak:0, cleanStreak:0, pillars:0, skin:0, hydra:0,
+                 journal:0, confid:0, missions:0, worn:0, chapters:0, scans:0,
+                 counts:{}, maxDay:0, longNight:0, earlyChange:false, lateChange:false,
+                 score:0, weekend:false, perfectDay:false };
+    try {
+      const entries = await getAll();
+      st.days = entries.filter(e => e && e.date).length;
+      st.skin = entries.filter(e => e && e.skin === 'verte').length;
+      st.hydra = entries.filter(e => e && (e.bib||0) >= 3).length;
+
+      const byDate = {}; entries.forEach(e => { if (e && e.date) byDate[e.date] = e; });
+      // séries
+      for (let i = 0; ; i++) {
+        const d = new Date(); d.setDate(d.getDate()-i);
+        const k = d.toISOString().slice(0,10);
+        if (byDate[k]) st.streak++; else { if (i===0) continue; break; }
+        if (i > 400) break;
+      }
+      for (let i = 0; ; i++) {
+        const d = new Date(); d.setDate(d.getDate()-i);
+        const k = d.toISOString().slice(0,10);
+        if (!byDate[k]) { if (i===0) continue; break; }
+        const r = await window.storage.get('breach:'+k);
+        const b = (r && r.value) ? JSON.parse(r.value) : {};
+        if (Object.keys(b).some(x => b[x])) break;
+        st.cleanStreak++;
+        if (i > 200) break;
+      }
+      // week-end complet
+      for (const e of entries) {
+        if (!e || !e.date) continue;
+        const j = new Date(e.date).getDay();
+        if (j === 6) {
+          const dim = new Date(e.date); dim.setDate(dim.getDate()+1);
+          if (byDate[dim.toISOString().slice(0,10)]) { st.weekend = true; break; }
+        }
+      }
+      // parcours des checks
+      for (const e of entries) {
+        if (!e || !e.date) continue;
+        const list = await getChecks(e.date);
+        let changesJour = 0;
+        for (const c of list) {
+          st.counts[c.result] = (st.counts[c.result] || 0) + 1;
+          if (c.result === 'change_fait') {
+            changesJour++;
+            if (c.t) {
+              const h = new Date(c.t).getHours();
+              if (h < 7) st.earlyChange = true;
+              if (h >= 0 && h < 5) st.lateChange = true;
+            }
+          }
+          if (c.type && String(c.type).indexOf('preuve') >= 0) st.scans++;
+        }
+        st.maxDay = Math.max(st.maxDay, changesJour);
+        // nuit la plus longue
+        const stamps = list.filter(c => c.result === 'change_fait' && c.t)
+                           .map(c => new Date(c.t).getTime()).sort((a,b)=>a-b);
+        for (let i=1;i<stamps.length;i++) {
+          const dur = (stamps[i]-stamps[i-1])/3600000;
+          const hDeb = new Date(stamps[i-1]).getHours();
+          if (hDeb >= 21 || hDeb < 3) st.longNight = Math.max(st.longNight, dur);
+        }
+      }
+      // piliers
+      for (const e of entries) {
+        if (!e || !e.date) continue;
+        const r = await window.storage.get('slotdone:'+e.date);
+        const d = (r && r.value) ? JSON.parse(r.value) : {};
+        st.pillars += ['c0900','c1600','c2230'].filter(k => d[k]).length;
+      }
+      // quête
+      const q = await getQuest();
+      st.journal = (q.journal||[]).length;
+      st.confid = (q.confidences||[]).length;
+      st.chapters = (q.unlockedStage >= 0) ? q.unlockedStage + 1 : 0;
+      // missions
+      if (window.HabitrainMissions) {
+        const m = await window.HabitrainMissions.getState();
+        st.missions = (m.doneP||[]).length;
+      }
+      // tenues scannées
+      if (window.HabitrainWardrobe) {
+        for (const e of entries) {
+          if (!e || !e.date) continue;
+          const w = await window.HabitrainWardrobe.getWornLog(e.date);
+          st.worn += w.length;
+        }
+      }
+      // score courant
+      try { const r = await window.storage.get('lastscore'); if (r && r.value) st.score = JSON.parse(r.value); } catch(e) {}
+    } catch(e) {}
+    return st;
+  }
+
+  function badgeAtteint(b, st, flags) {
+    switch (b.kind) {
+      case 'days':        return st.days >= b.t;
+      case 'streak':      return st.streak >= b.t;
+      case 'cleanStreak': return st.cleanStreak >= b.t;
+      case 'pillars':     return st.pillars >= b.t;
+      case 'skin':        return st.skin >= b.t;
+      case 'hydra':       return st.hydra >= b.t;
+      case 'journal':     return st.journal >= b.t;
+      case 'confid':      return st.confid >= b.t;
+      case 'missions':    return st.missions >= b.t;
+      case 'worn':        return st.worn >= b.t;
+      case 'chapters':    return st.chapters >= b.t;
+      case 'scans':       return st.scans >= b.t;
+      case 'score':       return st.score >= b.t;
+      case 'count':       return (st.counts[b.r] || 0) >= b.t;
+      case 'maxDay':      return st.maxDay >= b.t;
+      case 'longNight':   return st.longNight >= b.t;
+      case 'earlyChange': return st.earlyChange;
+      case 'lateChange':  return st.lateChange;
+      case 'weekend':     return st.weekend;
+      case 'introspect':  return !!(flags && flags.introspect);
+      case 'hardDay':     return !!(flags && flags.hardDay);
+      case 'discDone':    return !!(flags && flags.discDone);
+      case 'surpriseDay': return !!(flags && flags.surpriseDay);
+      case 'comeback':    return !!(flags && flags.comeback);
+      case 'perfectDay':  return !!(flags && flags.perfectDay);
+      case 'sensor':      return !!(flags && flags.sensor);
+    }
+    return false;
+  }
+
+  // Vérifie et débloque ; Foxy annonce les nouveaux badges
+  async function checkBadges(silencieux) {
+    if (!BG) return [];
+    const st = await statsBadges();
+    let flags = {};
+    try { const r = await window.storage.get('badgeflags'); if (r && r.value) flags = JSON.parse(r.value); } catch(e) {}
+    const dejaEus = await BG.getUnlocked();
+    const nouveaux = [];
+    for (const b of BG.BADGES) {
+      if (dejaEus[b.id]) continue;
+      if (badgeAtteint(b, st, flags)) { await BG.unlock(b.id); nouveaux.push(b); }
+    }
+    if (nouveaux.length && !silencieux && voiceMode === 'foxy') {
+      for (const b of nouveaux) {
+        await imSay(b.ic + ' <b>Haut fait débloqué : ' + b.n + '</b><br><span style="font-size:12px;color:var(--muted)">' + b.d + '</span>',
+                    1000, 'proud');
+      }
+      await imSay(broOn()
+        ? 'Ça se range dans ton tableau. Continue, il en reste.'
+        : 'Bravo ! C\'est rangé dans ton tableau de hauts faits. 🏆🦊', 850, 'cheer');
+      if (currentM) await imOfferHelp(currentM);
+    }
+    return nouveaux;
+  }
+
+  // Marque un événement ponctuel pour les badges intemporels
+  async function flagBadge(cle) {
+    try {
+      const r = await window.storage.get('badgeflags');
+      const f = (r && r.value) ? JSON.parse(r.value) : {};
+      f[cle] = true;
+      await window.storage.set('badgeflags', JSON.stringify(f));
+    } catch(e) {}
+  }
+
+  // --- Affichage du tableau de hauts faits ---
+  document.getElementById('openBadges').addEventListener('click', async () => {
+    const card = document.getElementById('badgesCard');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) { await renderBadges(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
+
+  async function renderBadges() {
+    if (!BG) return;
+    await checkBadges(true);   // met à jour avant d'afficher
+    const u = await BG.getUnlocked();
+    const total = BG.BADGES.length;
+    const acquis = BG.BADGES.filter(b => u[b.id]).length;
+    const pct = Math.round(acquis/total*100);
+
+    const prog = document.getElementById('badgesProg');
+    prog.innerHTML = '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">'+
+      '<span style="font-family:\'Fraunces\',serif;font-size:26px;font-weight:600;color:#5a4326">'+acquis+'</span>'+
+      '<span style="font-size:13px;font-weight:700;color:var(--muted)">/ '+total+' hauts faits ('+pct+'%)</span></div>'+
+      '<div style="height:10px;background:#efe4d2;border-radius:8px;overflow:hidden">'+
+      '<div style="height:100%;width:'+pct+'%;background:linear-gradient(90deg,#e8a94a,#c86b3a)"></div></div>';
+
+    const box = document.getElementById('badgesList');
+    box.innerHTML = '';
+    for (const niv of BG.NIVEAUX) {
+      const lot = BG.BADGES.filter(b => b.lvl === niv.lvl);
+      if (!lot.length) continue;
+      const n = lot.filter(b => u[b.id]).length;
+      const sec = document.createElement('div');
+      sec.style.cssText = 'margin-top:16px';
+      sec.innerHTML = '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:15px;color:#5a4326;margin-bottom:8px">'+
+        niv.ic+' '+niv.nom+' <span style="font-size:11.5px;font-weight:700;color:var(--muted)">('+n+'/'+lot.length+')</span></div>';
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px';
+      lot.forEach(b => {
+        const ok = !!u[b.id];
+        const el = document.createElement('div');
+        el.style.cssText = 'text-align:center;padding:10px 6px;border-radius:13px;border:1.5px solid '+
+          (ok?'#e0a060':'var(--line)')+';background:'+(ok?'#FBF3E8':'#f7f7f5')+';'+
+          (ok?'':'opacity:.55');
+        // médaillon SVG ; les badges majeurs portent une illustration de Foxy si disponible
+        let visuel = BG.medalSVG(b, ok, 58);
+        if (ok) {
+          // deux planches : « en couche » pour les badges de port, « habillé » pour le reste
+          let sheet = null, idx = -1;
+          if (BG.estMajeurCouche && BG.estMajeurCouche(b.id)) { sheet = 'badges-couche.png'; idx = BG.coucheIndex(b.id); }
+          else if (BG.estMajeur && BG.estMajeur(b.id))        { sheet = 'badges-foxy.png';   idx = BG.foxyIndex(b.id); }
+          if (sheet) {
+            visuel = '<div style="width:58px;height:58px;margin:0 auto;border-radius:14px;' +
+                     'background-image:url(\'' + sheet + '\');background-repeat:no-repeat;background-size:232px 232px;' +
+                     'background-position:' + (-(idx%4)*58) + 'px ' + (-Math.floor(idx/4)*58) + 'px;' +
+                     'border:2px solid #e0a060;background-color:#FDF3EA"></div>';
+          }
+        }
+        el.innerHTML = visuel +
+          '<div style="font-size:10.5px;font-weight:800;color:'+(ok?'#a8543b':'var(--muted)')+';margin-top:4px;line-height:1.25">'+b.n+'</div>';
+        el.title = b.d;
+        el.addEventListener('click', () => {
+          const d = document.getElementById('badgeDetail');
+          if (d) d.innerHTML = '<div style="display:flex;align-items:center;gap:12px">' +
+            BG.medalSVG(b, ok, 64) +
+            '<div><b>'+b.n+'</b><br>'+b.d+
+            (ok ? '<br><span style="color:var(--green);font-weight:800">✅ Débloqué</span>'
+                : '<br><span style="color:var(--muted)">🔒 À débloquer</span>')+'</div></div>';
+        });
+        grid.appendChild(el);
+      });
+      sec.appendChild(grid);
+      box.appendChild(sec);
+    }
+    const det = document.createElement('div');
+    det.id = 'badgeDetail';
+    det.className = 'set-note';
+    det.style.marginTop = '14px';
+    det.textContent = 'Tape un haut fait pour voir sa description.';
+    box.appendChild(det);
   }
 
   // ===== Missions =====
@@ -6077,6 +6853,7 @@
     try {
       await S.connect();
       statusEl.textContent = '🟢 Connecté';
+      try { await flagBadge('sensor'); } catch(e) {}
       document.getElementById('sensorConnect').textContent = '🔄 Resynchroniser';
     } catch (e) {
       statusEl.textContent = 'Échec / annulé';
@@ -6511,6 +7288,13 @@
     await loadPause();
     try { await loadFoxyMood(); } catch(e) {}
     try { await loadFoxySerie(); } catch(e) {}
+    try { await loadDayMood(); } catch(e) {}
+    try { await loadDiscipline(); } catch(e) {}
+    // marqueurs pour les hauts faits contextuels
+    try {
+      if (hardMode) await flagBadge('hardDay');
+      if (dayMood && dayMood.surprise) await flagBadge('surpriseDay');
+    } catch(e) {}
     try { await loadLiveWardrobe(); } catch(e) {}
     try { await checkQrLock(); } catch(e) {}
     try { await scheduleBraceletChecks(); } catch(e) {}
@@ -6602,7 +7386,7 @@
     let due = null;
     for (const s of CHANGE_SLOTS) {
       // en mode intensif, tous les créneaux deviennent des piliers obligatoires
-      const ctx = hardMode ? 'pilier' : s.ctx;
+      const ctx = (hardMode || discActive()) ? 'pilier' : s.ctx;
       const window = (ctx === 'pilier') ? 120 : 45;
       if (nowMin >= s.m && nowMin <= s.m + window) { due = Object.assign({}, s, { ctx }); break; }
     }
