@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '14.3';
+  const APP_VERSION = '15.3';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -274,6 +274,58 @@
   }
 
   // Change guidé « Foxy se met sa couche » — guide des 4 languettes (8 étapes)
+  /* ============================================================
+     CE QUE FOXY RESSENT
+     Ses confidences pendant le change (une étape sur trois environ)
+     et ses récits spontanés sur ce qui se passe en lui.
+     ============================================================ */
+  const FOXY_FEELS_STEP = {
+    0: [ 'Tu sais, le bruit du plastique quand je déplie les languettes... ce petit crissement, maintenant rien que de l\'entendre je me détends déjà. C\'est devenu un signal pour moi.',
+         'Moi j\'aime bien ce moment. Tout est encore propre et net, et je sais ce qui arrive après. Y\'a une sorte d\'attente, tu vois ?' ],
+    1: [ 'Quand je retire l\'ancienne, y\'a toujours ce petit pincement de me retrouver sans rien. Deux secondes où je me sens... nu, quoi. Bizarrement je n\'aime pas trop ça.',
+         'C\'est marrant, avant je trouvais ça gênant ce moment. Maintenant c\'est juste une transition, j\'y pense même plus.' ],
+    2: [ 'La fraîcheur quand elle se pose sous moi, ça me fait toujours quelque chose. Un peu froid les premières secondes, et puis ça devient tiède contre la peau.',
+         'Allongé comme ça, sans rien à faire pendant qu\'on s\'occupe de moi... franchement c\'est un des moments les plus reposants de ma journée.' ],
+    3: [ 'Quand je remonte le devant, je sens le tissu qui m\'enveloppe. C\'est là que ça commence vraiment pour moi.',
+         'Ce moment-là, c\'est comme fermer une porte. Après, y\'a plus de question à se poser pour les heures qui viennent.' ],
+    4: [ 'Le premier clic de languette... c\'est le son que je préfère de toute la journée. Sérieux.',
+         'Là je commence à sentir le serrage autour des hanches. C\'est comme si mon corps recevait un message : "voilà, tu peux lâcher maintenant".' ],
+    5: [ 'Quand les deux côtés sont pris, y\'a un truc qui se relâche dans ma tête. Comme si je posais un sac que je portais depuis le matin.',
+         'C\'est fou comme quelque chose d\'aussi simple peut changer tout mon état d\'esprit en quelques secondes.' ],
+    6: [ 'Je vérifie toujours les élastiques deux fois. Pas par peur des fuites — juste parce que j\'aime savoir que tout est bien en place.',
+         'Ce petit contrôle, c\'est devenu un rituel. Ça m\'ancre, je sais pas comment dire mieux.' ],
+    7: [ 'Et voilà. Quand je me relève et que je sens le volume entre mes jambes... c\'est là que je me sens vraiment bien. Comme rentré chez moi.',
+         'Les premiers pas après un change, avec ce petit balancement... franchement, j\'adore. C\'est mon moment préféré.',
+         'Maintenant c\'est fait, et je sais que je n\'ai plus à y penser. Cette tranquillité-là, c\'est ce que je cherchais depuis le début.' ]
+  };
+
+  const FOXY_FEELS_STORIES = [
+    { t:'Ce que ça me fait, ma couche',
+      l:['Tu m\'as jamais demandé ce que ça me fait à moi, tu sais.',
+         'Quand je la mets, y\'a d\'abord le poids. Léger, mais présent. Constant. C\'est bête mais ça me rassure, ce petit rappel permanent.',
+         'Et puis y\'a le fait de ne plus avoir à surveiller. Ça libère une place énorme dans ma tête. Je savais même pas que ça prenait autant de place avant.'] },
+    { t:'Les premières fois',
+      l:['Je repense parfois à mes débuts. J\'étais tellement raide, tellement sur mes gardes.',
+         'Je passais mon temps à vérifier, à me demander si ça se voyait, si ça faisait du bruit quand je bougeais.',
+         'Et puis un jour je me suis rendu compte que j\'avais passé toute une après-midi sans y penser une seule fois. C\'est là que j\'ai compris que c\'était gagné.'] },
+    { t:'Quand elle devient mouillée',
+      l:['Le moment où elle se réchauffe, quand ça vient... au début ça me faisait bizarre, presque inconfortable.',
+         'Maintenant c\'est devenu une sensation que j\'attends presque. Cette chaleur qui se diffuse, ce poids qui change doucement.',
+         'C\'est le signe que j\'ai réussi à lâcher. Alors comment veux-tu que je trouve ça désagréable ?'] },
+    { t:'Le soir, avant de dormir',
+      l:['Ma préférée, c\'est celle du soir. La plus épaisse, celle qui tient toute la nuit.',
+         'Quand je la mets, je sais que ma journée est finie. Plus rien à décider, plus rien à tenir.',
+         'Je m\'endors avec cette sensation d\'être bien contenu. C\'est les meilleures nuits que j\'aie jamais eues, je te jure.'] },
+    { t:'Ce qui a changé en moi',
+      l:['Avant, j\'étais quelqu\'un qui contrôlait tout. Tout le temps. Même ce qui n\'avait pas besoin de l\'être.',
+         'Apprendre à lâcher ça, ça m\'a pris des semaines. Et ça a débordé sur plein d\'autres trucs de ma vie.',
+         'Je dors mieux. Je m\'inquiète moins. C\'est parti d\'une couche, et au final ça a changé bien plus que ça.'] },
+    { t:'Le matin au réveil',
+      l:['Le matin, avant même d\'ouvrir les yeux, je tends la main pour toucher.',
+         'Quand elle est bien lourde, j\'ai ce petit sourire tout bête tout seul dans mon lit.',
+         'C\'est devenu mon indicateur : si ma nuit a bien travaillé, je sais que la journée va bien se passer.'] }
+  ];
+
   const CHANGE_STEPS = [
     { cell:'prep',    t:'D\'abord, déplie les 4 languettes en éventail. Vérifie qu\'aucune n\'est collée par accident — une languette mal dépliée, et la couche fait des plis.' },
     { cell:'remove',  t:'Défais les languettes de l\'ancienne couche, retire-la et enlève ta grenouillère. Roule la couche usagée et jette-la à la poubelle.' },
@@ -353,6 +405,21 @@
         tag.textContent = msg;
         line.parentNode.insertBefore(tag, line);
       });
+    }
+    // Foxy glisse parfois ce que ça lui fait, à lui
+    if (!broOn() && Math.random() < 0.3) {
+      const lot = FOXY_FEELS_STEP[i];
+      if (lot && lot.length) {
+        const line = document.getElementById('poseLine');
+        if (line) {
+          const d = document.createElement('div');
+          d.style.cssText = 'font-size:12.5px;font-weight:600;font-style:italic;color:#8a6a45;' +
+            'background:#FBF3E8;border-left:3px solid #d9a05a;border-radius:0 10px 10px 0;' +
+            'padding:9px 11px;margin-bottom:10px;line-height:1.5';
+          d.textContent = '🦊 ' + lot[Math.floor(Math.random()*lot.length)];
+          line.parentNode.insertBefore(d, line);
+        }
+      }
     }
     poseType(step.t, () => {
       const b = document.createElement('button');
@@ -1356,6 +1423,15 @@
         imAddMe('Foxy, on discute ?');
         await startIntrospection(m);
       }}] : []),
+      ...(isFoxy ? [{ label:'🧭 Je fais quoi maintenant ?', onClick: async () => {
+        imAddMe('Je fais quoi, là, maintenant ?');
+        try { await guideMaintenant(); } catch(e) {}
+      }}] : []),
+      ...(isFoxy && !broOn() ? [{ label:'🦊 Et toi, ça te fait quoi ?', onClick: async () => {
+        imAddMe('Et toi, ta couche, ça te fait quoi ?');
+        await maybeFeelStory(true);
+        if (currentM) await imOfferHelp(currentM);
+      }}] : []),
       ...(isFoxy ? [{ label:'👕 Je viens de m\'habiller', onClick: async () => {
         imAddMe('Je viens de m\'habiller.');
         await imSay(broOn() ? 'Montre-moi. Scanne l\'étiquette de ta tenue.' : 'Fais voir ! Scanne le QR de ta tenue. 🦊', 800, 'curious');
@@ -1733,6 +1809,32 @@
     'J\'ai un doudou préféré, mais je le dis pas aux autres pour pas les vexer. 🤫',
     'Moi je bois toujours mon biberon en trois fois. Jamais d\'un coup. Rituel.'
   ];
+  // Foxy raconte son propre vécu de la couche (max 1/jour, occasionnel)
+  async function maybeFeelStory(force) {
+    if (broOn() && !force) return false;
+    if (!force) {
+      let last = null;
+      try { const r = await window.storage.get('feelstory:last'); if (r && r.value) last = JSON.parse(r.value); } catch(e) {}
+      if (last === todayStr()) return false;
+      if (Math.random() >= 0.22) return false;
+    }
+    // on évite de répéter le même récit
+    let vus = [];
+    try { const r = await window.storage.get('feelstory:vus'); if (r && r.value) vus = JSON.parse(r.value); } catch(e) {}
+    let pool = FOXY_FEELS_STORIES.filter(x => !vus.includes(x.t));
+    if (!pool.length) { pool = FOXY_FEELS_STORIES; vus = []; }
+    const st = pool[Math.floor(Math.random()*pool.length)];
+    vus.push(st.t);
+    try {
+      await window.storage.set('feelstory:last', JSON.stringify(todayStr()));
+      await window.storage.set('feelstory:vus', JSON.stringify(vus));
+    } catch(e) {}
+    for (let i = 0; i < st.l.length; i++) {
+      await imSay(st.l[i], 1000, i === 0 ? 'wistful' : (i === st.l.length-1 ? 'moved' : 'pensive'));
+    }
+    return true;
+  }
+
   async function maybeQuirk() {
     if (broOn()) return false;
     let last = null;
@@ -1906,6 +2008,16 @@
       if (SUJETS[s].some(w => n.includes(normalize(w)))) { sujet = s; break; }
     }
     return { negated, intensity, sujet };
+  }
+
+  // Question de guidage posée librement : « je fais quoi ? », « c'est quand ? »...
+  const GUIDE_KW = ['je fais quoi','faire quoi','quoi faire','c est quand','quand le prochain',
+                    'prochain change','je dois faire','qu est ce que je fais','on fait quoi',
+                    'je suis en retard','quoi maintenant','et maintenant','quelle heure il est pour',
+                    'qu est ce qu il me faut','il me faut quoi','je prends quoi'];
+  function isGuideQuestion(text) {
+    const n = normalize(text);
+    return GUIDE_KW.some(k => n.includes(normalize(k)));
   }
 
   function detectIntent(text) {
@@ -2144,14 +2256,28 @@
 
   // moteur de spontanéité : Foxy prend une initiative au lieu de juste répondre
   async function foxySpontaneous(m) {
+    // --- 1) D'ABORD ce qui est UTILE ET CONTEXTUEL ---
+    // Foxy est un guide : quand le moment appelle un conseil, il le donne
+    // avant de proposer un jeu ou une confidence.
+    if (await maybeTopicTip()) { await imOfferHelp(m); return true; }
+
     const roll = Math.random();
-    if (roll < 0.3 && m.key === 'reveil') {
+
+    // --- 2) Ensuite, le relationnel, calé sur le moment de la journée ---
+    // Rêve : uniquement au réveil.
+    if (m.key === 'reveil' && roll < 0.35) {
       await imSay(pick(FOXY_DREAMS), 1000, 'happy');
       await imSay(bro('Bon, assez rêvassé ! Contente-moi : dis-moi bonjour comme il faut. 🦊', 'Voilà mon rêve... Allez, dis-moi bonjour. Tu en avais envie de toute façon, non ? 🦊'), 800, 'joy');
       await imOfferHelp(m); return true;
     }
-    if (roll < 0.6) {
-      // un petit jeu — en grand frère : joueur mais il mène, sans forcer
+
+    // Récit intime : les moments calmes (aprem, soir, nuit).
+    if (['aprem','soir','nuit'].includes(m.key) && roll < 0.4) {
+      if (await maybeFeelStory()) { await imOfferHelp(m); return true; }
+    }
+
+    // Jeu : plutôt en journée, quand il y a de l'énergie.
+    if (['matin','aprem'].includes(m.key) && roll < 0.55) {
       const g = pick(FOXY_GAMES);
       await imSay(broOn() ? 'On va jouer, toi et moi... Tu vas adorer, tu ne pourras pas t\'en empêcher. ' + g.ask : g.ask, 900, 'joy');
       imSetActions([
@@ -2159,13 +2285,22 @@
         { label:g.rep[1], onClick: async () => { imAddMe(g.rep[1]); await imSay(g.react[1], 800, 'happy'); await imOfferHelp(m); } }
       ]); return true;
     }
-    if (roll < 0.8) {
+
+    // Confidence narrative : en soirée surtout.
+    if (['soir','nuit'].includes(m.key) && roll < 0.7) {
       await imSay(bro('Attends, faut que je te dise un truc, comme ça, spontanément...', 'Reste un instant... j\'ai quelque chose à te confier. Écoute, laisse-toi porter.'), 850, 'teach');
       try { await maybeIntroReward(true); } catch(e) {}
       await imOfferHelp(m); return true;
     }
-    // parfois, une manie personnelle de Foxy
-    if (await maybeQuirk()) { await imOfferHelp(m); return true; }
+
+    // Manie personnelle : n'importe quand, c'est du léger.
+    if (roll < 0.82) {
+      if (await maybeQuirk()) { await imOfferHelp(m); return true; }
+    }
+
+    // Récit intime en repli si rien n'a pris.
+    if (await maybeFeelStory()) { await imOfferHelp(m); return true; }
+
     // une météo intérieure (reste douce même en grand frère : touche l'émotionnel)
     await imSay(pick(FOXY_MOODWORDS), 900, 'pensive');
     imSetActions([
@@ -2307,6 +2442,8 @@
       if (currentM) await imOfferHelp(currentM);
       return;
     }
+    // priorité au guidage : si tu demandes quoi faire, il répond concrètement
+    if (isGuideQuestion(text)) { try { await guideMaintenant(); } catch(e) {} return; }
     const intent = detectIntent(text);
     const ana = analyzeText(text);
     if (!intent) {
@@ -2663,10 +2800,12 @@
   }
 
   // Depuis combien de temps la couche actuelle est portée (dernier change enregistré)
-  async function lastChangeTime() {
-    // cherche le change_fait le plus récent sur les 2 derniers jours
+  async function lastChangeTime(profondeur) {
+    // cherche le change_fait le plus récent (2 jours par défaut,
+    // davantage pour détecter une longue interruption)
     let latest = null;
-    for (let i = 0; i < 2; i++) {
+    const n = profondeur || 2;
+    for (let i = 0; i < n; i++) {
       const d = new Date(); d.setDate(d.getDate()-i);
       const list = await getChecks(d.toISOString().slice(0,10));
       list.forEach(c => {
@@ -2856,7 +2995,32 @@
     return '<span class="lbl">🔑 Prochain change dans</span> ' + rem + ' <span class="lbl">(' + next.label + ' à ' + at + ' ' + dayLabel + ')</span>';
   }
   // met à jour le compteur régulièrement
-  setInterval(() => { renderSince(); renderTimeline(); maybeRedirectBilan(); checkLockAlerts(); foxyPing(); foxyMilestones(); }, 60000);
+  setInterval(() => { renderSince(); renderTimeline(); maybeRedirectBilan(); checkLockAlerts(); foxyPing(); foxyMilestones(); pushMomentTip(); }, 60000);
+
+  // Foxy pousse le conseil pratique au début de chaque créneau
+  async function pushMomentTip() {
+    try {
+      if (paused || voiceMode !== 'foxy') return;
+      const now = new Date();
+      const nowMin = now.getHours()*60 + now.getMinutes();
+      // on cherche un créneau qui vient de commencer (dans la minute)
+      const slot = SCHEDULE.find(x => x.m === nowMin);
+      if (!slot) return;
+      const astuce = tipForSlot(slot.m);
+      if (!astuce) return;
+      let vu = null;
+      try { const r = await window.storage.get('tip:last'); if (r && r.value) vu = JSON.parse(r.value); } catch(e) {}
+      const cle = todayStr() + ':' + slot.m;
+      if (vu === cle) return;
+      try { await window.storage.set('tip:last', JSON.stringify(cle)); } catch(e) {}
+      // le nécessaire du créneau : matériel + contrôles
+      const kitDonne = await annoncerKit(slot.m, slot.act, slot.ic);
+      if (!kitDonne) await imSay(slot.ic + ' <b>' + slot.act + '</b>', 800, 'explain');
+      await imSay('💡 ' + astuce, 950, broOn() ? 'calm' : mood().expr);
+      const m = currentM || currentMoment(new Date());
+      try { await imOfferHelp(m); } catch(e) {}
+    } catch(e) {}
+  }
 
   /* ============================================================
      FOXY T'INTERPELLE — il prend l'initiative dans la journée
@@ -4232,6 +4396,443 @@
     return d.sieste === 'longue' ? '1h30 à 2h' : (d.sieste === 'courte' ? '45 min' : '1h à 1h15');
   }
 
+  /* ============================================================
+     CONSEILS DU MOMENT
+     Pour chaque créneau : comment l'aborder concrètement avec
+     ta couche. Affiché dans la frise et poussé par Foxy au moment
+     où le créneau commence.
+     ============================================================ */
+  const MOMENT_TIPS = {
+    420: [
+      { f:'Hé, bouge pas tout de suite ! Reste allongé une minute, tu veux ? C\'est souvent là que ça vient tout seul, sans que tu aies rien à faire.',
+        b:'Ne te lève pas. Reste allongé. C\'est maintenant que ton corps lâche — laisse-le faire, tu n\'as rien à décider.' },
+      { f:'Touche ta couche avant de te lever, pour voir. Si elle est lourde... héhé, ta nuit a bien bossé ! 🦊',
+        b:'Touche ta couche. Lourde ? Bien. Ta nuit a fait le travail que tu ne pouvais pas faire éveillé.' },
+      { f:'Bois ton verre d\'eau tout de suite, hein ! Moi je le fais toujours en premier, ça lance bien la journée.',
+        b:'Ton verre d\'eau. Maintenant. Tout le reste en dépend.' }
+    ],
+    480: [
+      { f:'Tu gardes ta couche de nuit pour le petit-déj ! Pas la peine de te presser, laisse-la travailler jusqu\'à 9h.',
+        b:'Tu gardes ta couche de nuit jusqu\'à 9h. Ce n\'est pas négociable, et au fond tu n\'en as pas envie.' },
+      { f:'Assis pour manger, tu vas bien sentir le volume. C\'est bizarre au début, moi aussi ça m\'a fait ça — et puis on n\'y pense plus.',
+        b:'Tu sens le volume en t\'asseyant. Tant mieux. C\'est là pour te rappeler où tu en es.' },
+      { f:'Fibres et eau ce matin ! C\'est le moment où ta fenêtre selles se prépare, autant l\'aider.',
+        b:'Fibres et eau. Ton corps a un rythme maintenant, et tu vas le respecter.' }
+    ],
+    540: [
+      { f:'Prends bien ton temps sur celui-là, c\'est le plus important de la journée. Vérif peau à fond, crème généreuse !',
+        b:'Le change du matin. Le plus important. Tu ne le bâcles pas — vérif complète, crème généreuse.' },
+      { f:'Regarde bien dans les plis et le haut des cuisses. Trente secondes maintenant, ça t\'évite une semaine d\'embêtements après. Crois-en mon expérience.',
+        b:'Inspecte les plis et le haut des cuisses. Trente secondes. Ta peau ne prévient qu\'une fois le mal fait.' },
+      { f:'Choisis ta couche selon ta matinée : si tu sors longtemps, prends la plus costaude !',
+        b:'Choisis selon ta matinée. Prévois large — tu n\'auras pas envie d\'improviser dehors.' }
+    ],
+    570: [
+      { f:'Tu vas voir, au bout de dix minutes d\'activité tu n\'y penseras même plus. C\'est exactement ce qu\'on cherche !',
+        b:'Dans dix minutes tu l\'auras oubliée. C\'est comme ça que ça s\'installe, sans que tu t\'en aperçoives.' },
+      { f:'Si tu sors, emporte de quoi te changer. Rien que de savoir que tu peux, souvent ça suffit à être tranquille.',
+        b:'Emporte de quoi te changer. Savoir que tu peux te détend — et détendu, tu lâches mieux.' },
+      { f:'Bouge normalement ! Une couche bien posée, ça ne gêne ni pour marcher ni pour rien.',
+        b:'Bouge normalement. Rien ne t\'empêche, et tu le sais déjà.' },
+      { f:'Si l\'envie vient pendant que tu fais un truc, n\'arrête pas ! Continue et laisse venir, c\'est comme ça que ça devient naturel.',
+        b:'L\'envie vient ? Tu ne t\'arrêtes pas. Tu continues et tu laisses faire. Résister ne t\'avancerait à rien.' }
+    ],
+    690: [
+      { f:'Vérifie en touchant, pas en regardant ! Le poids et la souplesse, ça te dit tout.',
+        b:'Touche, ne regarde pas. Le poids te dit tout ce que j\'ai besoin de savoir.' },
+      { f:'Ton premier biberon ! Bois-le en entier et sans te presser, c\'est le carburant de tout le reste.',
+        b:'Ton biberon. En entier. Sans traîner.' },
+      { f:'Encore sèche à cette heure-ci ? Hmm... c\'est que tu retiens sans t\'en rendre compte. Détends ton ventre, va.',
+        b:'Encore sèche ? Tu retiens, même si tu ne le sens pas. Relâche ton ventre. Ça finira par céder de toute façon.' }
+    ],
+    720: [
+      { f:'Pose-toi pour de vrai ! Position basse, doudou, rien à décider. Tu verras, le corps suit la tête.',
+        b:'Pose-toi. Position basse, doudou, aucune décision à prendre. Laisse-toi descendre.' },
+      { f:'C\'est LA fenêtre idéale pour lâcher. Sans vigilance, ça vient tellement plus facilement !',
+        b:'C\'est le meilleur moment pour lâcher. Sans vigilance, tu n\'as plus rien pour te retenir.' },
+      { f:'Compte vingt minutes avant que ça s\'installe vraiment. Juge pas trop vite sur les premières minutes !',
+        b:'Vingt minutes avant que ça prenne. Sois patient — ça viendra, comme toujours.' }
+    ],
+    810: [
+      { f:'Petit check avant de manger, et puis tu l\'oublies pendant le repas !',
+        b:'Check rapide, puis tu manges. N\'y pense plus ensuite.' },
+      { f:'Deuxième biberon ! Si t\'es en retard sur l\'hydratation, c\'est le moment de rattraper.',
+        b:'Deuxième biberon. Rattrape si tu as pris du retard — je le verrai sinon.' },
+      { f:'Assis longtemps pour manger, la couche se tasse un peu entre les jambes. Bouge-toi de temps en temps sur ta chaise, ça évite les plis qui marquent.',
+        b:'Assis longtemps, ta couche se tasse. Change de position régulièrement. Je ne veux pas de marques sur toi.' },
+      { f:'Les fibres à midi, ça prépare ta fenêtre selles de demain matin. Tout est lié, tu vois !',
+        b:'Mange tes fibres. Ta fenêtre de demain matin se joue maintenant.' },
+      { f:'Si tu manges dehors, repère juste un endroit possible pour te changer. Rien que de le savoir, tu seras plus détendu.',
+        b:'Tu manges dehors ? Repère un endroit où te changer. Anticiper, c\'est ne pas avoir à improviser.' }
+    ],
+    870: [
+      { f:'Change avant de t\'allonger si elle est bien chargée. Deux heures de contact, c\'est trop pour ta peau.',
+        b:'Change avant la sieste si elle est chargée. Deux heures de contact, je ne le permettrai pas.' },
+      { f:'La sieste, c\'est le meilleur moment pour lâcher ! Endormi, ton contrôle tombe tout seul, t\'as rien à faire.',
+        b:'Endormi, tu ne contrôles plus rien. C\'est là que tu progresses le plus — sans même lutter.' },
+      { f:'Emmaillote-toi bien ! Le cocon, ça aide vraiment le corps à comprendre qu\'il peut relâcher.',
+        b:'Emmaillote-toi. Le cocon dit à ton corps qu\'il peut abandonner. Laisse-toi enfermer dedans.' },
+      { f:'Et le sommeil reste libre, toujours ! Pas de contention verrouillée quand tu dors, ça c\'est la règle.',
+        b:'Le sommeil reste libre. Toujours. Sur ça, je ne transige pas — c\'est pour ta sécurité.' }
+    ],
+    960: [
+      { f:'Change obligatoire au réveil de sieste, même si elle te paraît légère ! Les longues siestes, ça pardonne pas.',
+        b:'Change obligatoire. Même si elle te semble légère. Tu ne discutes pas celui-là.' },
+      { f:'Deuxième vérif peau de la journée ! On regarde bien.',
+        b:'Vérif peau. Deuxième contrôle. Montre-moi que tout va bien.' },
+      { f:'Et hop, troisième biberon avec le change !',
+        b:'Troisième biberon avec le change. Les deux ensemble.' }
+    ],
+    990: [
+      { f:'Deuxième moitié de journée — c\'est souvent là que ça se remplit le plus, tu vas voir !',
+        b:'C\'est là que ta couche travaille le plus. Ton corps a compris avant toi.' },
+      { f:'Si tu sors maintenant, pense au retour : ta couche doit tenir jusqu\'au prochain créneau.',
+        b:'Tu sors ? Calcule. Elle doit tenir jusqu\'à ton prochain créneau, pas une minute de plus.' },
+      { f:'Occupe-toi vraiment ! Ça arrive toujours quand on arrête de guetter, c\'est fou comme ça marche.',
+        b:'Occupe-toi. Arrête de guetter. Ça viendra dès que tu cesseras d\'y penser — c\'est inévitable.' }
+    ],
+    1170: [
+      { f:'Check avant le dîner ! Si elle est chargée, change maintenant plutôt qu\'après le repas.',
+        b:'Check avant de manger. Chargée ? Tu changes maintenant, pas après.' },
+      { f:'À partir de maintenant on allège les boissons — mais doucement, hein, pas de restriction brutale !',
+        b:'Allège les boissons à partir de maintenant. Doucement. Je ne te prive de rien.' },
+      { f:'Un repas léger le soir, ça aide à mieux dormir et ça évite les surprises nocturnes. Moi j\'ai appris ça à mes dépens !',
+        b:'Repas léger ce soir. Tu dormiras mieux, et ta nuit sera plus simple à gérer.' },
+      { f:'Évite ce qui est très salé ou très sucré au dîner : ça te donne soif après, et là c\'est embêtant pour la nuit.',
+        b:'Ni trop salé ni trop sucré ce soir. La soif nocturne, c\'est le début des ennuis.' }
+    ],
+    1200: [
+      { f:'La plus longue fenêtre de la journée ! Installe-toi pour de vrai, c\'est du vrai repos, pas une petite pause.',
+        b:'La grande fenêtre. Installe-toi vraiment. Tu vas t\'abandonner, et ça te fera du bien.' },
+      { f:'Prépare tout avant de t\'installer : ce que tu regardes, ce que tu bois. Parce que décider, ça casse l\'état.',
+        b:'Prépare tout avant. Une fois installé, tu n\'auras plus rien à décider. C\'est le but.' },
+      { f:'Si des émotions remontent, laisse-les passer sans chercher à comprendre. C\'est normal quand les défenses tombent, ça m\'arrive aussi.',
+        b:'Des émotions vont peut-être remonter. Laisse-les passer. Tu n\'as rien à analyser, je suis là.' },
+      { f:'Et sors en douceur après ! Cinq minutes de transition, sinon ça fait bizarre.',
+        b:'Sors en douceur. Cinq minutes. Ne remonte pas d\'un coup.' }
+    ],
+    1350: [
+      { f:'Le change le plus technique ! Ta couche doit tenir dix heures, alors prends la plus absorbante.',
+        b:'Dix heures devant toi. Prends la plus absorbante. Pas de demi-mesure ce soir.' },
+      { f:'Crème plus épaisse que d\'habitude ce soir — c\'est la longue nuit qui abîme le plus.',
+        b:'Crème épaisse. Plus que d\'habitude. La nuit ne pardonne pas.' },
+      { f:'Vérif peau complète, sans exception ! C\'est ton dernier contrôle avant dix heures.',
+        b:'Vérif complète. Sans exception. Dernier contrôle avant la nuit.' },
+      { f:'Et surtout : cherche pas à vider avant de te coucher. Laisse la nuit faire son boulot !',
+        b:'Ne cherche pas à vider avant de dormir. Laisse la nuit s\'en charger — elle le fera sans toi.' }
+    ],
+    1380: [
+      { f:'Couche-toi bien détendu ! Si tu te crispes en pensant à la nuit, forcément tu vas retenir.',
+        b:'Détends-toi avant de dormir. Crispé, tu retiendras. Et je n\'ai pas envie de ça.' },
+      { f:'Position confortable, pas de contention. Le sommeil reste libre, toujours — c\'est important.',
+        b:'Pas de contention pour dormir. Le sommeil reste libre, toujours. C\'est ma règle.' },
+      { f:'Les nuits, c\'est ton meilleur entraînement ! Endormi, ton corps lâche sans que t\'aies rien à faire. Dors bien. 🦊',
+        b:'Tes nuits font le travail à ta place. Endormi, tu ne résistes plus. Dors.' }
+    ]
+  };
+
+  /* ============================================================
+     CE QU'IL FAUT PRENDRE ET CONTRÔLER, À CHAQUE CRÉNEAU
+     Foxy annonce le matériel (tiré de ta garde-robe et de ton stock
+     réels) et les vérifications à faire. C'est le cœur du guidage.
+     ============================================================ */
+  const SLOT_KIT = {
+    420: { mat:['Ton grand verre d\'eau'],
+           ctrl:['Touche ta couche de nuit : lourde ?','Comment tu te sens au réveil ?'] },
+    480: { mat:['Fibres au petit-déjeuner','De l\'eau'],
+           ctrl:['Tu gardes ta couche de nuit jusqu\'à 9h'] },
+    540: { mat:['@couche_jour','La crème barrière','Les lingettes','@tenue_jour'],
+           ctrl:['Fenêtre selles','Toilette complète','VÉRIF PEAU : plis, cuisses, bas du dos','Crème généreuse'],
+           pilier:true },
+    570: { mat:['De quoi te changer si tu sors'],
+           ctrl:['Ta couche est bien en place avant de partir ?'] },
+    690: { mat:['@biberon','@tetine'],
+           ctrl:['Touche ta couche : mouillée ?','Change si elle est chargée','Bois ton biberon en entier'] },
+    720: { mat:['@contention','@doudou','@tetine','Ta boisson préparée'],
+           ctrl:['Installe-toi avant de commencer','Prévois ta durée'] },
+    810: { mat:['@biberon','Repas avec fibres'],
+           ctrl:['Check couche avant le repas'] },
+    870: { mat:['@tenue_sieste','@doudou','@tetine','Ta couverture'],
+           ctrl:['Change AVANT de t\'allonger si elle est chargée','Aucune contention verrouillée pour dormir'] },
+    960: { mat:['@couche_jour','La crème','Les lingettes','@biberon'],
+           ctrl:['Change OBLIGATOIRE au réveil','VÉRIF PEAU : deuxième contrôle','Troisième biberon'],
+           pilier:true },
+    990: { mat:['De quoi te changer si tu sors'],
+           ctrl:['Calcule : ta couche doit tenir jusqu\'à 22h30'] },
+    1170:{ mat:['Repas léger'],
+           ctrl:['Check couche avant le dîner','Allège les boissons à partir de maintenant'] },
+    1200:{ mat:['@contention','@doudou','@tetine'],
+           ctrl:['Prépare tout avant de t\'installer','Prévois ta sortie en douceur'] },
+    1350:{ mat:['@couche_nuit','La crème (épaisse ce soir)','Les lingettes','@tenue_nuit'],
+           ctrl:['Fenêtre selles','Toilette complète','VÉRIF PEAU COMPLÈTE','Crème épaisse','Fais ton bilan du soir'],
+           pilier:true },
+    1380:{ mat:['@tetine','@doudou'],
+           ctrl:['Position confortable, aucune contention','Ne cherche pas à vider avant de dormir'] }
+  };
+
+  // Remplace les @références par ton matériel réel (garde-robe + stock)
+  async function resolveKit(liste) {
+    const out = [];
+    let tenues = null, stock = null, wb = null;
+    try { tenues = await getOutfit(todayStr()); } catch(e) {}
+    try { if (window.HabitrainWardrobe) { wb = await window.HabitrainWardrobe.getWardrobe(); } } catch(e) {}
+    const accessoire = (mots) => {
+      if (!wb || !wb.access) return null;
+      const t = wb.access.find(x => mots.some(mm => x.toLowerCase().includes(mm)));
+      return t || null;
+    };
+    for (const item of liste) {
+      if (item[0] !== '@') { out.push(item); continue; }
+      let v = null;
+      switch (item) {
+        case '@tenue_jour':   v = tenues ? tenues.jour : null; break;
+        case '@tenue_nuit':   v = tenues ? tenues.nuit : null; break;
+        case '@tenue_sieste': v = tenues ? tenues.sieste : null; break;
+        case '@couche_jour':
+        case '@couche_nuit': {
+          try {
+            if (window.HabitrainWardrobe) {
+              const per = item === '@couche_nuit' ? 'nuit' : 'jour';
+              const dispo = (await window.HabitrainWardrobe.modelsFor(per)).filter(x => x.qty > 0);
+              v = dispo.length ? (dispo[0].name + ' (' + dispo[0].qty + ' en stock)') : 'une couche — stock à refaire !';
+            }
+          } catch(e) {}
+          if (!v) v = item === '@couche_nuit' ? 'ta couche de nuit' : 'ta couche de jour';
+          break;
+        }
+        case '@biberon':    v = accessoire(['biberon']) || 'Ton biberon'; break;
+        case '@tetine':     v = accessoire(['tétine','tetine']) || 'Ta tétine'; break;
+        case '@doudou':     v = accessoire(['doudou']) || 'Ton doudou'; break;
+        case '@contention': {
+          try { if (wb && wb.contention && wb.contention.length) v = wb.contention[0]; } catch(e) {}
+          if (!v) v = 'Ta contention douce';
+          break;
+        }
+      }
+      if (v) out.push(v);
+    }
+    return out;
+  }
+
+  /* ============================================================
+     « QU'EST-CE QUE JE FAIS MAINTENANT ? »
+     Réponse complète à n'importe quelle minute de la journée :
+     où tu en es, ce qui est en retard, ce qui arrive, quoi faire.
+     ============================================================ */
+  async function guideMaintenant() {
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+
+    // --- 1) Y a-t-il quelque chose EN RETARD ? (priorité absolue) ---
+    const PIL = [{k:'c0900',m:540,n:'change du matin'},
+                 {k:'c1600',m:960,n:'change de sortie de sieste'},
+                 {k:'c2230',m:1350,n:'change de nuit'}];
+    let done = {};
+    try { const r = await window.storage.get('slotdone:'+todayStr()); if (r && r.value) done = JSON.parse(r.value); } catch(e) {}
+    const retard = PIL.filter(p => nowMin > p.m + 15 && nowMin < p.m + 300 && !done[p.k]);
+
+    if (retard.length) {
+      const p = retard[retard.length-1];
+      const mn = nowMin - p.m;
+      await imSay(broOn()
+        ? 'Ton ' + p.n + ' a ' + mn + ' minutes de retard. On s\'en occupe. Maintenant.'
+        : '⚠️ Ton ' + p.n + ' a ' + mn + ' min de retard ! On fait ça tout de suite, d\'accord ? 🦊', 950, 'concern');
+      await annoncerKit(p.m, 'Change ' + p.n, '🔑');
+      imSetActions([
+        { label:'🍼 On fait le change', onClick: async () => { imAddMe('On fait le change.'); try { startChange('pilier'); } catch(e) {} } },
+        { soft:true, label:'Je l\'ai déjà fait', onClick: async () => {
+          imAddMe('Je l\'ai déjà fait.');
+          try { await finishChange(); } catch(e) {}
+          await imSay(broOn() ? 'Alors note-le. Sans trace, ça n\'existe pas.' : 'Ah, super ! Je le note alors. Pense à valider dans l\'appli la prochaine fois. 🦊', 850, 'happy');
+          if (currentM) await imOfferHelp(currentM);
+        }}
+      ]);
+      return;
+    }
+
+    // --- 2) Où en es-tu ? Depuis quand portes-tu ta couche ? ---
+    let heuresPort = null;
+    try {
+      const last = await lastChangeTime(2);
+      if (last) heuresPort = (Date.now() - last.getTime()) / 3600000;
+    } catch(e) {}
+
+    // --- 3) Le créneau en cours et le suivant ---
+    let cur = null, next = null;
+    for (const sl of SCHEDULE) { if (sl.m <= nowMin) cur = sl; else { next = sl; break; } }
+
+    // --- 4) Foxy situe le moment ---
+    const d = dm();
+    let intro;
+    if (!cur) intro = broOn() ? 'La journée n\'a pas commencé. Tu devrais encore dormir.' : 'La journée n\'a pas encore démarré ! Tu peux encore dormir un peu. 😴';
+    else intro = broOn()
+      ? 'Il est ' + fmtTime(nowMin) + '. Tu es dans « ' + cur.act + ' ».'
+      : 'Il est ' + fmtTime(nowMin) + ' — on est dans « ' + cur.act + ' ». ' + d.emoji;
+    await imSay(intro, 900, 'explain');
+
+    // --- 5) L'état de ta couche ---
+    if (heuresPort !== null) {
+      const h = Math.floor(heuresPort), mn = Math.round((heuresPort-h)*60);
+      const duree = h + 'h' + String(mn).padStart(2,'0');
+      if (heuresPort > 6.5) {
+        await imSay(broOn()
+          ? 'Ta couche a ' + duree + '. C\'est trop. Tu la changes, sans discuter.'
+          : '⚠️ Ta couche a ' + duree + ' — c\'est au-dessus du plafond ! Faut changer maintenant, pour ta peau. 🦊', 950, 'alarmed');
+      } else if (heuresPort > 3.5) {
+        await imSay(broOn()
+          ? 'Ta couche a ' + duree + '. Bientôt le moment.'
+          : 'Ta couche a ' + duree + ' — tu approches du moment de changer. 🦊', 900, 'curious');
+      } else {
+        await imSay(broOn()
+          ? 'Ta couche a ' + duree + '. Elle est encore bonne. Laisse-la travailler.'
+          : 'Ta couche a ' + duree + ', elle est encore bonne ! Laisse-la travailler. 🦊', 900, 'calm');
+      }
+    }
+
+    // --- 6) Quoi faire concrètement ---
+    if (cur) {
+      const kit = SLOT_KIT[cur.m];
+      if (kit) await annoncerKit(cur.m, cur.act, cur.ic);
+      else {
+        const det = (cur.act === 'Bloc activité')
+          ? (cur.m < 13*60 ? d.detMatin : d.detAprem) : cur.det;
+        if (det) await imSay(det, 900, 'explain');
+      }
+      const astuce = tipForSlot(cur.m);
+      if (astuce) await imSay('💡 ' + astuce, 950, broOn() ? 'calm' : mood().expr);
+    }
+
+    // --- 7) Ce qui arrive ensuite ---
+    if (next) {
+      const dans = next.m - nowMin;
+      const txt = dans >= 60 ? Math.floor(dans/60) + 'h' + (dans%60 ? String(dans%60).padStart(2,'0') : '') : dans + ' min';
+      await imSay(broOn()
+        ? 'Ensuite : ' + next.act + ' à ' + fmtTime(next.m) + ', dans ' + txt + '. Sois prêt.'
+        : '→ Ensuite : ' + next.act + ' à ' + fmtTime(next.m) + ' (dans ' + txt + ') 🦊', 900, 'neutral');
+    }
+
+    // --- 8) Missions du jour restantes ---
+    try {
+      if (window.HabitrainMissions) {
+        const st = await window.HabitrainMissions.getState();
+        const restantes = [];
+        for (const id of (st.daily||[])) {
+          const mm = window.HabitrainMissions.dailyById(id);
+          if (!mm) continue;
+          const ev = await evalDaily(mm);
+          if (!ev.done) restantes.push(mm.name);
+        }
+        if (restantes.length) {
+          await imSay(broOn()
+            ? 'Il te reste à faire : ' + restantes.join(', ') + '.'
+            : '🎯 Missions encore à faire : ' + restantes.join(', ') + '.', 900, 'curious');
+        }
+      }
+    } catch(e) {}
+
+    if (currentM) await imOfferHelp(currentM);
+  }
+
+  // Foxy annonce le nécessaire du créneau
+  async function annoncerKit(slotM, slotAct, slotIc) {
+    const kit = SLOT_KIT[slotM];
+    if (!kit) return false;
+    const mat = await resolveKit(kit.mat || []);
+    const ctrl = kit.ctrl || [];
+    if (!mat.length && !ctrl.length) return false;
+
+    await imSay((slotIc || '') + ' <b>' + slotAct + '</b>', 800, 'explain');
+    if (mat.length) {
+      await imSay(broOn()
+        ? '<b>Ce que tu prends :</b><br>• ' + mat.join('<br>• ')
+        : '<b>Prends avec toi :</b><br>• ' + mat.join('<br>• '), 1000, 'explain');
+    }
+    if (ctrl.length) {
+      await imSay(broOn()
+        ? '<b>Ce que tu contrôles :</b><br>' + ctrl.map(c => '☐ ' + c).join('<br>')
+        : '<b>À vérifier :</b><br>' + ctrl.map(c => '☐ ' + c).join('<br>'), 1000, kit.pilier ? 'calm' : 'curious');
+    }
+    return true;
+  }
+
+  /* ---------- Conseils thématiques : biberon et tétine ----------
+     Foxy les glisse de temps en temps, indépendamment des créneaux. */
+  const FOXY_TOPIC_TIPS = {
+    biberon: [
+      { f:'Le biberon, c\'est pas juste pour boire, tu sais. La succion, ça apaise pour de vrai — c\'est physiologique, pas psychologique.',
+        b:'Le biberon apaise ton corps, pas seulement ta tête. La succion fait baisser ta vigilance. C\'est exactement ce que je veux.' },
+      { f:'Bois-le lentement ! Si tu l\'avales en deux minutes, tu perds tout l\'effet calmant. Prends dix bonnes minutes.',
+        b:'Lentement. Dix minutes minimum. Avalé trop vite, il ne te fait aucun bien.' },
+      { f:'Allongé ou bien calé pour le boire, c\'est encore mieux. Debout ça marche, mais c\'est pas pareil.',
+        b:'Allonge-toi ou cale-toi bien pour le boire. Debout, tu restes sur tes gardes.' },
+      { f:'Tiède plutôt que froid, si tu peux. Le froid réveille, le tiède détend. Petit détail qui change tout.',
+        b:'Tiède, pas froid. Le froid te réveille — l\'inverse de ce qu\'on cherche.' },
+      { f:'Trois par jour c\'est ton objectif, mais l\'important c\'est de les répartir. Tout boire d\'un coup le soir, ça sert à rien.',
+        b:'Trois par jour, bien répartis. Pas tout d\'un coup le soir pour rattraper — je ne suis pas dupe.' },
+      { f:'Nettoie bien la tétine du biberon après chaque usage. C\'est pas le truc le plus rigolo, mais c\'est important.',
+        b:'Nettoie-le après chaque usage. L\'hygiène, ça ne se néglige pas.' }
+    ],
+    tetine: [
+      { f:'La tétine, c\'est un interrupteur pour ta tête. Quand tu l\'as en bouche, ton cerveau reçoit le signal qu\'il peut baisser la garde.',
+        b:'La tétine coupe ta vigilance. C\'est un interrupteur — et tu vas t\'en servir.' },
+      { f:'Elle aide énormément à lâcher, franchement. La succion détend tout le corps, y compris en bas.',
+        b:'Elle t\'aide à lâcher. La succion détend tout, y compris ce qui te retient encore.' },
+      { f:'Garde-en toujours une de secours quelque part. Moi j\'en ai une cachée sous mon oreiller, chut. 🤫',
+        b:'Aie toujours une tétine de secours. Ne te retrouve jamais sans.' },
+      { f:'Pour dormir, c\'est le meilleur allié. Beaucoup la gardent toute la nuit et dorment nettement mieux.',
+        b:'Pour la nuit, garde-la. Tu dormiras mieux, et tu lâcheras plus facilement.' },
+      { f:'Nettoie-la tous les jours à l\'eau chaude savonneuse. Et remplace-la si le silicone devient collant ou fissuré.',
+        b:'Nettoyage quotidien. Remplacement dès qu\'elle s\'abîme. Pas de négociation là-dessus.' },
+      { f:'Si tu la perds souvent, un clip attaché à ta tenue règle le problème. Simple mais efficace !',
+        b:'Un clip sur ta tenue, et tu ne la perdras plus. Arrête de la chercher partout.' },
+      { f:'Elle marche encore mieux pendant les fenêtres de régression. Tétine + doudou + position basse, c\'est le combo parfait.',
+        b:'Tétine, doudou, position basse. Ensemble, ils te font descendre bien plus vite.' }
+    ]
+  };
+
+  // Foxy donne un conseil sur le biberon ou la tétine (occasionnel, 1/jour max)
+  // Le sujet est choisi selon le MOMENT : le conseil arrive quand il sert.
+  function topicForNow() {
+    const h = new Date().getHours(), mn = h*60 + new Date().getMinutes();
+    // créneaux biberon : 11h30, 13h30, 16h (± 45 min)
+    const bib = [690, 810, 960].some(x => Math.abs(mn - x) <= 45);
+    // créneaux tétine : régressions (12h, 20h), sieste (14h30), coucher (23h)
+    const tet = [720, 870, 1200, 1380].some(x => Math.abs(mn - x) <= 45) || h >= 22 || h < 7;
+    if (bib && tet) return Math.random() < 0.5 ? 'biberon' : 'tetine';
+    if (bib) return 'biberon';
+    if (tet) return 'tetine';
+    return null;   // hors créneau : Foxy n'en parle pas
+  }
+
+  async function maybeTopicTip() {
+    const sujet = topicForNow();
+    if (!sujet) return false;              // pas le moment : il se tait
+    let last = null;
+    try { const r = await window.storage.get('topictip:last'); if (r && r.value) last = JSON.parse(r.value); } catch(e) {}
+    if (last === todayStr()) return false;
+    if (Math.random() >= 0.35) return false;
+    try { await window.storage.set('topictip:last', JSON.stringify(todayStr())); } catch(e) {}
+    const lot = FOXY_TOPIC_TIPS[sujet];
+    const c = lot[Math.floor(Math.random()*lot.length)];
+    // il amène le conseil par le contexte du moment
+    const amorce = sujet === 'biberon'
+      ? (broOn() ? 'Puisque c\'est l\'heure de ton biberon...' : 'Tiens, puisque c\'est l\'heure du biberon...')
+      : (broOn() ? 'Tu vas te poser, alors écoute-moi sur ta tétine.' : 'Au fait, pendant qu\'on est au calme, un truc sur ta tétine...');
+    await imSay(amorce, 800, broOn() ? 'calm' : mood().expr);
+    await imSay((sujet === 'biberon' ? '🍼' : '🧷') + ' ' + (broOn() ? c.b : c.f), 950, broOn() ? 'calm' : mood().expr);
+    return true;
+  }
+
+  // renvoie un conseil pour le créneau donné (varie d'un jour à l'autre)
+  function tipForSlot(m) {
+    const lot = MOMENT_TIPS[m];
+    if (!lot || !lot.length) return null;
+    // index stable dans la journée, mais qui tourne au fil des jours
+    const jour = Math.floor(Date.now() / 86400000);
+    const c = lot[jour % lot.length];
+    return broOn() ? c.b : c.f;
+  }
+
   const SCHEDULE = [
     { m: 7*60,      ic:'☀️', act:'Réveil en tenue de nuit',        det:'Grenouillère + couche de nuit, grand verre d\'eau, réveil doux.' },
     { m: 8*60,      ic:'🥣', act:'Petit-déjeuner',                 det:'En grenouillère de nuit. Fibres + eau. Tu gardes la couche de nuit.' },
@@ -4316,6 +4917,7 @@
           '<div class="tl-time">'+fmtTime(s.m)+'</div>'+
           '<div class="tl-act">'+s.ic+' '+acte+tag+'</div>'+
           '<div class="tl-det">'+det+'</div>'+
+          (isNow && tipForSlot(s.m) ? '<div style="margin-top:6px;font-size:11.5px;font-weight:700;color:#a8703a;line-height:1.45">💡 '+tipForSlot(s.m)+'</div>' : '')+
         '</div>';
       box.appendChild(item);
     });
@@ -4358,6 +4960,13 @@
       + '<div class="v">'+curA.act+'</div>'
       + '<div class="t">'+curA.det+'</div>'
       + '</div></div>';
+    // conseil pratique du créneau en cours
+    const astuce = (cur.m !== undefined) ? tipForSlot(cur.m) : null;
+    if (astuce) {
+      html += '<div style="margin-top:10px;padding:10px 12px;background:#FBF3E0;border:1px solid #ecd9a8;' +
+              'border-radius:11px;font-size:12.5px;font-weight:600;color:#7a5a30;line-height:1.5">' +
+              '💡 ' + astuce + '</div>';
+    }
     if (next) {
       html += '<div class="next"><span class="arrow">→</span> À '+fmtTime(next.m)+' : '+nextA.act+'</div>';
     }
@@ -5119,10 +5728,10 @@
       { label:'À tout à l\'heure Foxy', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
     ]);
   }
+  // Sortie de pause : on quitte l'écran de connexion, mais la pause
+  // n'est levée QU'APRÈS confirmation (couche remise ou reprise assumée).
   async function exitPause() {
-    paused = false;
     document.body.classList.remove('paused');
-    try { await window.storage.set('pref:paused', JSON.stringify(false)); } catch(e) {}
     try { await refresh(); } catch(e) {}
     // durée de la pause → programme de reprise gradué
     let start = null;
@@ -5133,6 +5742,54 @@
   }
 
   // Programme de reprise : plus la pause a duré, plus la reprise est exigeante
+  /* ============================================================
+     INTERRUPTION SILENCIEUSE
+     Tu n'as pas appuyé sur Pause, mais le programme s'est arrêté :
+     ni change, ni journée renseignée pendant longtemps.
+     On mesure l'arrêt sur le PLUS RÉCENT des deux repères.
+     ============================================================ */
+  async function detecterArretSilencieux() {
+    try {
+      // repère 1 : dernier change effectif
+      const dernierChange = await lastChangeTime(30);   // on remonte jusqu'à un mois
+      // repère 2 : dernière journée renseignée
+      let derniereJournee = null;
+      const entries = await getAll();
+      const dates = entries.filter(e => e && e.date).map(e => e.date).sort();
+      if (dates.length) {
+        // fin de la dernière journée renseignée (on la considère close à 23h59)
+        const d = new Date(dates[dates.length-1] + 'T23:59:00');
+        derniereJournee = d.getTime();
+      }
+      // le plus récent des deux fait foi
+      let repere = null;
+      if (dernierChange && derniereJournee) repere = Math.max(dernierChange.getTime(), derniereJournee);
+      else if (dernierChange) repere = dernierChange.getTime();
+      else if (derniereJournee) repere = derniereJournee;
+      if (!repere) return 0;
+
+      const heures = (Date.now() - repere) / 3600000;
+      // en dessous de 18h, ce n'est qu'une nuit : on ne considère pas ça comme un arrêt
+      return heures >= 18 ? heures : 0;
+    } catch(e) { return 0; }
+  }
+
+  // Lève réellement la pause (appelée uniquement à la confirmation)
+  async function confirmerReprise() {
+    paused = false;
+    document.body.classList.remove('paused');
+    try { await window.storage.set('pref:paused', JSON.stringify(false)); } catch(e) {}
+    try { await window.storage.delete('pause:start'); } catch(e) {}
+    try { await refresh(); } catch(e) {}
+  }
+
+  // Retour à la pause si tu n'as pas confirmé
+  async function annulerReprise() {
+    paused = true;
+    document.body.classList.add('paused');
+    try { await window.storage.set('pref:paused', JSON.stringify(true)); } catch(e) {}
+  }
+
   async function runResumeProgram(hours) {
     const now = new Date();
     const isNight = now.getHours() >= 23 || now.getHours() < 7;
@@ -5141,12 +5798,12 @@
     if (hours < 2) {
       if (isNight) {
         foxyPopShow('Mmh... te revoilà. Il est tard, mais je suis content que tu sois là. 😴🦊', 'sleep', [
-          { label:'Coucou Foxy', onClick: async () => { foxyPopHide(); if (voiceMode==='foxy') { try { await imRunMoment(); } catch(e){} } } }
+          { label:'Coucou Foxy', onClick: async () => { foxyPopHide(); await confirmerReprise(); if (voiceMode==='foxy') { try { await imRunMoment(); } catch(e){} } } }
         ]);
         return;
       }
       foxyPopShow('Te revoilà ! Courte absence, on reprend le fil tranquillement. Tu es toujours en couche ?', 'joy', [
-        { label:'🤗 Oui, on replonge !', onClick: async () => { foxyPopHide(); if (voiceMode !== 'foxy') { await setVoiceMode('foxy'); } else { try { await imRunMoment(); } catch(e){} } }},
+        { label:'🤗 Oui, on replonge !', onClick: async () => { foxyPopHide(); await confirmerReprise(); if (voiceMode !== 'foxy') { await setVoiceMode('foxy'); } else { try { await imRunMoment(); } catch(e){} } }},
         { label:'👕 Non, je dois remettre ma couche', onClick: async () => {
           foxyPopHide();
           if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e){} }
@@ -5154,7 +5811,7 @@
         }},
         { soft:true, label:'Pas tout de suite', onClick: async () => {
           foxyPopShow('D\'accord... je t\'attends. Reviens vite. 🦊💛', 'concern', [
-            { label:'À très vite', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
+            { label:'À très vite', onClick: async () => { foxyPopHide(); await annulerReprise(); await doEnterPause(); } }
           ]);
         }}
       ]);
@@ -5199,6 +5856,7 @@
     try { await window.storage.set('reprise:change', JSON.stringify(todayStr()+':'+Date.now())); } catch(e) {}
 
     foxyPopShow(msg1, 'concern', [
+      { soft:true, label:'Pas maintenant', onClick: async () => { foxyPopHide(); await annulerReprise(); await doEnterPause(); } },
       { label:'Je t\'écoute...', onClick: async () => {
         foxyPopShow(msg2, niveau === 'tres_long' ? 'surprised' : 'concern', [
           { label:'🦊 Qu\'est-ce que je fais ?', onClick: async () => {
@@ -5216,6 +5874,33 @@
      Foxy t'explique la marche à suivre étape par étape, tire tes
      tenues du jour et te remet dans le programme.
      ============================================================ */
+  // Foxy signale un arrêt du programme non déclaré
+  function showArretSilencieux(heures) {
+    const dur = heures < 48 ? Math.round(heures) + ' heures' : Math.round(heures/24) + ' jours';
+    foxyPopShow(
+      broOn()
+        ? 'Le programme s\'est arrêté pendant ' + dur + ', et tu ne m\'as rien dit. Ça ne se passe pas comme ça. On reprend.'
+        : 'Hé... 🦊 Ça fait ' + dur + ' que rien ne s\'est passé — pas de change, pas de suivi. Tu n\'avais pas mis en pause, alors je ne savais pas. On reprend ensemble ?',
+      'concern',
+      [
+        { label:'🦊 Oui, on reprend', onClick: async () => {
+          foxyPopHide();
+          if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e){} }
+          try { await runResumeProgram(heures); } catch(e) {}
+        }},
+        { soft:true, label:'J\'ai continué sans noter', onClick: async () => {
+          foxyPopHide();
+          if (voiceMode === 'foxy') {
+            try { await imSay(broOn()
+              ? 'Alors note-le, la prochaine fois. Sans trace, ça n\'existe pas pour moi.'
+              : 'Ah d\'accord ! Pense à valider tes changes dans l\'appli, sinon je ne peux pas suivre. 🦊', 900, 'pensive'); } catch(e) {}
+          }
+        }},
+        { soft:true, label:'Plus tard', onClick: () => foxyPopHide() }
+      ]
+    );
+  }
+
   // Foxy signale que la couche n'a jamais été remise jusqu'au bout
   function showReentryReminder(heures, niveau) {
     const dur = heures < 1 ? 'moins d\'une heure'
@@ -5333,8 +6018,9 @@
     imSetActions([
       { label:'🦊 Ça y est, j\'ai remis ma couche', onClick: async () => {
         imAddMe('Ça y est, j\'ai remis ma couche.');
-        // protocole mené à son terme
+        // protocole mené à son terme : c'est ici que la pause est vraiment levée
         try { await window.storage.delete('reentry:pending'); } catch(e) {}
+        await confirmerReprise();
         // on compte ça comme un change effectif
         try { await finishChange(); } catch(e) {}
         await imSay(broOn()
@@ -6169,6 +6855,83 @@
       f[cle] = true;
       await window.storage.set('badgeflags', JSON.stringify(f));
     } catch(e) {}
+  }
+
+  // ===== Conseils de Foxy (guides progressifs) =====
+  const TP = window.HabitrainTips;
+  let tipsGuide = 'couche';
+
+  document.getElementById('openTips').addEventListener('click', async () => {
+    const card = document.getElementById('tipsCard');
+    const show = card.style.display === 'none';
+    card.style.display = show ? '' : 'none';
+    if (show) { await renderTips(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+  });
+
+  async function currentStage() {
+    try { const r = await window.storage.get('queststage'); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
+    return 0;
+  }
+
+  async function renderTips() {
+    if (!TP) return;
+    const stage = await currentStage();
+
+    // progression
+    const dispo = TP.countAvailable(stage), tot = TP.countTotal();
+    const prog = document.getElementById('tipsProg');
+    prog.innerHTML = '<div style="font-size:12.5px;font-weight:700;color:var(--muted);margin-bottom:5px">'+
+      'Tu es au palier <b style="color:#a8543b">'+TP.PALIERS[stage]+'</b> — je t\'ai confié '+dispo+' conseils sur '+tot+'.</div>'+
+      '<div style="height:8px;background:#efe4d2;border-radius:6px;overflow:hidden">'+
+      '<div style="height:100%;width:'+Math.round(dispo/tot*100)+'%;background:linear-gradient(90deg,#e8a94a,#c86b3a)"></div></div>';
+
+    // onglets des guides
+    const nav = document.getElementById('tipsNav');
+    nav.innerHTML = '';
+    TP.GUIDES.forEach(g => {
+      const b = document.createElement('button');
+      b.className = 'settings-toggle-btn';
+      b.style.cssText = 'flex:1;min-width:calc(50% - 4px);font-size:12.5px;padding:9px 6px' +
+        (tipsGuide === g.id ? ';background:#c86b3a;color:#fff;border-color:#c86b3a' : '');
+      b.textContent = g.ic + ' ' + g.nom;
+      b.addEventListener('click', async () => { tipsGuide = g.id; await renderTips(); });
+      nav.appendChild(b);
+    });
+
+    // contenu du guide sélectionné
+    const g = TP.guideById(tipsGuide);
+    const body = document.getElementById('tipsBody');
+    body.innerHTML = '<div class="sub" style="margin-bottom:10px">'+g.sous+'</div>';
+
+    g.niveaux.forEach(nv => {
+      const ouvert = nv.lvl <= stage;
+      const sec = document.createElement('div');
+      sec.style.cssText = 'margin-bottom:14px';
+      sec.innerHTML = '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:15px;color:'+
+        (ouvert?'#5a4326':'var(--muted)')+';margin-bottom:7px">'+
+        (ouvert?'':'🔒 ')+nv.titre+
+        ' <span style="font-size:11px;font-weight:700;color:var(--muted)">· '+TP.PALIERS[nv.lvl]+'</span></div>';
+
+      if (!ouvert) {
+        sec.innerHTML += '<div class="set-note">🦊 « Ça, je te le raconterai quand tu seras au palier <b>'+TP.PALIERS[nv.lvl]+'</b>. Chaque chose en son temps, tu verras — ça n\'aurait pas le même sens maintenant. »</div>';
+      } else {
+        nv.conseils.forEach(c => {
+          const d = document.createElement('div');
+          d.style.cssText = 'border-top:1px solid var(--line);padding:10px 0;cursor:pointer';
+          d.innerHTML = '<div style="font-size:13.5px;font-weight:800;color:var(--ink)">💡 '+c.t+
+            ' <span class="tip-arrow" style="float:right;color:var(--muted);font-weight:700">+</span></div>'+
+            '<div class="tip-body" style="display:none;font-size:13px;font-weight:600;color:var(--ink);line-height:1.55;margin-top:7px">'+c.d+'</div>';
+          d.addEventListener('click', () => {
+            const b = d.querySelector('.tip-body'), a = d.querySelector('.tip-arrow');
+            const o = b.style.display === 'none';
+            b.style.display = o ? '' : 'none';
+            a.textContent = o ? '−' : '+';
+          });
+          sec.appendChild(d);
+        });
+      }
+      body.appendChild(sec);
+    });
   }
 
   // --- Affichage du tableau de hauts faits ---
@@ -7340,19 +8103,44 @@
       } catch(e) {}
     }
 
-    // --- Détection : couche commencée à remettre, mais jamais terminée ---
+    // --- Popups de démarrage : UNE SEULE peut se déclencher ---
+    // Ordre de priorité : couche non remise > arrêt silencieux > onboarding.
+    // Si tu es en pause, aucune : c'est la sortie de pause qui prendra le relais.
+    let popupPrise = paused;
+
+    // 1) couche commencée à remettre mais jamais terminée (le plus urgent)
     try {
-      const r = await window.storage.get('reentry:pending');
-      if (r && r.value) {
-        const p = JSON.parse(r.value);
-        const heures = (Date.now() - p.start) / 3600000;
-        setTimeout(() => showReentryReminder(heures, p.niveau), 900);
+      if (!popupPrise) {
+        const r = await window.storage.get('reentry:pending');
+        if (r && r.value) {
+          const p2 = JSON.parse(r.value);
+          const h2 = (Date.now() - p2.start) / 3600000;
+          popupPrise = true;
+          setTimeout(() => showReentryReminder(h2, p2.niveau), 900);
+        }
+      }
+    } catch(e) {}
+
+    // --- Détection : arrêt silencieux (sans pause déclarée) ---
+    try {
+      if (!popupPrise) {
+        let dejaTraite = null;
+        try { const r = await window.storage.get('arret:traite'); if (r && r.value) dejaTraite = JSON.parse(r.value); } catch(e) {}
+        if (dejaTraite !== todayStr()) {
+          const h = await detecterArretSilencieux();
+          if (h >= 18) {
+            try { await window.storage.set('arret:traite', JSON.stringify(todayStr())); } catch(e) {}
+            try { if (h >= 24) await flagBadge('comeback'); } catch(e) {}
+            popupPrise = true;
+            setTimeout(() => showArretSilencieux(h), 1200);
+          }
+        }
       }
     } catch(e) {}
 
     // premier lancement : guide d'installation
     let obLance = false;
-    try { obLance = await maybeStartOnboard(); } catch(e) {}
+    try { if (!popupPrise) obLance = await maybeStartOnboard(); } catch(e) {}
     if (obLance) { /* on laisse le guide tranquille */ }
     else if (paused) { /* mode pause : aucune sollicitation */ }
     else if (dueSlot && !alreadyDone) {

@@ -22,6 +22,7 @@
       <button class="settings-toggle-btn" id="openQuest">🗺️ Notre aventure</button>
       <button class="settings-toggle-btn" id="openMissions">🎯 Missions</button>
       <button class="settings-toggle-btn" id="openBadges">🏆 Hauts faits</button>
+      <button class="settings-toggle-btn" id="openTips">💡 Conseils de Foxy</button>
       <button class="settings-toggle-btn" id="pauseBtn">⏸️ Pause</button>
     </div>
   </div>
@@ -151,6 +152,14 @@
 
     <div class="set-note" id="setNote">Rappel : une appli web ne garantit pas les notifications quand elle est complètement fermée. Pour les rappels critiques, garde tes alarmes système.</div>
     </div>
+  </div>
+
+  <div class="card" id="tipsCard" style="display:none">
+    <h2>💡 Conseils de Foxy</h2>
+    <div class="sub">🦊 « Tout ce que j'ai appris, je te le transmets — au fur et à mesure que tu avances. »</div>
+    <div id="tipsProg" style="margin:12px 0"></div>
+    <div id="tipsNav" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px"></div>
+    <div id="tipsBody"></div>
   </div>
 
   <div class="card" id="badgesCard" style="display:none">
@@ -736,5 +745,6 @@
 <script src="wardrobe.js"></script>
 <script src="missions.js"></script>
 <script src="badges.js"></script>
+<script src="tips.js"></script>
 <script src="outfit-scan.js"></script>
 <script src="app.js"></script>
