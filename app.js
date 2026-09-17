@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '15.3';
+  const APP_VERSION = '15.5';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -298,6 +298,55 @@
          'Les premiers pas après un change, avec ce petit balancement... franchement, j\'adore. C\'est mon moment préféré.',
          'Maintenant c\'est fait, et je sais que je n\'ai plus à y penser. Cette tranquillité-là, c\'est ce que je cherchais depuis le début.' ]
   };
+
+  /* ---------- Ce que sa couche lui apporte, au quotidien ----------
+     De petites remarques courtes, glissées régulièrement. Foxy dit
+     simplement qu'il s'y sent bien et pourquoi. ---------- */
+  const FOXY_WELLBEING = [
+    'Je me sens bien là-dedans, tu sais. C\'est tout bête mais c\'est vrai.',
+    'J\'aime bien ce petit poids constant. Ça me rappelle que je suis à ma place.',
+    'Franchement ? Depuis que je porte des couches, j\'ai la tête bien plus légère. Y\'a un truc en moins à gérer en permanence.',
+    'Ce que ça m\'apporte le plus, c\'est de ne plus avoir à surveiller. Tu imagines pas la place que ça libère.',
+    'Je me sens contenu. C\'est le mot juste, je crois. Contenu, et du coup tranquille.',
+    'Y\'a cette douceur contre moi, tout le temps. C\'est bête mais ça me rassure toute la journée.',
+    'Moi ça m\'apaise. Vraiment. C\'est pas juste pratique, ça me fait du bien.',
+    'Tu sais ce que je préfère ? Ne plus jamais être pressé. Plus de course, plus d\'urgence. Juste... être.',
+    'Je dors tellement mieux depuis. Plus de réveil en pleine nuit, plus rien. Des nuits entières.',
+    'C\'est devenu mon petit cocon portable. Où que j\'aille, j\'emmène un bout de confort avec moi.',
+    'Ça m\'a appris à me détendre. Pour de vrai, pas juste à faire semblant.',
+    'Le matin quand je la mets, y\'a comme un soulagement. Ma journée peut commencer.',
+    'J\'ai plus cette petite tension de fond que j\'avais avant. Elle a disparu, et elle m\'a pas manqué.',
+    'C\'est doux, c\'est chaud, ça tient bien. Franchement je vois pas ce que je pourrais demander de mieux.',
+    'Le plus beau cadeau que ça m\'a fait, c\'est d\'arrêter de me battre contre mon propre corps.',
+    'Je me sens en sécurité. C\'est le mot. Comme si rien de grave ne pouvait arriver.',
+    'Y\'a plus rien à prouver quand je suis en couche. Je suis juste moi, et ça suffit.'
+  ];
+
+  // Foxy dit simplement qu'il s'y sent bien (régulier mais léger)
+  async function maybeWellbeing() {
+    if (broOn()) return false;
+    let n = 0, jour = null;
+    try {
+      const r = await window.storage.get('wellb:state');
+      if (r && r.value) { const st = JSON.parse(r.value); n = st.n||0; jour = st.jour||null; }
+    } catch(e) {}
+    if (jour !== todayStr()) n = 0;
+    if (n >= 2) return false;              // deux fois par jour maximum
+    if (Math.random() >= 0.3) return false;
+    // évite de répéter les mêmes
+    let vus = [];
+    try { const r = await window.storage.get('wellb:vus'); if (r && r.value) vus = JSON.parse(r.value); } catch(e) {}
+    let pool = FOXY_WELLBEING.filter(x => !vus.includes(x));
+    if (!pool.length) { pool = FOXY_WELLBEING; vus = []; }
+    const ligne = pool[Math.floor(Math.random()*pool.length)];
+    vus.push(ligne); if (vus.length > 12) vus = vus.slice(-12);
+    try {
+      await window.storage.set('wellb:state', JSON.stringify({ n:n+1, jour:todayStr() }));
+      await window.storage.set('wellb:vus', JSON.stringify(vus));
+    } catch(e) {}
+    await imSay('🦊 ' + ligne, 950, pick(['moved','calm','comfort']));
+    return true;
+  }
 
   const FOXY_FEELS_STORIES = [
     { t:'Ce que ça me fait, ma couche',
@@ -2801,21 +2850,54 @@
 
   // Depuis combien de temps la couche actuelle est portée (dernier change enregistré)
   async function lastChangeTime(profondeur) {
-    // cherche le change_fait le plus récent (2 jours par défaut,
-    // davantage pour détecter une longue interruption)
+    // Cherche le change_fait le plus récent. On balaie d'abord les derniers
+    // jours (rapide), puis on remonte plus loin en s'appuyant sur les dates
+    // réellement enregistrées — sinon une longue interruption reste invisible.
     let latest = null;
     const n = profondeur || 2;
-    for (let i = 0; i < n; i++) {
-      const d = new Date(); d.setDate(d.getDate()-i);
-      const list = await getChecks(d.toISOString().slice(0,10));
+    const vues = new Set();
+
+    const scanDate = async (ds) => {
+      if (vues.has(ds)) return;
+      vues.add(ds);
+      const list = await getChecks(ds);
       list.forEach(c => {
         if ((c.result === 'change_fait' || c.result === 'change_fait_sanspreuve') && c.t) {
           const t = new Date(c.t);
           if (!latest || t > latest) latest = t;
         }
       });
+    };
+
+    // balayage jour par jour sur la profondeur demandée (max 40 pour rester rapide)
+    const nJours = Math.min(n, 40);
+    for (let i = 0; i < nJours; i++) {
+      const d = new Date(); d.setDate(d.getDate()-i);
+      await scanDate(d.toISOString().slice(0,10));
     }
+    if (latest) return latest;
+
+    // rien trouvé : on remonte sur les dates réellement enregistrées
+    try {
+      const entries = await getAll();
+      const dates = entries.filter(e => e && e.date).map(e => e.date).sort().reverse();
+      for (const ds of dates.slice(0, 120)) {
+        await scanDate(ds);
+        if (latest) break;
+      }
+    } catch(e) {}
     return latest;
+  }
+
+  // Temps écoulé depuis le dernier change EFFECTIF, en heures.
+  // C'est le seul indicateur valable du temps sans couche : une journée
+  // renseignée ne prouve pas que tu portais quelque chose.
+  async function tempsSansCouche() {
+    try {
+      const last = await lastChangeTime(40);
+      if (!last) return null;
+      return (Date.now() - last.getTime()) / 3600000;
+    } catch(e) { return null; }
   }
 
   function sinceComment(hours, isNight, ctx) {
@@ -2898,7 +2980,7 @@
     const nextEl = document.getElementById('sinceNext');
     const stateEl = document.getElementById('sinceState');
     if (!timeEl) return;
-    const last = await lastChangeTime();
+    const last = await lastChangeTime(40);
     // statut couche = dernier état rapporté (après le dernier change)
     if (stateEl) stateEl.innerHTML = await renderDiaperState(last);
     if (!last) {
@@ -5769,10 +5851,16 @@
       if (!repere) return 0;
 
       const heures = (Date.now() - repere) / 3600000;
-      // en dessous de 18h, ce n'est qu'une nuit : on ne considère pas ça comme un arrêt
-      return heures >= 18 ? heures : 0;
+      // durée SANS COUCHE : uniquement depuis le dernier change
+      const sansCouche = dernierChange ? (Date.now() - dernierChange.getTime()) / 3600000 : null;
+      // en dessous de 18h, ce n'est qu'une nuit : pas un arrêt
+      if (heures < 18) return 0;
+      // on mémorise le détail pour le message
+      _arretDetail = { suivi: heures, sansCouche };
+      return heures;
     } catch(e) { return 0; }
   }
+  let _arretDetail = null;
 
   // Lève réellement la pause (appelée uniquement à la confirmation)
   async function confirmerReprise() {
@@ -5875,12 +5963,29 @@
      tenues du jour et te remet dans le programme.
      ============================================================ */
   // Foxy signale un arrêt du programme non déclaré
+  function fmtDuree(h) {
+    if (h == null) return null;
+    if (h < 48) return Math.round(h) + ' heures';
+    const j = Math.floor(h / 24);
+    if (j < 14) return j + ' jours';
+    const sem = Math.floor(j / 7), reste = j % 7;
+    return sem + ' semaine' + (sem > 1 ? 's' : '') + (reste ? ' et ' + reste + ' jour' + (reste > 1 ? 's' : '') : '');
+  }
+
   function showArretSilencieux(heures) {
-    const dur = heures < 48 ? Math.round(heures) + ' heures' : Math.round(heures/24) + ' jours';
+    const dur = fmtDuree(heures);
+    // le temps SANS COUCHE est souvent plus long que l'arrêt du suivi
+    const sc = (_arretDetail && _arretDetail.sansCouche) ? _arretDetail.sansCouche : null;
+    const durSC = fmtDuree(sc);
+    const detail = (durSC && sc > heures + 12)
+      ? (broOn()
+          ? ' Et tu n\'as pas eu de couche depuis ' + durSC + '. Ça, c\'est encore plus long.'
+          : ' Et ta dernière couche remonte à ' + durSC + '... ça fait un bail. 🦊')
+      : '';
     foxyPopShow(
       broOn()
-        ? 'Le programme s\'est arrêté pendant ' + dur + ', et tu ne m\'as rien dit. Ça ne se passe pas comme ça. On reprend.'
-        : 'Hé... 🦊 Ça fait ' + dur + ' que rien ne s\'est passé — pas de change, pas de suivi. Tu n\'avais pas mis en pause, alors je ne savais pas. On reprend ensemble ?',
+        ? 'Le programme s\'est arrêté pendant ' + dur + ', et tu ne m\'as rien dit.' + detail + ' Ça ne se passe pas comme ça. On reprend.'
+        : 'Hé... 🦊 Ça fait ' + dur + ' que rien ne s\'est passé — pas de change, pas de suivi.' + detail + ' On reprend ensemble ?',
       'concern',
       [
         { label:'🦊 Oui, on reprend', onClick: async () => {
@@ -6199,6 +6304,105 @@
       }
       try { await refresh(); } catch(e) {}
     });
+  }
+
+  // ===== Feuille complète de QR à imprimer =====
+  const QR_PLACEMENT = {
+    change_pilier: 'Sur ton tapis à langer',
+    change_tous:   'Sur ton tapis à langer',
+    biberon:       'Près du frigo ou du plan de travail',
+    coucher:       'Sur la porte de ta chambre',
+    unlock:        'Sur ton bracelet — à garder au poignet'
+  };
+
+  (function(){
+    const b = document.getElementById('qrPrintSheet');
+    if (b) b.addEventListener('click', async () => { await buildQrSheet(); });
+    const c = document.getElementById('qrSheetClose');
+    if (c) c.addEventListener('click', () => document.body.classList.remove('qrsheet-on'));
+    const p = document.getElementById('qrSheetPrint');
+    if (p) p.addEventListener('click', () => window.print());
+  })();
+
+  async function buildQrSheet() {
+    const QR = window.HabitrainQR, WB = window.HabitrainWardrobe;
+    const box = document.getElementById('qrSheetBody');
+    if (!box || !QR) return;
+    document.body.classList.add('qrsheet-on');
+    box.innerHTML = '<div class="qrsheet-sub">Génération…</div>';
+    window.scrollTo(0, 0);
+
+    const frag = document.createElement('div');
+    const now = new Date();
+    frag.innerHTML =
+      '<div class="qrsheet-title">🦊 Habitrain — mes QR codes</div>' +
+      '<div class="qrsheet-sub">Généré le ' + now.toLocaleDateString('fr-FR') +
+      ' · Ces codes sont uniques à ton installation. Découpe chaque étiquette et plastifie-la.</div>';
+
+    const ajouterSection = async (titre, items) => {
+      if (!items.length) return;
+      const h = document.createElement('div');
+      h.className = 'qrsheet-sec'; h.textContent = titre;
+      frag.appendChild(h);
+      const grid = document.createElement('div');
+      grid.className = 'qrsheet-grid';
+      for (const it of items) {
+        const card = document.createElement('div');
+        card.className = 'qrsheet-card';
+        const cv = document.createElement('canvas');
+        const payload = await QR.payloadFor(it.id);
+        QR.drawQR(cv, payload, 120);
+        card.appendChild(cv);
+        const n = document.createElement('div');
+        n.className = 'n'; n.textContent = it.nom;
+        card.appendChild(n);
+        if (it.ou) {
+          const w = document.createElement('div');
+          w.className = 'w'; w.textContent = '📍 ' + it.ou;
+          card.appendChild(w);
+        }
+        grid.appendChild(card);
+      }
+      frag.appendChild(grid);
+    };
+
+    // 1) Actions à valider
+    const actions = QR.QR_ACTIONS.map(a => ({
+      id: a.id, nom: a.label, ou: QR_PLACEMENT[a.id] || ''
+    }));
+    await ajouterSection('Actions à valider', actions);
+
+    // 2) Bracelet
+    await ajouterSection('Bracelet de déverrouillage', [
+      { id:'unlock', nom:'Bracelet', ou: QR_PLACEMENT.unlock }
+    ]);
+
+    // 3) Tenues
+    if (WB) {
+      try {
+        const w = await WB.getWardrobe();
+        const vus = new Set();
+        const tenues = [];
+        for (const cat of ['nuit','jour','sieste']) {
+          for (const nom of (w[cat] || [])) {
+            if (vus.has(nom)) continue;
+            vus.add(nom);
+            tenues.push({ id: WB.itemId(cat, nom), nom, ou: 'À l\'intérieur du col ou de la ceinture' });
+          }
+        }
+        await ajouterSection('Mes tenues (' + tenues.length + ')', tenues);
+      } catch(e) {}
+    }
+
+    const pied = document.createElement('div');
+    pied.className = 'qrsheet-sub';
+    pied.style.marginTop = '18px';
+    pied.textContent = '⚠️ Garde une copie de cette feuille en lieu sûr : si tu actives le bracelet obligatoire, c\'est ta porte de sortie. Secours anti-blocage : 3 tapes rapides sur le logo de l\'écran de connexion.';
+    frag.appendChild(pied);
+
+    box.innerHTML = '';
+    box.appendChild(frag);
+    try { await window.storage.set('ob:qrdone', JSON.stringify(true)); } catch(e) {}
   }
 
   // ===== Programmation des tags NFC =====

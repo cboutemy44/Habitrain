@@ -1,5 +1,5 @@
 // Service worker Habitrain — cache app-shell pour fonctionnement hors-ligne.
-const CACHE = 'habitrain-v15.3';
+const CACHE = 'habitrain-v15.5';
 const ASSETS = [
   './',
   './index.html',

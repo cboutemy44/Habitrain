@@ -50,6 +50,15 @@
     </div>
   </div>
 
+  <div id="qrSheet" style="display:none">
+    <div class="qrsheet-bar">
+      <button id="qrSheetClose">✕ Fermer</button>
+      <span class="qrsheet-hint">Imprime cette page, puis découpe et plastifie chaque étiquette.</span>
+      <button id="qrSheetPrint">🖨️ Imprimer</button>
+    </div>
+    <div id="qrSheetBody" class="qrsheet-body"></div>
+  </div>
+
   <div id="onboard" style="display:none">
     <div class="ob-inner">
       <div class="ob-foxy" id="obFoxy"></div>
@@ -290,6 +299,7 @@
     <div class="set-cat"><h4>👕 QR de mes vêtements</h4>
       <div class="sub">Un QR par tenue, à coller ou coudre à l'intérieur (col, ceinture). Scanne-le à chaque fois que tu t'habilles : Foxy saura ce que tu portes.</div>
       <button class="settings-toggle-btn" id="qrClothesGen">👕 Générer les QR de mes tenues</button>
+      <button class="settings-toggle-btn" id="qrPrintSheet" style="margin-top:8px">🖨️ Feuille complète à imprimer</button>
       <div id="qrClothesList" style="margin-top:10px"></div>
     </div>
 
