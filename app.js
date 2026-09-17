@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '15.6';
+  const APP_VERSION = '15.7';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -5787,7 +5787,12 @@
     paused = true;
     document.body.classList.add('paused');
     try { await window.storage.set('pref:paused', JSON.stringify(true)); } catch(e) {}
-    try { await window.storage.set('pause:start', JSON.stringify(Date.now())); } catch(e) {}
+    // On ne réécrit la date de début QUE si la pause n'en a pas déjà une.
+    // Sinon, renoncer à reprendre remettrait le compteur à zéro.
+    try {
+      const r = await window.storage.get('pause:start');
+      if (!r || !r.value) await window.storage.set('pause:start', JSON.stringify(Date.now()));
+    } catch(e) {}
     const ov = document.getElementById('overlay'); if (ov) ov.classList.remove('show');
     fillFacade();
   }
@@ -5818,7 +5823,13 @@
     // durée de la pause → programme de reprise gradué
     let start = null;
     try { const r = await window.storage.get('pause:start'); if (r && r.value) start = JSON.parse(r.value); } catch(e) {}
-    const hours = start ? (Date.now() - start) / 3600000 : 0;
+    let hours = start ? (Date.now() - start) / 3600000 : 0;
+    // Filet de sécurité : si aucune couche n'a été remise depuis plus longtemps
+    // que la pause déclarée, c'est cette durée-là qui compte.
+    try {
+      const sc = await tempsSansCouche();
+      if (sc != null && sc > hours) hours = sc;
+    } catch(e) {}
     try { if (hours >= 24) await flagBadge('comeback'); } catch(e) {}
     await runResumeProgram(hours);
   }
@@ -5910,19 +5921,19 @@
     let niveau, dureeTxt, entorse, msg1, msg2;
     if (hours < 24) {
       niveau = 'moyen';
-      dureeTxt = Math.round(hours) + 'h';
+      dureeTxt = fmtDuree(hours);
       entorse = 'pause_moyenne';
       msg1 = 'Te voilà. Tu as été absent ' + dureeTxt + '. On ne reprend pas comme si de rien n\'était.';
       msg2 = 'Change de reprise, tout de suite, et vérification de ton état. Ensuite on retrouve le rythme. Allez.';
     } else if (hours < 72) {
       niveau = 'long';
-      dureeTxt = Math.round(hours/24) + ' jour(s)';
+      dureeTxt = fmtDuree(hours);
       entorse = 'pause_longue';
       msg1 = dureeTxt + ' d\'absence. C\'est long. Le cadre s\'est défait pendant ce temps, et ça, ça compte.';
       msg2 = 'Reprise stricte : change immédiat, contention sur ta prochaine fenêtre, et je te surveille de près pour le reste de la journée. On répare ça ensemble.';
     } else {
       niveau = 'tres_long';
-      dureeTxt = Math.round(hours/24) + ' jours';
+      dureeTxt = fmtDuree(hours);
       entorse = 'pause_tres_longue';
       msg1 = dureeTxt + ' sans rien. Tu as complètement déserté le programme. Je ne vais pas faire semblant que ce n\'est rien.';
       msg2 = 'On reprend au maximum d\'exigence, immédiatement. Change, contention, vigilance totale. Ton corps aura besoin de quelques heures pour relâcher à nouveau — ça, c\'est normal, je ne t\'en tiens pas rigueur. Mais l\'engagement, lui, tu le reprends maintenant. Entièrement.';
