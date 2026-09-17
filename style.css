@@ -850,3 +850,17 @@ body.qrsheet-on #qrSheet { display: block; }
   .qrsheet-card { border: 1px dashed #999; }
   @page { size: A4; margin: 12mm; }
 }
+
+/* ===== Contrôles du scanner QR ===== */
+#qrScanTools {
+  position: absolute; bottom: 96px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; z-index: 5;
+  background: rgba(0,0,0,.45); padding: 8px 12px; border-radius: 30px;
+  backdrop-filter: blur(4px);
+}
+#qrScanTools button {
+  width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer;
+  background: rgba(255,255,255,.18); color: #fff; font-size: 19px; line-height: 1;
+}
+#qrScanTools button.on { background: #e8a94a; }
+#qrZoom { width: 130px; accent-color: #e8894a; }

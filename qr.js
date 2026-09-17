@@ -78,11 +78,82 @@
   let scanStream = null, scanRAF = null;
   function stopScan() {
     if (scanRAF) { cancelAnimationFrame(scanRAF); scanRAF = null; }
-    if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+    if (scanStream) {
+      try { scanStream.getVideoTracks().forEach(t => t.applyConstraints({ advanced: [{ torch: false }] }).catch(()=>{})); } catch(e) {}
+      scanStream.getTracks().forEach(t => t.stop()); scanStream = null;
+    }
+    const bt = document.getElementById('qrTorch'); if (bt) bt.classList.remove('on');
+    const vz = document.getElementById('qrVideo'); if (vz) vz.onclick = null;
     const ov = document.getElementById('qrScanOverlay');
     if (ov) ov.style.display = 'none';
     try { if (window.HabitrainNFC && window.HabitrainNFC.isScanning()) window.HabitrainNFC.stopScan(); } catch (e) {}
   }
+  // ---- Contrôles caméra : mise au point, zoom, lampe ----
+  function setupCameraControls(video, hint) {
+    const track = scanStream && scanStream.getVideoTracks ? scanStream.getVideoTracks()[0] : null;
+    if (!track) return;
+    let caps = {};
+    try { caps = track.getCapabilities ? track.getCapabilities() : {}; } catch (e) {}
+
+    // Relance la mise au point : on bascule brièvement en manuel puis en continu,
+    // ce qui force l'appareil à refaire son autofocus.
+    const relancerFocus = async () => {
+      if (!caps.focusMode) return false;
+      try {
+        if (caps.focusMode.includes('single-shot')) {
+          await track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] });
+          setTimeout(() => {
+            if (caps.focusMode.includes('continuous')) {
+              track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(()=>{});
+            }
+          }, 900);
+        } else if (caps.focusMode.includes('continuous')) {
+          await track.applyConstraints({ advanced: [{ focusMode: 'manual' }] }).catch(()=>{});
+          await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+        }
+        return true;
+      } catch (e) { return false; }
+    };
+
+    // bouton dédié + tap n'importe où sur l'image
+    const btnFocus = document.getElementById('qrFocus');
+    const faireFocus = async () => {
+      const ok = await relancerFocus();
+      if (hint) {
+        hint.textContent = ok ? 'Mise au point…' : 'Éloigne un peu le téléphone (15-20 cm).';
+        setTimeout(() => { if (hint) hint.textContent = 'Vise le QR code...'; }, 1600);
+      }
+    };
+    if (btnFocus) btnFocus.onclick = faireFocus;
+    video.onclick = faireFocus;
+
+    // zoom optique/numérique si l'appareil le propose
+    const zoom = document.getElementById('qrZoom');
+    if (zoom && caps.zoom) {
+      zoom.style.display = '';
+      zoom.min = caps.zoom.min; zoom.max = Math.min(caps.zoom.max, caps.zoom.min + 4);
+      zoom.step = caps.zoom.step || 0.1; zoom.value = caps.zoom.min;
+      zoom.oninput = () => { track.applyConstraints({ advanced: [{ zoom: parseFloat(zoom.value) }] }).catch(()=>{}); };
+    } else if (zoom) { zoom.style.display = 'none'; }
+
+    // lampe
+    const btnTorch = document.getElementById('qrTorch');
+    if (btnTorch) {
+      if (caps.torch) {
+        btnTorch.style.display = '';
+        let on = false;
+        btnTorch.onclick = async () => {
+          on = !on;
+          try { await track.applyConstraints({ advanced: [{ torch: on }] }); btnTorch.classList.toggle('on', on); }
+          catch (e) { on = false; }
+        };
+      } else { btnTorch.style.display = 'none'; }
+    }
+
+    // premier autofocus au lancement
+    setTimeout(relancerFocus, 500);
+  }
+
   // onResult(kind|null). expected = kind attendu ('unlock' ou une action) ou null (accepte tout)
   async function startScan(expected, onResult) {
     const ov = document.getElementById('qrScanOverlay');
@@ -107,8 +178,24 @@
       } catch (e) { /* NFC indisponible : on continue en QR seul */ }
     }
     try {
-      scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      // Haute résolution + autofocus continu : indispensable pour lire un petit QR.
+      // Sans ça, beaucoup de téléphones restent flous à courte distance.
+      const contraintes = {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width:  { ideal: 1920 },
+          height: { ideal: 1080 },
+          advanced: [{ focusMode: 'continuous' }]
+        }
+      };
+      try {
+        scanStream = await navigator.mediaDevices.getUserMedia(contraintes);
+      } catch (e1) {
+        // certains appareils refusent les contraintes avancées : on retombe au simple
+        scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      }
       video.srcObject = scanStream; video.setAttribute('playsinline', 'true'); await video.play();
+      setupCameraControls(video, hint);
     } catch (e) {
       hint.textContent = nfcOn
         ? 'Caméra indisponible — mais tu peux approcher ton tag NFC.'
@@ -123,7 +210,16 @@
         canvas.width = video.videoWidth; canvas.height = video.videoHeight;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = window.jsQR ? window.jsQR(img.data, img.width, img.height) : null;
+        let code = window.jsQR ? window.jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' }) : null;
+        // seconde passe sur le centre de l'image : aide beaucoup quand le QR est petit
+        if (!code && window.jsQR) {
+          const cw = Math.floor(canvas.width * 0.6), ch = Math.floor(canvas.height * 0.6);
+          const cx = Math.floor((canvas.width - cw) / 2), cy = Math.floor((canvas.height - ch) / 2);
+          try {
+            const centre = ctx.getImageData(cx, cy, cw, ch);
+            code = window.jsQR(centre.data, centre.width, centre.height, { inversionAttempts: 'attemptBoth' });
+          } catch (e) {}
+        }
         if (code && code.data) {
           const kind = await parsePayload(code.data);
           if (kind && (!expected || kind === expected)) {
