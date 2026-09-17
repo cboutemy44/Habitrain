@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '15.5';
+  const APP_VERSION = '15.6';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -6322,6 +6322,8 @@
     if (c) c.addEventListener('click', () => document.body.classList.remove('qrsheet-on'));
     const p = document.getElementById('qrSheetPrint');
     if (p) p.addEventListener('click', () => window.print());
+    const d = document.getElementById('qrSheetDl');
+    if (d) d.addEventListener('click', () => downloadQrSheet());
   })();
 
   async function buildQrSheet() {
@@ -6403,6 +6405,50 @@
     box.innerHTML = '';
     box.appendChild(frag);
     try { await window.storage.set('ob:qrdone', JSON.stringify(true)); } catch(e) {}
+  }
+
+  // Télécharge la feuille comme fichier HTML autonome (ouvrable et imprimable partout)
+  function downloadQrSheet() {
+    const box = document.getElementById('qrSheetBody');
+    if (!box) return;
+    // on remplace chaque canvas par une image PNG intégrée
+    const clone = box.cloneNode(true);
+    const srcCanvas = box.querySelectorAll('canvas');
+    const dstCanvas = clone.querySelectorAll('canvas');
+    for (let i = 0; i < dstCanvas.length; i++) {
+      try {
+        const img = document.createElement('img');
+        img.src = srcCanvas[i].toDataURL('image/png');
+        img.style.cssText = 'display:block;margin:0 auto 6px;width:120px;height:120px';
+        dstCanvas[i].parentNode.replaceChild(img, dstCanvas[i]);
+      } catch(e) {}
+    }
+    const css = [
+      'body{font-family:system-ui,-apple-system,sans-serif;color:#111;margin:0;padding:16px;background:#fff}',
+      '.qrsheet-title{font-size:22px;font-weight:600;margin-bottom:4px;color:#4a3520}',
+      '.qrsheet-sub{font-size:12.5px;color:#666;margin-bottom:16px}',
+      '.qrsheet-sec{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;',
+      'color:#8a6a45;margin:18px 0 8px;border-bottom:1px solid #e2ddd4;padding-bottom:4px}',
+      '.qrsheet-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}',
+      '.qrsheet-card{border:1.5px dashed #b9b2a6;border-radius:10px;padding:10px 8px;text-align:center;',
+      'background:#fff;break-inside:avoid;page-break-inside:avoid}',
+      '.qrsheet-card .n{font-size:12.5px;font-weight:800;line-height:1.25;color:#111}',
+      '.qrsheet-card .w{font-size:11px;font-weight:600;color:#666;margin-top:3px;line-height:1.35}',
+      '@media print{body{padding:0}@page{size:A4;margin:12mm}}'
+    ].join('');
+    const html = '<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<title>Habitrain — mes QR codes</title><style>' + css + '</style></head><body>' +
+      clone.innerHTML + '</body></html>';
+    try {
+      const blob = new Blob([html], { type:'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'habitrain-qr-codes-' + new Date().toISOString().slice(0,10) + '.html';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch(e) {}
   }
 
   // ===== Programmation des tags NFC =====
