@@ -32,23 +32,41 @@
   // Format COMPACT pour les supports minuscules (bracelet) : "H|<8 car>|<1 lettre>".
   // Moins de caractères = moins de modules dans le QR = des carrés plus gros
   // à taille de papier égale. C'est ce qui rend un QR de bracelet lisible.
+  // Le format court va plus loin que raccourcir le texte : en restant sur
+  // MAJUSCULES + CHIFFRES + tiret, on reste dans le jeu de caractères
+  // « alphanumérique » du standard QR, encodé sur 5,5 bits au lieu de 8.
+  // Même contenu, nettement moins de modules.
   const KIND_CODE = { change_pilier:'P', change_tous:'T', biberon:'B', coucher:'C', unlock:'U' };
   const CODE_KIND = { P:'change_pilier', T:'change_tous', B:'biberon', C:'coucher', U:'unlock' };
-  function secretCourt(s) { return String(s).replace(/[^A-Za-z0-9]/g, '').slice(-8); }
+  function secretCourt(s) { return String(s).replace(/[^A-Za-z0-9]/g, '').slice(-8).toUpperCase(); }
+  // les tenues et accessoires ont un identifiant libre (wb…) : il passe tel quel,
+  // en majuscules, et redescend en minuscules à la lecture.
+  function codePour(kind) { return KIND_CODE[kind] || String(kind).toUpperCase(); }
 
   async function payloadFor(kind, compact) {
     const s = await getSecret();
-    if (compact && KIND_CODE[kind]) return 'H|' + secretCourt(s) + '|' + KIND_CODE[kind];
+    if (compact) return 'H-' + secretCourt(s) + '-' + codePour(kind);
     return 'HABITRAIN|' + s + '|' + kind;
   }
   async function parsePayload(text) {
     const s = await getSecret();
-    const parts = (text || '').split('|');
+    const t = text || '';
+    // format court actuel : H-<SECRET>-<CODE>
+    if (t.charAt(0) === 'H' && t.charAt(1) === '-') {
+      const p = t.split('-');
+      if (p.length === 3 && p[1] === secretCourt(s)) {
+        return CODE_KIND[p[2]] || p[2].toLowerCase();
+      }
+      return null;
+    }
+    const parts = t.split('|');
     if (parts.length !== 3) return null;
-    // format complet
+    // format complet (impressions d'origine)
     if (parts[0] === 'HABITRAIN' && parts[1] === s) return parts[2];
-    // format compact (bracelet)
-    if (parts[0] === 'H' && parts[1] === secretCourt(s) && CODE_KIND[parts[2]]) return CODE_KIND[parts[2]];
+    // format court intermédiaire (v16.1) : H|<secret>|<CODE>
+    if (parts[0] === 'H' && parts[1].toUpperCase() === secretCourt(s)) {
+      return CODE_KIND[parts[2]] || parts[2].toLowerCase();
+    }
     return null;
   }
 
@@ -69,22 +87,45 @@
 
   // ---- Génération : dessine un QR dans un canvas ----
   // ecc : 'M' par défaut, 'L' pour les tout petits supports (moins de modules)
-  function drawQR(canvas, text, size, ecc) {
+  // jeu de caractères du mode « alphanumérique » du standard QR
+  const ALNUM_QR = /^[0-9A-Z $%*+\-.\/:]+$/;
+  // mm : largeur d'impression souhaitée du code (hors marge), pour la feuille papier
+  function drawQR(canvas, text, size, ecc, mm) {
     size = size || 220;
     const qr = qrcode(0, ecc || 'M');
-    qr.addData(text);
+    // encodage dense quand le contenu s'y prête : 5,5 bits par caractère au lieu
+    // de 8. C'est ce qui ramène les QR de tenues de 25×25 à 21×21 modules.
+    if (ALNUM_QR.test(text)) {
+      try { qr.addData(text, 'Alphanumeric'); } catch (e) { qr.addData(text); }
+    } else {
+      qr.addData(text);
+    }
     qr.make();
     const n = qr.getModuleCount();
-    const cell = Math.floor(size / (n + 2));
-    const dim = cell * (n + 2);
+    // Marge blanche (« quiet zone ») : la norme en exige 4 modules. J'en mettais 1.
+    // Sur un grand QR ça passe ; à 1 cm de côté, le lecteur ne retrouve plus les
+    // trois carrés de repère si un bord de plastification les touche.
+    const MARGE = 4;
+    const total = n + MARGE * 2;
+    // cellule entière et jamais trop fine : des bords nets valent mieux qu'une
+    // taille exacte, l'impression se règle ensuite en millimètres.
+    const cell = Math.max(4, Math.floor(size / total));
+    const dim = cell * total;
     canvas.width = dim; canvas.height = dim;
     const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, dim, dim);
     ctx.fillStyle = '#000';
     for (let r = 0; r < n; r++) {
       for (let c = 0; c < n; c++) {
-        if (qr.isDark(r, c)) ctx.fillRect((c + 1) * cell, (r + 1) * cell, cell, cell);
+        if (qr.isDark(r, c)) ctx.fillRect((c + MARGE) * cell, (r + MARGE) * cell, cell, cell);
       }
+    }
+    // taille d'impression réelle, marge comprise
+    if (mm) {
+      const mmTotal = mm * (total / n);   // le mm demandé porte sur le code lui-même
+      canvas.style.width = mmTotal.toFixed(2) + 'mm';
+      canvas.style.height = mmTotal.toFixed(2) + 'mm';
     }
   }
 

@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '16.2';
+  const APP_VERSION = '16.4';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -6441,6 +6441,7 @@
   async function scanTenue() {
     const QR = window.HabitrainQR, WB = window.HabitrainWardrobe;
     if (!QR || !WB) return;
+    // une étiquette cousue dans un col est aussi petite qu'un bracelet
     QR.startScan(null, async (kind) => {
       if (!kind) return;
       const item = await WB.findByItemId(kind);
@@ -6474,7 +6475,7 @@
         } catch(e) {}
       }
       try { await refresh(); } catch(e) {}
-    });
+    }, { petit: true });
   }
 
   // ===== Feuille complète de QR à imprimer =====
@@ -6495,6 +6496,8 @@
     if (p) p.addEventListener('click', () => window.print());
     const d = document.getElementById('qrSheetDl');
     if (d) d.addEventListener('click', () => downloadQrSheet());
+    const m = document.getElementById('qrSheetMm');
+    if (m) m.addEventListener('change', async () => { await buildQrSheet(); });
   })();
 
   async function buildQrSheet() {
@@ -6504,6 +6507,10 @@
     document.body.classList.add('qrsheet-on');
     box.innerHTML = '<div class="qrsheet-sub">Génération…</div>';
     window.scrollTo(0, 0);
+
+    // taille d'impression choisie dans la barre (en millimètres)
+    const selMm = document.getElementById('qrSheetMm');
+    const mmChoisi = selMm ? parseFloat(selMm.value) || 20 : 20;
 
     const frag = document.createElement('div');
     const now = new Date();
@@ -6526,9 +6533,8 @@
         // Format court partout : 21×21 modules au lieu de 29×29, soit des carrés
         // ~40 % plus larges à taille de papier égale. La correction reste en M :
         // avec un contenu aussi court elle ne coûte aucun module de plus.
-        const petit = (it.id === 'unlock');
         const payload = await QR.payloadFor(it.id, true);
-        QR.drawQR(cv, payload, petit ? 150 : 120, 'M');
+        QR.drawQR(cv, payload, 400, 'M', mmChoisi);
         card.appendChild(cv);
         const n = document.createElement('div');
         n.className = 'n'; n.textContent = it.nom;
@@ -6570,6 +6576,36 @@
         await ajouterSection('Mes tenues (' + tenues.length + ')', tenues);
       } catch(e) {}
     }
+
+    // --- Bande d'étalonnage : le même code à plusieurs tailles réelles ---
+    // À imprimer une fois pour trouver la plus petite taille que TON imprimante
+    // et TON téléphone encaissent, avant de plastifier toute la série.
+    try {
+      const h = document.createElement('div');
+      h.className = 'qrsheet-sec'; h.textContent = 'Bande d\'étalonnage — imprime, puis scanne du plus petit au plus grand';
+      frag.appendChild(h);
+      const bande = document.createElement('div');
+      bande.className = 'qrsheet-cal';
+      const payloadCal = await QR.payloadFor('unlock', true);
+      for (const mm of [8, 10, 12, 15, 20]) {
+        const cell = document.createElement('div');
+        cell.className = 'qrsheet-calitem';
+        const cv = document.createElement('canvas');
+        QR.drawQR(cv, payloadCal, 400, 'M', mm);
+        cell.appendChild(cv);
+        const lb = document.createElement('div');
+        lb.className = 'n'; lb.textContent = mm + ' mm';
+        cell.appendChild(lb);
+        bande.appendChild(cell);
+      }
+      frag.appendChild(bande);
+      const noteCal = document.createElement('div');
+      noteCal.className = 'qrsheet-sub';
+      noteCal.innerHTML = 'Ce sont tous le même code (bracelet). Imprime cette feuille <b>à 100 %, sans « ajuster à la page »</b>, '
+        + 'puis scanne-les en commençant par le plus petit. La plus petite taille qui passe du premier coup, '
+        + 'avec un peu de marge, c\'est celle à retenir pour toute ta série.';
+      frag.appendChild(noteCal);
+    } catch(e) {}
 
     const pied = document.createElement('div');
     pied.className = 'qrsheet-sub';
@@ -6613,6 +6649,11 @@
       'background:#fff;break-inside:avoid;page-break-inside:avoid}',
       '.qrsheet-card .n{font-size:12.5px;font-weight:800;line-height:1.25;color:#111}',
       '.qrsheet-card .w{font-size:11px;font-weight:600;color:#666;margin-top:3px;line-height:1.35}',
+      '.qrsheet-cal{display:flex;align-items:flex-end;gap:10mm;flex-wrap:wrap;padding:6mm 2mm;',
+      'background:#fff;break-inside:avoid;page-break-inside:avoid}',
+      '.qrsheet-calitem{text-align:center}',
+      '.qrsheet-calitem canvas{display:block;image-rendering:pixelated}',
+      '.qrsheet-calitem .n{font-size:10px;font-weight:800;color:#666;margin-top:2mm}',
       '@media print{body{padding:0}@page{size:A4;margin:12mm}}'
     ].join('');
     const html = '<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">' +
