@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '17.0';
+  const APP_VERSION = '17.2';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -67,7 +67,11 @@
     try { const r = await window.storage.get('pref:voicemode'); if (r && r.value) voiceMode = JSON.parse(r.value); } catch(e) {}
     immersive = immersiveModes.includes(voiceMode);
     applyVoiceChrome();
-    if (immersive) { try { await imRunMoment(); } catch(e) {} }
+    // Sans await : imRunMoment attend que tu tapes pour dérouler ses phrases.
+    // En l'attendant, tout le reste du démarrage restait bloqué derrière —
+    // y compris la vérification du verrouillage, qui n'arrivait donc qu'APRÈS
+    // que Foxy ait parlé. C'était la cause de la phrase aperçue avant l'entrée.
+    if (immersive) { try { imRunMoment(); } catch(e) {} }
   }
   async function setVoiceMode(mode) {
     voiceMode = mode;
@@ -635,6 +639,14 @@
   const attendreOverlay = () => attendreFermeture('overlay', 'show');
   const attendrePopup   = () => attendreFermeture('foxyPop');
 
+  // Écran de connexion affiché : Foxy n'a rien à dire tant que tu n'es pas entré.
+  // Au démarrage, plusieurs discussions se lançaient pendant que le verrou
+  // s'installait — d'où la phrase aperçue une seconde avant l'écran de connexion.
+  function ecranVerrouille() {
+    const l = document.getElementById('qrLock');
+    return !!(l && l.style.display && l.style.display !== 'none');
+  }
+
   function fenetreOuverte() {
     const o = document.getElementById('overlay');
     const f = document.getElementById('foxyPop');
@@ -662,6 +674,13 @@
     const k = key || ('t'+prio+':'+Math.random());
     if ((talkActive && talkActive.key === k) || talkQueue.some(t => t.key === k)) return Promise.resolve(false);
     const item = { prio, key:k, run, at: Date.now(), dead:false };
+
+    // écran de connexion : tout attend, sans exception de priorité
+    if (ecranVerrouille()) {
+      talkQueue.push(item);
+      talkQueue.sort((a,b) => (a.prio - b.prio) || (a.at - b.at));
+      return Promise.resolve(true);
+    }
 
     // une fenêtre ouverte (change en cours, popup) occupe l'écran même sans
     // discussion déclarée : seules les urgences passent par-dessus.
@@ -712,6 +731,7 @@
   // passe à la discussion suivante, en jetant celles qui ont trop attendu
   function talkSuivante() {
     if (talkActive) return;
+    if (ecranVerrouille()) return;  // pas un mot avant d'être entré
     if (fenetreOuverte()) return;   // l'écran est occupé : on laisse finir
     const now = Date.now();
     talkQueue = talkQueue.filter(t => (now - t.at) < TALK_TTL[t.prio]);
@@ -724,6 +744,9 @@
 
   // dit un message ; en mode Foxy → boîte RPG. waitTap=true → attend un appui (narration).
   function imSay(text, delay, expr, waitTap) {
+    // écran de connexion : on ne rend rien. Le flux se termine en silence
+    // plutôt que de rester bloqué, et l'écran se régénère après l'entrée.
+    if (ecranVerrouille()) return Promise.resolve();
     // discussion coupée : on se tait définitivement, la suite ne s'exécute pas
     const owner = talkActive;
     if (owner && owner.dead) return new Promise(() => {});
@@ -3573,6 +3596,7 @@
     { id:'b_portlong',        n:'Port trop long',                        grav:'moyenne', w:7 },
     { id:'b_sature',          n:'Couche saturée gardée',                 grav:'grave',   w:12 },
     { id:'b_tenue',           n:'Aucune tenue scannée',                  grav:'legere',  w:3 },
+    { id:'b_tenue_hs',        n:'Tenue non conforme au tirage',          grav:'legere',  w:3 },
     { id:'b_urgence',         n:'Serrure ouverte en urgence',            grav:'legere',  w:3 }
   ];
   const GRAV_LABEL = { grave:'Grave', moyenne:'Moyenne', legere:'Légère' };
@@ -5298,6 +5322,41 @@
     };
   }
 
+  /* ------------------------------------------------------------
+     QUELLE TENUE EST ATTENDUE MAINTENANT — source unique
+     Deux définitions cohabitaient et ne disaient pas la même chose :
+     la carte du tirage basculait nuit/jour à 22h30 et 9h, la vérification
+     du scan à 22h et 8h, et exigeait en plus la tenue de sieste entre
+     14h et 16h alors que la carte la présente comme facultative.
+     Entre 8h et 9h, Foxy réclamait donc une tenue que la carte
+     n'affichait pas. Tout passe désormais par cette fonction.
+     ------------------------------------------------------------ */
+  const NUIT_DEBUT = 22*60 + 30;   // 22h30
+  const NUIT_FIN   = 9*60;         // 9h
+  const SIESTE = [14*60, 16*60];   // fenêtre où la tenue de repos est tolérée
+
+  function estNuit(now) {
+    const m = (now || new Date()).getHours()*60 + (now || new Date()).getMinutes();
+    return m >= NUIT_DEBUT || m < NUIT_FIN;
+  }
+  // renvoie { moment, nom, tolerees[] } — tolerees = noms acceptés sans remarque
+  function tenueAttendue(o, now) {
+    now = now || new Date();
+    if (!o) return null;
+    const m = now.getHours()*60 + now.getMinutes();
+    const nuit = estNuit(now);
+    const moment = nuit ? 'nuit' : 'jour';
+    const nom = nuit ? o.nuit : o.jour;
+    const tolerees = [nom];
+    // pendant la sieste, repasser en tenue de nuit ou de sieste est permis :
+    // la carte le dit, la vérification doit le dire aussi.
+    if (!nuit && m >= SIESTE[0] && m < SIESTE[1]) {
+      if (o.nuit) tolerees.push(o.nuit);
+      if (o.sieste) tolerees.push(o.sieste);
+    }
+    return { moment, nom, tolerees: tolerees.filter(Boolean) };
+  }
+
   async function getOutfit(date) {
     try { const r = await window.storage.get('outfit:'+date); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
     return null;
@@ -5308,9 +5367,8 @@
 
   function renderOutfitResult(o) {
     const now = new Date();
-    const nowMin = now.getHours()*60 + now.getMinutes();
-    // Nuit = 22h30 → 9h (réveil/petit-déj + détente du soir + nuit) ; Jour = 9h → 22h30.
-    const isNightNow = (nowMin >= 22*60+30) || (nowMin < 9*60);
+    // même règle que la vérification du scan (voir tenueAttendue)
+    const isNightNow = estNuit(now);
     const cards = [
       { key:'jour', ic:'☀️', moment:'Tenue de jour', wear:o.jour, active:!isNightNow },
       { key:'nuit', ic:'🌙', moment:'Tenue de nuit / repos', wear:o.nuit, active:isNightNow }
@@ -6450,32 +6508,110 @@
         return;
       }
       await WB.logWorn(todayStr(), item.cat, item.name);
-      // conformité avec la tenue tirée du jour
-      let attendue = null;
-      try {
-        const r = await window.storage.get('outfit:'+todayStr());
-        if (r && r.value) {
-          const o = JSON.parse(r.value);
-          const h = new Date().getHours();
-          attendue = (h >= 22 || h < 8) ? o.nuit : (h >= 14 && h < 16 ? o.sieste : o.jour);
-        }
-      } catch(e) {}
+      // conformité avec le tirage du jour — même règle que la carte du tirage
+      let att = null;
+      try { att = tenueAttendue(await getOutfit(todayStr()), new Date()); } catch(e) {}
+      const conforme = !att || !att.nom || att.tolerees.indexOf(item.name) >= 0;
+
       if (voiceMode === 'foxy') {
         try {
-          if (attendue && attendue !== item.name) {
-            await imSay(broOn()
-              ? 'Ce n\'est pas la tenue que j\'avais tirée. J\'avais dit « ' + attendue + ' ». Tu le sais.'
-              : 'Hmm, j\'avais tiré « ' + attendue + ' » pour toi aujourd\'hui, pas celle-là ! 🦊', 900, 'puzzled');
-          } else {
+          if (conforme) {
             await imSay(broOn()
               ? 'Bien. « ' + item.name + ' », c\'est noté. Tu es habillé comme il faut.'
               : 'Parfait, « ' + item.name + ' » ! Tu es tout beau. 🦊', 850, 'proud');
+            if (currentM) await imOfferHelp(currentM);
+          } else {
+            await corrigerTenue(item, att);
           }
-          if (currentM) await imOfferHelp(currentM);
         } catch(e) {}
       }
       try { await refresh(); } catch(e) {}
     }, { petit: true });
+  }
+
+  /* ------------------------------------------------------------
+     TENUE NON CONFORME — on ne se contente pas de le signaler
+     Foxy demande de la retirer, de mettre la bonne, puis il revérifie.
+     Tant que ce n'est pas fait, il reste sur le sujet.
+     ------------------------------------------------------------ */
+  async function corrigerTenue(item, att, essai) {
+    essai = essai || 1;
+    const quand = att.moment === 'nuit' ? 'pour la nuit' : 'pour la journée';
+
+    if (essai === 1) {
+      await imSay(broOn()
+        ? 'Non. « ' + item.name + ' », ce n\'est pas ce que j\'avais tiré. C\'est « ' + att.nom +' » ' + quand + '.'
+        : 'Ah... « ' + item.name + ' », ce n\'est pas celle du jour. J\'avais tiré « ' + att.nom + ' » ' + quand + '. 🦊',
+        900, 'puzzled');
+      await imSay(broOn()
+        ? 'Tu la retires, tu mets la bonne, et tu me la scannes. Ça ne se négocie pas, tu le sais bien.'
+        : 'Va la retirer et mets « ' + att.nom + ' » à la place. Puis tu me la scannes, je vérifie. Tu peux traîner un peu si tu veux, mais on finira par y passer de toute façon. 🦊',
+        1000, 'calm');
+    } else {
+      await imSay(broOn()
+        ? 'Toujours pas la bonne. « ' + att.nom + ' ». On recommence.'
+        : 'Ce n\'est toujours pas « ' + att.nom + ' » ! On réessaie, tu y es presque. 🦊', 850, 'concern');
+    }
+
+    return new Promise((resolve) => {
+      imSetActions([
+        { label:'📷 C\'est fait, revérifie', onClick: async () => {
+          imAddMe('C\'est fait, revérifie.');
+          await reverifierTenue(att, essai + 1);
+          resolve();
+        }},
+        { soft:true, label:'Je ne l\'ai pas (au sale)', onClick: async () => {
+          imAddMe('Je ne l\'ai pas, elle est au sale.');
+          await imSay(broOn()
+            ? 'Bon. Pour cette fois. Mais tu gardes celle-là jusqu\'au prochain change, pas de valse de tenues.'
+            : 'Ah, d\'accord — ça arrive ! Garde celle-là alors, mais jusqu\'au prochain change, on ne change pas cinq fois. 🦊', 900, 'calm');
+          try { await marquerEntorse('b_tenue_hs'); } catch(e) {}
+          if (currentM) await imOfferHelp(currentM);
+          resolve();
+        }}
+      ]);
+    });
+  }
+
+  // relance le scan et rejuge, sans repasser par « je viens de m'habiller »
+  async function reverifierTenue(att, essai) {
+    const QR = window.HabitrainQR, WB = window.HabitrainWardrobe;
+    if (!QR || !WB) return;
+    await imSay(broOn() ? 'Montre.' : 'Fais voir ! 🦊', 600, 'curious');
+    return new Promise((resolve) => {
+      QR.startScan(null, async (kind) => {
+        if (!kind) { resolve(); return; }
+        const it = await WB.findByItemId(kind);
+        if (!it) {
+          await imSay('Ce QR n\'est pas une de tes tenues. Réessaie ?', 800, 'puzzled');
+          await corrigerTenue({ name:'?' }, att, essai);
+          resolve(); return;
+        }
+        await WB.logWorn(todayStr(), it.cat, it.name);
+        // on rejuge sur l'heure courante : la correction a pu franchir une bascule
+        let att2 = att;
+        try { att2 = tenueAttendue(await getOutfit(todayStr()), new Date()) || att; } catch(e) {}
+        if (att2.tolerees.indexOf(it.name) >= 0) {
+          await imSay(broOn()
+            ? 'Voilà. « ' + it.name + ' ». C\'est mieux quand tu ne discutes pas.'
+            : 'Voilà ! « ' + it.name + ' », c\'est exactement ça. Tu vois, c\'était pas si terrible. 🦊', 900, 'proud');
+          if (currentM) await imOfferHelp(currentM);
+        } else {
+          await corrigerTenue(it, att2, essai);
+        }
+        try { await refresh(); } catch(e) {}
+        resolve();
+      }, { petit: true });
+    });
+  }
+
+  // enregistre une entorse du jour
+  async function marquerEntorse(id) {
+    const d = todayStr();
+    const b = await getBreaches(d);
+    b[id] = true;
+    await saveBreaches(d, b);
+    try { await renderBreaches(); } catch(e) {}
   }
 
   // ===== Feuille complète de QR à imprimer =====
@@ -8303,6 +8439,10 @@
   function showQrLock(isSurprise) {
     const lock = document.getElementById('qrLock');
     lock.style.display = 'flex';
+    // on coupe net ce qui était en train de se dire et on vide la boîte :
+    // sinon une phrase entamée reste derrière l'écran et réapparaît à l'entrée.
+    try { talkForce(); } catch(e) {}
+    try { imClear(); } catch(e) {}
 
     // --- horloge en direct ---
     const majHeure = () => {
@@ -8353,6 +8493,16 @@
       lock.style.display = 'none';
       if (lockClockTimer) { clearInterval(lockClockTimer); lockClockTimer = null; }
       try { if (NFC && NFC.isScanning()) NFC.stopScan(); } catch(e) {}
+      // Maintenant seulement, Foxy a droit à la parole. Son accueil a été
+      // avalé par le silence du verrou : on le rejoue, puis on laisse repartir
+      // ce qui patientait dans la file.
+      setTimeout(async () => {
+        try {
+          if (immersive) await imRunMoment();
+          else await renderMoment();
+        } catch(e) {}
+        try { talkSuivante(); } catch(e) {}
+      }, 250);
     };
 
     if (hint) {
@@ -8383,7 +8533,7 @@
     const title = document.getElementById('qrLockTitle');
     title.onclick = () => {
       const now = Date.now(); taps.push(now); taps = taps.filter(x => now - x < 1200);
-      if (taps.length >= 3) { taps = []; sessionUnlocked = true; lock.style.display = 'none'; }
+      if (taps.length >= 3) { taps = []; ouvrir(); }   // même sortie que le scan
     };
   }
   // contrôles surprises du bracelet obligatoire (bloquants, secours actif)
@@ -8615,6 +8765,8 @@
     document.body.classList.toggle('hardmode', hardMode);
     await loadFoxyOutfit();
     refreshHeadFoxy();
+    // le verrouillage se décide AVANT la voix : rien ne doit parler avant l'entrée
+    try { await checkQrLock(); } catch(e) {}
     await loadVoice();
     try { const r = await window.storage.get('queststage'); window._lastStage = (r && r.value) ? JSON.parse(r.value) : 0; } catch(e) { window._lastStage = 0; }
     await loadPause();
@@ -8628,7 +8780,6 @@
       if (dayMood && dayMood.surprise) await flagBadge('surpriseDay');
     } catch(e) {}
     try { await loadLiveWardrobe(); } catch(e) {}
-    try { await checkQrLock(); } catch(e) {}
     try { await scheduleBraceletChecks(); } catch(e) {}
     scheduleNotifications();
     await renderCheckStat();
