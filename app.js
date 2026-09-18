@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '17.2';
+  const APP_VERSION = '17.4';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -4850,9 +4850,18 @@
       if (item[0] !== '@') { out.push(item); continue; }
       let v = null;
       switch (item) {
-        case '@tenue_jour':   v = tenues ? tenues.jour : null; break;
-        case '@tenue_nuit':   v = tenues ? tenues.nuit : null; break;
-        case '@tenue_sieste': v = tenues ? tenues.sieste : null; break;
+        // Sans tirage enregistré, la référence était simplement ignorée :
+        // Foxy passait la tenue sous silence au lieu de te dire qu'il en manque un.
+        case '@tenue_jour':   v = tenues ? tenues.jour : 'Ta tenue du jour — le tirage n\'est pas encore fait'; break;
+        case '@tenue_nuit':   v = tenues ? tenues.nuit : 'Ta tenue de nuit — le tirage n\'est pas encore fait'; break;
+        // La sieste est une tolérance, pas une obligation : la carte du tirage
+        // le dit, le kit doit le dire aussi. Sinon Foxy réclame une tenue que
+        // rien ne t'impose — et la vérification, elle, accepte les trois.
+        case '@tenue_sieste':
+          v = tenues && tenues.sieste
+            ? (tenues.sieste + ' — si tu veux ; tu peux aussi garder ta tenue de jour')
+            : null;
+          break;
         case '@couche_jour':
         case '@couche_nuit': {
           try {
@@ -6287,9 +6296,23 @@
       ? 'Maintenant tu vas remettre ta couche. Tu ne l\'avais pas pendant ton absence — on repart du début.'
       : 'Allez, on va te remettre bien comme il faut ! Tu n\'avais pas ta couche pendant ta pause, alors on repart du début. Je t\'explique tout, viens. 🦊', 1000, 'calm');
 
-    // 1) tirage automatique des tenues
-    let tenues = null;
-    try { tenues = drawOutfit(); } catch(e) {}
+    // 1) tenues du jour
+    // On réutilise le tirage déjà enregistré s'il existe, et on enregistre
+    // celui qu'on tire sinon. Sans ça, le retour annonçait une tenue tirée
+    // dans le vide : la carte du jour et « je fais quoi maintenant » lisaient
+    // le tirage stocké, Foxy en annonçait un autre. Deux tenues pour un jour.
+    let tenues = null, dejaTire = false;
+    try {
+      tenues = await getOutfit(todayStr());
+      dejaTire = !!tenues;
+      if (!tenues) {
+        tenues = drawOutfit();
+        await saveOutfit(todayStr(), tenues);
+        try { await renderOutfitCard(); } catch(e) {}
+      }
+    } catch(e) {
+      try { tenues = drawOutfit(); } catch(e2) {}
+    }
     // 2) modèle de couche selon le moment
     let modele = null;
     try {
@@ -6301,7 +6324,9 @@
 
     const tenueDuMoment = tenues ? (periode === 'nuit' ? tenues.nuit : tenues.jour) : null;
 
-    await imSay('J\'ai tiré ta tenue pour toi — tu ne choisis pas, ça fait partie du retour dans le cadre.', 900, 'proud');
+    await imSay(dejaTire
+      ? 'Ta tenue du jour est déjà tirée — c\'est celle-là, tu ne choisis pas. Ça fait partie du retour dans le cadre.'
+      : 'J\'ai tiré ta tenue pour toi — tu ne choisis pas, ça fait partie du retour dans le cadre.', 900, 'proud');
     let recap = '👕 Tenue de ' + periode + ' : ' + (tenueDuMoment || 'ta tenue habituelle');
     if (modele) recap += '\n🍼 Couche : ' + modele.name + ' (' + modele.qty + ' en stock)';
     else recap += '\n🍼 Couche : prends ce que tu as en stock';
