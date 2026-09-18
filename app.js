@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '15.9';
+  const APP_VERSION = '16.0';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -592,8 +592,151 @@
     imThread().appendChild(d); imScroll();
   }
 
+  /* ============================================================
+     CHEF D'ORCHESTRE DES DISCUSSIONS
+     Tout ce qui prend la parole passe par ici. Une seule discussion
+     à la fois, les autres attendent leur tour dans l'ordre de leur
+     importance. Une discussion vraiment prioritaire annonce qu'elle
+     coupe, puis coupe : la discussion perdante se tait aussitôt.
+     ============================================================ */
+  const TALK = { SECU:0, ACCES:1, PILIER:2, CHECK:3, CADRE:4, PROGRES:5, GUIDE:6, AMBIANCE:7 };
+  const TALK_NOM = ['sécurité','accès','change pilier','check','cadre','progression','guidage','ambiance'];
+  // durée de validité en file : au-delà, la discussion n'a plus de sens et est jetée
+  const TALK_TTL = [Infinity, Infinity, 45*60000, 30*60000, 60*60000, 6*3600000, 12*60000, 8*60000];
+  // au-delà de ce niveau, une seule discussion peut patienter en file
+  const TALK_UNIQUE = TALK.GUIDE;
+
+  let talkActive = null;   // ticket de la discussion qui parle en ce moment
+  let talkQueue  = [];     // discussions en attente
+  const talkPhrasesCoupe = [
+    'Attends deux secondes — y\'a plus important, là.',
+    'Je te coupe, désolé. Ça passe avant.',
+    'On met ça de côté une minute, écoute-moi.',
+    'Chut. Autre chose d\'abord.'
+  ];
+  const talkPhraseSecu = 'Stop. Ça, ça passe avant tout le reste.';
+
+  // certaines discussions passent par une fenêtre (overlay, popup Foxy) plutôt que
+  // par la boîte de dialogue : elles gardent la parole tant que la fenêtre est ouverte.
+  function attendreFermeture(id, clsOuvert) {
+    return new Promise(res => {
+      const el = document.getElementById(id);
+      if (!el) return res();
+      const ouvert = () => clsOuvert ? el.classList.contains(clsOuvert) : (el.style.display !== 'none' && el.style.display !== '');
+      let vuOuvert = false;
+      const iv = setInterval(() => {
+        if (ouvert()) { vuOuvert = true; return; }
+        if (vuOuvert || Date.now() - t0 > 4000) { clearInterval(iv); res(); }
+      }, 250);
+      const t0 = Date.now();
+      setTimeout(() => { clearInterval(iv); res(); }, 30*60000); // garde-fou : jamais bloqué à vie
+    });
+  }
+  const attendreOverlay = () => attendreFermeture('overlay', 'show');
+  const attendrePopup   = () => attendreFermeture('foxyPop');
+
+  function fenetreOuverte() {
+    const o = document.getElementById('overlay');
+    const f = document.getElementById('foxyPop');
+    return !!(o && o.classList.contains('show')) || !!(f && f.style.display && f.style.display !== 'none');
+  }
+
+  // le safeword ne demande pas la parole : il la prend, et vide la file.
+  // Rien de ce qui attendait ne doit repartir après un stop.
+  function talkForce() {
+    if (talkActive) { talkActive.dead = true; talkActive = null; }
+    talkQueue = [];
+  }
+
+  function talkBusy() { return !!talkActive; }
+  function talkBusyAtLeast(prio) { return !!talkActive && talkActive.prio <= prio; }
+  // accès de contrôle (diagnostic / tests)
+  window.__talk = { TALK, talk, force: talkForce, busy: talkBusy, dire: (t)=>imSay(t, 100, null, false),
+                    etat: () => ({ actif: talkActive && {prio:talkActive.prio, key:talkActive.key},
+                                   file: talkQueue.map(t => t.prio + ':' + t.key) }) };
+
+  // déclare une discussion. run = fonction async qui parle.
+  // opt.key : identifiant (évite les doublons en file)
+  function talk(prio, key, run, opt) {
+    opt = opt || {};
+    const k = key || ('t'+prio+':'+Math.random());
+    if ((talkActive && talkActive.key === k) || talkQueue.some(t => t.key === k)) return Promise.resolve(false);
+    const item = { prio, key:k, run, at: Date.now(), dead:false };
+
+    // une fenêtre ouverte (change en cours, popup) occupe l'écran même sans
+    // discussion déclarée : seules les urgences passent par-dessus.
+    if (!talkActive && fenetreOuverte() && prio > TALK.CHECK) {
+      talkQueue.push(item);
+      talkQueue.sort((a,b) => (a.prio - b.prio) || (a.at - b.at));
+      return Promise.resolve(true);
+    }
+    if (!talkActive) { talkDemarre(item); return Promise.resolve(true); }
+
+    if (prio < talkActive.prio) {          // plus important que ce qui parle → on annonce et on coupe
+      talkCoupe(item);
+      return Promise.resolve(true);
+    }
+    // sinon on patiente. Au-delà de TALK_UNIQUE, un seul en attente par niveau.
+    if (prio >= TALK_UNIQUE && talkQueue.some(t => t.prio === prio)) return Promise.resolve(false);
+    talkQueue.push(item);
+    talkQueue.sort((a,b) => (a.prio - b.prio) || (a.at - b.at));
+    return Promise.resolve(true);
+  }
+
+  // coupe la discussion en cours, en l'annonçant dans la voix de Foxy.
+  // L'entrant prend la parole dès l'annonce : personne ne peut s'insérer entre les deux.
+  function talkCoupe(entrant) {
+    const mort = talkActive;
+    if (mort) mort.dead = true;
+    talkActive = entrant;
+    const phrase = (entrant.prio === TALK.SECU)
+      ? talkPhraseSecu
+      : talkPhrasesCoupe[Math.floor(Math.random()*talkPhrasesCoupe.length)];
+    const go = () => { if (talkActive === entrant) talkLance(entrant); };
+    try {
+      const p = rpgSay(phrase, entrant.prio === TALK.SECU ? 'alarmed' : 'concern', false);
+      if (p && p.then) p.then(go, go); else setTimeout(go, 600);
+    } catch(e) { setTimeout(go, 400); }
+  }
+
+  function talkDemarre(item) { talkActive = item; talkLance(item); }
+
+  // exécute réellement la discussion et rend la parole à la fin
+  function talkLance(item) {
+    let p;
+    try { p = item.run(); } catch(e) { p = null; }
+    const fin = () => { if (talkActive === item) { talkActive = null; talkSuivante(); } };
+    if (p && p.then) p.then(fin, fin); else fin();
+  }
+
+  // passe à la discussion suivante, en jetant celles qui ont trop attendu
+  function talkSuivante() {
+    if (talkActive) return;
+    if (fenetreOuverte()) return;   // l'écran est occupé : on laisse finir
+    const now = Date.now();
+    talkQueue = talkQueue.filter(t => (now - t.at) < TALK_TTL[t.prio]);
+    const next = talkQueue.shift();
+    if (next) talkDemarre(next);
+  }
+
+  // la file se vide d'elle-même dès que l'écran se libère
+  setInterval(talkSuivante, 3000);
+
   // dit un message ; en mode Foxy → boîte RPG. waitTap=true → attend un appui (narration).
   function imSay(text, delay, expr, waitTap) {
+    // discussion coupée : on se tait définitivement, la suite ne s'exécute pas
+    const owner = talkActive;
+    if (owner && owner.dead) return new Promise(() => {});
+    if (owner) {
+      return imSayBrut(text, delay, expr, waitTap).then(v => {
+        if (owner.dead) return new Promise(() => {});
+        talkActive = owner;   // on rend la parole au bon propriétaire après l'attente
+        return v;
+      });
+    }
+    return imSayBrut(text, delay, expr, waitTap);
+  }
+  function imSayBrut(text, delay, expr, waitTap) {
     // en mode Foxy, on attend l'appui par défaut (sauf si waitTap explicitement false)
     if (voiceMode === 'foxy') return rpgSay(text, expr, waitTap === undefined ? true : waitTap);
     return new Promise(resolve => {
@@ -3079,7 +3222,21 @@
     return '<span class="lbl">🔑 Prochain change dans</span> ' + rem + ' <span class="lbl">(' + next.label + ' à ' + at + ' ' + dayLabel + ')</span>';
   }
   // met à jour le compteur régulièrement
-  setInterval(() => { renderSince(); renderTimeline(); maybeRedirectBilan(); checkLockAlerts(); foxyPing(); foxyMilestones(); pushMomentTip(); }, 60000);
+  setInterval(() => {
+    // rendus muets : ils ne prennent jamais la parole, ils peuvent tourner librement
+    renderSince(); renderTimeline();
+    // discussions : chacune passe par le chef d'orchestre, à son niveau
+    talk(TALK.SECU,     'lock:alert',  () => checkLockAlerts());
+    talk(TALK.CADRE,    'bilan',       () => maybeRedirectBilan());
+    // le soir, une fois la journée assez avancée : entorses relevées puis discipline
+    if (new Date().getHours() >= 20 && !paused) {
+      talk(TALK.CADRE,  'breaches',    () => proposeBreaches());
+      talk(TALK.CADRE,  'discipline',  () => checkDisciplineTrigger());
+    }
+    talk(TALK.PROGRES,  'milestone',   () => foxyMilestones());
+    talk(TALK.GUIDE,    'tip:'+new Date().getHours()+':'+new Date().getMinutes(), () => pushMomentTip());
+    talk(TALK.AMBIANCE, 'ping',        () => foxyPing());
+  }, 60000);
 
   // Foxy pousse le conseil pratique au début de chaque créneau
   async function pushMomentTip() {
@@ -5445,6 +5602,7 @@
   function bro(soft, dom) { return broOn() ? dom : soft; }
   // le safeword coupe tout et ramène le Foxy doux
   async function triggerSafeword() {
+    talkForce();   // priorité absolue : tout le reste se tait et la file est vidée
     bigbro = false;
     try { await window.storage.set('pref:bigbro', JSON.stringify(false)); } catch(e) {}
     const sw = document.getElementById('bigbroSwitch'); if (sw) sw.classList.remove('on');
@@ -8379,7 +8537,7 @@
           const p2 = JSON.parse(r.value);
           const h2 = (Date.now() - p2.start) / 3600000;
           popupPrise = true;
-          setTimeout(() => showReentryReminder(h2, p2.niveau), 900);
+          setTimeout(() => talk(TALK.ACCES, 'reentry:reminder', () => { showReentryReminder(h2, p2.niveau); return attendrePopup(); }), 900);
         }
       }
     } catch(e) {}
@@ -8395,7 +8553,7 @@
             try { await window.storage.set('arret:traite', JSON.stringify(todayStr())); } catch(e) {}
             try { if (h >= 24) await flagBadge('comeback'); } catch(e) {}
             popupPrise = true;
-            setTimeout(() => showArretSilencieux(h), 1200);
+            setTimeout(() => talk(TALK.ACCES, 'arret:silencieux', () => { showArretSilencieux(h); return attendrePopup(); }), 1200);
           }
         }
       }
@@ -8404,15 +8562,16 @@
     // premier lancement : guide d'installation
     let obLance = false;
     try { if (!popupPrise) obLance = await maybeStartOnboard(); } catch(e) {}
-    if (obLance) { /* on laisse le guide tranquille */ }
-    else if (paused) { /* mode pause : aucune sollicitation */ }
+    if (obLance) popupPrise = true;
+    if (paused) { /* mode pause : aucune sollicitation */ }
     else if (dueSlot && !alreadyDone) {
-      // affiche le rappel "c'est l'heure" puis lance le flux guidé.
-      // Le créneau n'est PAS marqué ici : "Plus tard" doit le laisser réapparaître.
-      setTimeout(() => popChangeDue(dueSlot), 500);
-    } else if (autoOn && (notifPrefs.surprise !== false) && Math.random() < OPEN_PROBABILITY) {
+      // le créneau dû est déclaré au chef d'orchestre : s'il y a une discussion
+      // d'accès en cours (reprise, arrêt silencieux), il attend sagement son tour.
+      const prio = (dueSlot.ctx === 'pilier' || hardMode || discActive()) ? TALK.PILIER : TALK.CHECK;
+      setTimeout(() => talk(prio, 'due:'+dueSlot.key, () => { popChangeDue(dueSlot); return attendreOverlay(); }), 500);
+    } else if (!popupPrise && autoOn && (notifPrefs.surprise !== false) && Math.random() < OPEN_PROBABILITY) {
       // sinon, éventuellement une vérif surprise (si activée dans les réglages)
-      setTimeout(() => popCheck(), 700);
+      setTimeout(() => talk(TALK.CHECK, 'check:surprise', () => { popCheck(); return attendreOverlay(); }), 700);
     }
     // vérif périodique du change dû (persiste tant que non fait, avec snooze)
     setInterval(checkDueChangePeriodic, 60000);
@@ -8450,7 +8609,8 @@
     } catch(e) {}
     // snoozé (Plus tard récent) ?
     if (dueSnooze[due.key] && Date.now() < dueSnooze[due.key]) return;
-    popChangeDue(due);
+    // pilier = niveau 2, check = niveau 3
+    talk(due.ctx === 'pilier' ? TALK.PILIER : TALK.CHECK, 'due:'+due.key, () => { popChangeDue(due); return attendreOverlay(); });
   }
 
   // Enregistrement du service worker (mode hors-ligne / installable)
