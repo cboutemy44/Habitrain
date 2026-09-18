@@ -139,8 +139,10 @@
   .mini { font-size: 11.5px; color: var(--muted); font-weight: 700; }
 
   /* ===== Scanner QR & verrouillage ===== */
+  /* Au-dessus de TOUT : l'écran de verrouillage (10050) et la feuille (10200)
+     passaient devant la caméra. Elle tournait sans jamais être visible. */
   #qrScanOverlay {
-    position:fixed; inset:0; z-index:10001; background:#000;
+    position:fixed; inset:0; z-index:10600; background:#000;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
   }
   #qrVideo { width:100%; height:100%; object-fit:cover; position:absolute; inset:0; }
@@ -698,8 +700,15 @@ body.report.hardmode .head h1::after { content:" 🔥"; }
 
 .qrlock-hint {
   margin-top: 14px; font-size: 12px; font-weight: 700;
-  color: rgba(255,255,255,.55); line-height: 1.5;
+  color: rgba(255,255,255,.55); line-height: 1.7;
 }
+/* « Approche ton tag » : c'est la voie sans geste, elle doit se voir */
+.qrlock-nfc {
+  display: inline-block; font-size: 14.5px; color: #ffd9a0;
+  animation: nfcPulse 2.2s ease-in-out infinite;
+}
+@keyframes nfcPulse { 0%,100% { opacity:.6 } 50% { opacity:1 } }
+.qrlock-or { font-size: 11.5px; color: rgba(255,255,255,.45); }
 
 
 
@@ -853,7 +862,7 @@ body.qrsheet-on #qrSheet { display: block; }
   #qrSheet { position: static; display: block !important; overflow: visible; }
   .qrsheet-bar { display: none !important; }
   .qrsheet-body { padding: 0; }
-  .qrsheet-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  /* le nombre de colonnes est calculé à la génération, d'après la taille choisie */
   .qrsheet-card { border: 1px dashed #999; }
   @page { size: A4; margin: 12mm; }
 }

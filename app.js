@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '16.9';
+  const APP_VERSION = '17.0';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -8340,10 +8340,43 @@
       else g = 'Il est tard... Foxy veille sur toi';
       greet.textContent = g;
     }
-    document.getElementById('qrUnlockBtn').onclick = () => {
-      QR.startScan('unlock', (kind) => {
-        if (kind === 'unlock') { sessionUnlocked = true; lock.style.display = 'none'; if (lockClockTimer) { clearInterval(lockClockTimer); lockClockTimer = null; } }
-      });
+    // --- Deux voies de déverrouillage, clairement séparées ---
+    // Le tag NFC écoute tout seul dès l'affichage de l'écran : rien à appuyer,
+    // tu approches ton poignet. Le bouton, lui, ouvre la caméra pour le QR.
+    const hint = document.getElementById('qrLockHint');
+    const btn = document.getElementById('qrUnlockBtn');
+    const NFC = window.HabitrainNFC;
+    const nfcDispo = !!(NFC && NFC.supported());
+
+    const ouvrir = () => {
+      sessionUnlocked = true;
+      lock.style.display = 'none';
+      if (lockClockTimer) { clearInterval(lockClockTimer); lockClockTimer = null; }
+      try { if (NFC && NFC.isScanning()) NFC.stopScan(); } catch(e) {}
+    };
+
+    if (hint) {
+      hint.innerHTML = nfcDispo
+        ? '<span class="qrlock-nfc">📶 Approche ton tag</span><br><span class="qrlock-or">ou utilise le bouton pour ton QR</span>'
+        : '<span class="qrlock-or">Scanne le QR de ton bracelet pour entrer.</span>';
+    }
+    if (btn) btn.textContent = '📷 Scanner mon bracelet';
+
+    // écoute NFC passive, relancée à chaque affichage de l'écran
+    if (nfcDispo) {
+      try {
+        NFC.startScan(async (payload) => {
+          try {
+            const kind = await QR.parsePayloadPublic(payload);
+            if (kind === 'unlock') ouvrir();
+            else if (hint) hint.innerHTML = '<span class="qrlock-nfc">Ce tag n\'est pas le tien. Réessaie.</span>';
+          } catch(e) {}
+        });
+      } catch(e) { /* NFC indisponible : le bouton reste la voie normale */ }
+    }
+
+    if (btn) btn.onclick = () => {
+      QR.startScan('unlock', (kind) => { if (kind === 'unlock') ouvrir(); }, { petit: true });
     };
     // secours discret : 3 tapes sur le titre (TOUJOURS actif, anti-blocage)
     let taps = [];
