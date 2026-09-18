@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '16.1';
+  const APP_VERSION = '16.2';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -6421,8 +6421,8 @@
         const wrap = document.createElement('div');
         wrap.style.cssText = 'display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line)';
         const cv = document.createElement('canvas');
-        const txt = await QR.payloadFor(id, id === 'unlock');
-        QR.drawQR(cv, txt, 90, id === 'unlock' ? 'L' : 'M');
+        const txt = await QR.payloadFor(id, true);
+        QR.drawQR(cv, txt, 90, 'M');
         const lbl = document.createElement('div');
         lbl.style.cssText = 'flex:1;font-size:13px;font-weight:700;color:var(--ink)';
         lbl.textContent = nom;
@@ -6523,10 +6523,12 @@
         const card = document.createElement('div');
         card.className = 'qrsheet-card';
         const cv = document.createElement('canvas');
-        // le bracelet est minuscule : version courte, correction L, carrés plus gros
+        // Format court partout : 21×21 modules au lieu de 29×29, soit des carrés
+        // ~40 % plus larges à taille de papier égale. La correction reste en M :
+        // avec un contenu aussi court elle ne coûte aucun module de plus.
         const petit = (it.id === 'unlock');
-        const payload = await QR.payloadFor(it.id, petit);
-        QR.drawQR(cv, payload, petit ? 150 : 120, petit ? 'L' : 'M');
+        const payload = await QR.payloadFor(it.id, true);
+        QR.drawQR(cv, payload, petit ? 150 : 120, 'M');
         card.appendChild(cv);
         const n = document.createElement('div');
         n.className = 'n'; n.textContent = it.nom;
@@ -6572,7 +6574,11 @@
     const pied = document.createElement('div');
     pied.className = 'qrsheet-sub';
     pied.style.marginTop = '18px';
-    pied.textContent = '⚠️ Garde une copie de cette feuille en lieu sûr : si tu actives le bracelet obligatoire, c\'est ta porte de sortie. Secours anti-blocage : 3 tapes rapides sur le logo de l\'écran de connexion.';
+    pied.innerHTML = '⚠️ Garde une copie de cette feuille en lieu sûr : si tu actives le bracelet obligatoire, c\'est ta porte de sortie. '
+      + 'Secours anti-blocage : 3 tapes rapides sur le logo de l\'écran de connexion.'
+      + '<br><br>📐 <b>Format court.</b> Ces codes font 21 carrés de côté au lieu de 29 : à taille de papier égale, '
+      + 'leurs modules sont 40 % plus larges. Tu peux les imprimer jusqu\'à 2 cm de côté (1,5 cm pour le bracelet) '
+      + 'et ils restent lisibles. Tes anciennes impressions continuent de fonctionner : l\'appli lit les deux formats.';
     frag.appendChild(pied);
 
     box.innerHTML = '';
@@ -6651,7 +6657,7 @@
       b.textContent = '📶 Écrire : ' + c.label;
       b.addEventListener('click', async () => {
         try {
-          const payload = await window.HabitrainQR.payloadFor(c.kind);
+          const payload = await window.HabitrainQR.payloadFor(c.kind, true);
           res.textContent = '📶 Approche le tag du dos du téléphone...';
           await NFC.writeTag(payload);
           res.textContent = '✅ Tag « ' + c.label + ' » programmé ! Colle-le au bon endroit.';
@@ -8166,8 +8172,8 @@
       const wrap = document.createElement('div'); wrap.className = 'qrgen-item';
       const cv = document.createElement('canvas');
       const petit = (item.id === 'unlock');
-      const txt = await QR.payloadFor(item.id, petit);
-      QR.drawQR(cv, txt, petit ? 170 : 140, petit ? 'L' : 'M');
+      const txt = await QR.payloadFor(item.id, true);
+      QR.drawQR(cv, txt, petit ? 170 : 140, 'M');
       const lbl = document.createElement('div'); lbl.innerHTML = '<div class="n">'+item.label+'</div>';
       wrap.appendChild(cv); wrap.appendChild(lbl);
       gl.appendChild(wrap);
