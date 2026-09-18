@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '16.4';
+  const APP_VERSION = '16.9';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -6498,12 +6498,24 @@
     if (d) d.addEventListener('click', () => downloadQrSheet());
     const m = document.getElementById('qrSheetMm');
     if (m) m.addEventListener('change', async () => { await buildQrSheet(); });
+    const f = document.getElementById('qrSheetFmt');
+    if (f) f.addEventListener('change', async () => {
+      // le 10×15 n'a de sens qu'avec des codes compacts : on s'aligne d'office
+      // 11 mm : le plus grand code qui garde 4 colonnes et 3,6 cm de libre en 10×15
+      if (f.value === '10x15' && m && parseFloat(m.value) > 11) m.value = '11';
+      await buildQrSheet();
+    });
   })();
 
   async function buildQrSheet() {
     const QR = window.HabitrainQR, WB = window.HabitrainWardrobe;
     const box = document.getElementById('qrSheetBody');
     if (!box || !QR) return;
+    // L'impression masque tous les enfants directs de <body> sauf la feuille.
+    // Si la feuille est imbriquée dans un autre bloc, c'est ce bloc qui disparaît
+    // et la page sort vide : on la remonte d'abord au niveau du body.
+    const sheet = document.getElementById('qrSheet');
+    if (sheet && sheet.parentElement !== document.body) document.body.appendChild(sheet);
     document.body.classList.add('qrsheet-on');
     box.innerHTML = '<div class="qrsheet-sub">Génération…</div>';
     window.scrollTo(0, 0);
@@ -6512,20 +6524,75 @@
     const selMm = document.getElementById('qrSheetMm');
     const mmChoisi = selMm ? parseFloat(selMm.value) || 20 : 20;
 
+    // ---- Échelle des étiquettes, alignée sur la taille du QR ----
+    // Tout est exprimé en millimètres et dérivé de mmChoisi : à 10 mm de code,
+    // une légende en 12,5 px occuperait plus de place que le QR lui-même.
+    // Plancher de lisibilité à l'impression : ~1,8 mm de hauteur de caractère.
+    const fNom  = Math.max(1.5, mmChoisi * 0.16).toFixed(2);   // nom de l'étiquette
+    const fLieu = Math.max(1.25, mmChoisi * 0.125).toFixed(2); // emplacement
+    const pad   = Math.max(0.8, mmChoisi * 0.10).toFixed(2);   // marge intérieure
+    const colMin = Math.max(18, mmChoisi * 1.9).toFixed(0);    // largeur mini d'une colonne
+    // Police étroite : à hauteur égale elle occupe ~20 % de largeur en moins,
+    // ce qui compte plus que les millimètres sur une étiquette de 2 cm.
+    const ETROITE = "'Arial Narrow','Helvetica Neue Condensed','Liberation Sans Narrow',"
+                  + "'Roboto Condensed',system-ui,sans-serif";
+
+    // --- Format de page ---
+    // En 10×15, la place est comptée : on retire le titre décoratif, les intertitres
+    // et la note de bas de page, et on ne garde que les étiquettes.
+    const selFmt = document.getElementById('qrSheetFmt');
+    const photo = selFmt ? selFmt.value === '10x15' : false;
+    const margePage = photo ? 4 : 12;
+    const largeurUtile = photo ? (100 - margePage * 2) : 100;
+    const cssPage = photo
+      ? '@page{size:100mm 150mm;margin:' + margePage + 'mm}'
+        + 'body{padding:0}'
+        + '.qrsheet-title,.qrsheet-sub,.qrsheet-sec{display:none}'
+        + '.qrsheet-body{padding:0}'
+      : '@page{size:A4;margin:' + margePage + 'mm}';
+
+    const echelle =
+      '<style>' + cssPage +
+      '.qrsheet-grid{grid-template-columns:repeat(auto-fill,minmax(' + colMin + 'mm,1fr));gap:' + pad + 'mm;' +
+        'max-width:' + largeurUtile + 'mm}' +
+      '.qrsheet-card{padding:' + pad + 'mm}' +
+      '.qrsheet-card .n,.qrsheet-card .w{font-family:' + ETROITE + ';font-stretch:condensed;' +
+        'letter-spacing:-.01em;hyphens:auto;overflow-wrap:anywhere}' +
+      '.qrsheet-card .n{font-size:' + fNom + 'mm;line-height:1.05}' +
+      '.qrsheet-card .w{font-size:' + fLieu + 'mm;line-height:1.1;font-weight:600;' +
+        'margin-top:' + (pad/4).toFixed(2) + 'mm}' +
+      '.qrsheet-card canvas,.qrsheet-card img{margin-bottom:' + (pad/2).toFixed(2) + 'mm}' +
+      '</style>';
+
     const frag = document.createElement('div');
     const now = new Date();
-    frag.innerHTML =
+    frag.innerHTML = echelle +
       '<div class="qrsheet-title">🦊 Habitrain — mes QR codes</div>' +
       '<div class="qrsheet-sub">Généré le ' + now.toLocaleDateString('fr-FR') +
       ' · Ces codes sont uniques à ton installation. Découpe chaque étiquette et plastifie-la.</div>';
 
+    // en 10×15, tout va dans une grille unique : trois grilles séparées
+    // laisseraient des trous de plusieurs centimètres entre les sections
+    let grilleUnique = null;
     const ajouterSection = async (titre, items) => {
       if (!items.length) return;
-      const h = document.createElement('div');
-      h.className = 'qrsheet-sec'; h.textContent = titre;
-      frag.appendChild(h);
-      const grid = document.createElement('div');
-      grid.className = 'qrsheet-grid';
+      if (!photo) {
+        const h = document.createElement('div');
+        h.className = 'qrsheet-sec'; h.textContent = titre;
+        frag.appendChild(h);
+      }
+      let grid;
+      if (photo) {
+        if (!grilleUnique) {
+          grilleUnique = document.createElement('div');
+          grilleUnique.className = 'qrsheet-grid';
+          frag.appendChild(grilleUnique);
+        }
+        grid = grilleUnique;
+      } else {
+        grid = document.createElement('div');
+        grid.className = 'qrsheet-grid';
+      }
       for (const it of items) {
         const card = document.createElement('div');
         card.className = 'qrsheet-card';
@@ -6546,7 +6613,7 @@
         }
         grid.appendChild(card);
       }
-      frag.appendChild(grid);
+      if (!photo) frag.appendChild(grid);
     };
 
     // 1) Actions à valider
@@ -6570,55 +6637,53 @@
           for (const nom of (w[cat] || [])) {
             if (vus.has(nom)) continue;
             vus.add(nom);
-            tenues.push({ id: WB.itemId(cat, nom), nom, ou: 'À l\'intérieur du col ou de la ceinture' });
+            // en 10×15 l'emplacement est le même pour les 11 tenues : deux lignes
+            // répétées onze fois, autant de place perdue. On le dit une fois en A4,
+            // en abrégé sur la page photo.
+            tenues.push({ id: WB.itemId(cat, nom), nom,
+                          ou: photo ? 'Col ou ceinture' : 'À l\'intérieur du col ou de la ceinture' });
           }
         }
         await ajouterSection('Mes tenues (' + tenues.length + ')', tenues);
       } catch(e) {}
     }
 
-    // --- Bande d'étalonnage : le même code à plusieurs tailles réelles ---
-    // À imprimer une fois pour trouver la plus petite taille que TON imprimante
-    // et TON téléphone encaissent, avant de plastifier toute la série.
-    try {
-      const h = document.createElement('div');
-      h.className = 'qrsheet-sec'; h.textContent = 'Bande d\'étalonnage — imprime, puis scanne du plus petit au plus grand';
-      frag.appendChild(h);
-      const bande = document.createElement('div');
-      bande.className = 'qrsheet-cal';
-      const payloadCal = await QR.payloadFor('unlock', true);
-      for (const mm of [8, 10, 12, 15, 20]) {
-        const cell = document.createElement('div');
-        cell.className = 'qrsheet-calitem';
-        const cv = document.createElement('canvas');
-        QR.drawQR(cv, payloadCal, 400, 'M', mm);
-        cell.appendChild(cv);
-        const lb = document.createElement('div');
-        lb.className = 'n'; lb.textContent = mm + ' mm';
-        cell.appendChild(lb);
-        bande.appendChild(cell);
-      }
-      frag.appendChild(bande);
-      const noteCal = document.createElement('div');
-      noteCal.className = 'qrsheet-sub';
-      noteCal.innerHTML = 'Ce sont tous le même code (bracelet). Imprime cette feuille <b>à 100 %, sans « ajuster à la page »</b>, '
-        + 'puis scanne-les en commençant par le plus petit. La plus petite taille qui passe du premier coup, '
-        + 'avec un peu de marge, c\'est celle à retenir pour toute ta série.';
-      frag.appendChild(noteCal);
-    } catch(e) {}
-
     const pied = document.createElement('div');
     pied.className = 'qrsheet-sub';
     pied.style.marginTop = '18px';
     pied.innerHTML = '⚠️ Garde une copie de cette feuille en lieu sûr : si tu actives le bracelet obligatoire, c\'est ta porte de sortie. '
       + 'Secours anti-blocage : 3 tapes rapides sur le logo de l\'écran de connexion.'
-      + '<br><br>📐 <b>Format court.</b> Ces codes font 21 carrés de côté au lieu de 29 : à taille de papier égale, '
-      + 'leurs modules sont 40 % plus larges. Tu peux les imprimer jusqu\'à 2 cm de côté (1,5 cm pour le bracelet) '
-      + 'et ils restent lisibles. Tes anciennes impressions continuent de fonctionner : l\'appli lit les deux formats.';
+      + '<br><br>📐 <b>Impression.</b> Règle la taille dans la barre, puis imprime <b>à 100 %, sans « ajuster à la page »</b> — '
+      + 'c\'est la seule façon d\'obtenir les millimètres annoncés. La marge blanche autour de chaque code en fait partie : '
+      + 'ne la rogne pas à la découpe. Tes anciennes impressions restent valables, l\'appli lit les deux formats.';
     frag.appendChild(pied);
 
     box.innerHTML = '';
     box.appendChild(frag);
+
+    // --- Témoin : est-ce que ça tient sur la page choisie ? ---
+    // On mesure ce qui vient d'être rendu plutôt que de l'estimer.
+    try {
+      const fit = document.getElementById('qrSheetFit');
+      if (fit) {
+        const hMm = box.getBoundingClientRect().height / 96 * 25.4;
+        const budget = photo ? (150 - margePage * 2) : (297 - margePage * 2);
+        const reste = budget - hMm;
+        const nomPage = photo ? '10 × 15' : 'A4';
+        if (reste >= 5) {
+          fit.style.color = '#2e7d4f';
+          fit.textContent = '✓ tient sur ' + nomPage + ' (' + Math.round(reste) + ' mm de libre)';
+        } else if (reste >= 0) {
+          fit.style.color = '#b8860b';
+          fit.textContent = '⚠︎ tient de justesse (' + reste.toFixed(1) + ' mm) — prends la taille en dessous';
+        } else {
+          fit.style.color = '#c0392b';
+          fit.textContent = '✗ déborde de ' + Math.abs(reste).toFixed(0) + ' mm sur ' + nomPage
+            + (photo ? ' — passe en 10 mm' : '');
+        }
+      }
+    } catch(e) {}
+
     try { await window.storage.set('ob:qrdone', JSON.stringify(true)); } catch(e) {}
   }
 
@@ -6632,9 +6697,14 @@
     const dstCanvas = clone.querySelectorAll('canvas');
     for (let i = 0; i < dstCanvas.length; i++) {
       try {
+        const src = srcCanvas[i];
         const img = document.createElement('img');
-        img.src = srcCanvas[i].toDataURL('image/png');
-        img.style.cssText = 'display:block;margin:0 auto 6px;width:120px;height:120px';
+        img.src = src.toDataURL('image/png');
+        // on reprend la taille d'impression réelle du canvas (en mm) au lieu
+        // d'une largeur fixe : sinon le choix de taille ne sortait jamais du navigateur.
+        const l = src.style.width, h = src.style.height;
+        img.style.cssText = 'display:block;margin:0 auto 6px;image-rendering:pixelated;'
+          + (l ? ('width:' + l + ';height:' + (h || l)) : 'width:120px;height:120px');
         dstCanvas[i].parentNode.replaceChild(img, dstCanvas[i]);
       } catch(e) {}
     }
@@ -6649,11 +6719,6 @@
       'background:#fff;break-inside:avoid;page-break-inside:avoid}',
       '.qrsheet-card .n{font-size:12.5px;font-weight:800;line-height:1.25;color:#111}',
       '.qrsheet-card .w{font-size:11px;font-weight:600;color:#666;margin-top:3px;line-height:1.35}',
-      '.qrsheet-cal{display:flex;align-items:flex-end;gap:10mm;flex-wrap:wrap;padding:6mm 2mm;',
-      'background:#fff;break-inside:avoid;page-break-inside:avoid}',
-      '.qrsheet-calitem{text-align:center}',
-      '.qrsheet-calitem canvas{display:block;image-rendering:pixelated}',
-      '.qrsheet-calitem .n{font-size:10px;font-weight:800;color:#666;margin-top:2mm}',
       '@media print{body{padding:0}@page{size:A4;margin:12mm}}'
     ].join('');
     const html = '<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">' +

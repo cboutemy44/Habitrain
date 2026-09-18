@@ -59,15 +59,23 @@
     <div class="qrsheet-bar">
       <button id="qrSheetClose">✕ Fermer</button>
       <span class="qrsheet-hint">Imprime à 100 %, puis découpe et plastifie chaque étiquette.</span>
+      <label class="qrsheet-hint" style="display:flex;align-items:center;gap:6px">Page
+        <select id="qrSheetFmt">
+          <option value="a4" selected>A4</option>
+          <option value="10x15">10 × 15 cm</option>
+        </select>
+      </label>
       <label class="qrsheet-hint" style="display:flex;align-items:center;gap:6px">Taille
         <select id="qrSheetMm">
           <option value="10">10 mm</option>
+          <option value="11">11 mm</option>
           <option value="12">12 mm</option>
           <option value="15">15 mm</option>
           <option value="20" selected>20 mm</option>
           <option value="30">30 mm</option>
         </select>
       </label>
+      <span id="qrSheetFit" class="qrsheet-hint"></span>
       <button id="qrSheetDl">⬇️ Télécharger</button>
       <button id="qrSheetPrint">🖨️ Imprimer</button>
     </div>
