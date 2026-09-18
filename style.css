@@ -148,6 +148,13 @@
     position:relative; z-index:2; width:230px; height:230px; border:3px solid #fff;
     border-radius:20px; box-shadow:0 0 0 2000px rgba(0,0,0,.45);
   }
+  /* mode petit QR (bracelet) : viseur resserré, pour placer le code au centre
+     — c'est exactement la zone que le lecteur agrandit pour le décoder */
+  #qrScanOverlay.petit .qr-frame {
+    width:120px; height:120px; border-radius:14px; border-color:#ffd9a0;
+    animation:qrPulse 1.8s ease-in-out infinite;
+  }
+  @keyframes qrPulse { 0%,100% { border-color:#ffd9a0 } 50% { border-color:#fff } }
   #qrScanHint { position:relative; z-index:2; color:#fff; font-weight:800; margin-top:22px; font-size:15px; text-align:center; padding:0 24px; }
   #qrScanCancel {
     position:relative; z-index:2; margin-top:20px; font-family:inherit; font-size:14.5px; font-weight:800;

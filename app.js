@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '16.0';
+  const APP_VERSION = '16.1';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -6421,8 +6421,8 @@
         const wrap = document.createElement('div');
         wrap.style.cssText = 'display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line)';
         const cv = document.createElement('canvas');
-        const txt = await QR.payloadFor(id);
-        QR.drawQR(cv, txt, 90);
+        const txt = await QR.payloadFor(id, id === 'unlock');
+        QR.drawQR(cv, txt, 90, id === 'unlock' ? 'L' : 'M');
         const lbl = document.createElement('div');
         lbl.style.cssText = 'flex:1;font-size:13px;font-weight:700;color:var(--ink)';
         lbl.textContent = nom;
@@ -6523,8 +6523,10 @@
         const card = document.createElement('div');
         card.className = 'qrsheet-card';
         const cv = document.createElement('canvas');
-        const payload = await QR.payloadFor(it.id);
-        QR.drawQR(cv, payload, 120);
+        // le bracelet est minuscule : version courte, correction L, carrés plus gros
+        const petit = (it.id === 'unlock');
+        const payload = await QR.payloadFor(it.id, petit);
+        QR.drawQR(cv, payload, petit ? 150 : 120, petit ? 'L' : 'M');
         card.appendChild(cv);
         const n = document.createElement('div');
         n.className = 'n'; n.textContent = it.nom;
@@ -8163,8 +8165,9 @@
     for (const item of toGen) {
       const wrap = document.createElement('div'); wrap.className = 'qrgen-item';
       const cv = document.createElement('canvas');
-      const txt = await QR.payloadFor(item.id);
-      QR.drawQR(cv, txt, 140);
+      const petit = (item.id === 'unlock');
+      const txt = await QR.payloadFor(item.id, petit);
+      QR.drawQR(cv, txt, petit ? 170 : 140, petit ? 'L' : 'M');
       const lbl = document.createElement('div'); lbl.innerHTML = '<div class="n">'+item.label+'</div>';
       wrap.appendChild(cv); wrap.appendChild(lbl);
       gl.appendChild(wrap);
