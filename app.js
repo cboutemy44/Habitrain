@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '15.8';
+  const APP_VERSION = '15.9';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -2999,6 +2999,8 @@
     // C'est le symptôme d'un change non enregistré, ou d'une couche
     // jamais remise. On le signale clairement plutôt que d'afficher un chiffre faux.
     if (hours > 14) {
+      // le statut « sèche » hérité du dernier change n'a plus de sens ici
+      if (stateEl) stateEl.innerHTML = '<span class="lbl" style="font-size:11.5px;font-weight:700;color:var(--muted)">Statut incertain — on repart d\'une couche fraîche</span>';
       positionFoxyCell(portrait, 'alarmed', 88);
       timeEl.className = 'since-time long';
       timeEl.textContent = (h > 48 ? Math.round(hours/24) + ' j' : h + 'h' + (min<10?'0'+min:min));
@@ -3701,6 +3703,7 @@
     // La peau plafonne le palier : la santé prime sur la performance.
     let stageBySkin = 3;
     const surveillerRecent = last7.map(d=>byDate[d]).filter(e => e && e.skin === 'surveiller').length;
+    const treatRecent = last7.map(d=>byDate[d]).filter(e => e && e.skin === 'traiter').length;
     if (treatRecent > 0) stageBySkin = 1;            // peau à traiter : palier 1 maximum
     else if (surveillerRecent >= 3) stageBySkin = 2; // peau à surveiller souvent : palier 2 max
 
@@ -3717,7 +3720,6 @@
     // --- Peau (garde-fou santé, hors score) ---
     const skinFilled = dates.map(d => byDate[d]).filter(e => e && e.skin);
     const greenPct = skinFilled.length ? Math.round(skinFilled.filter(e=>e.skin==='verte').length / skinFilled.length * 100) : 0;
-    const treatRecent = last7.map(d=>byDate[d]).filter(e=>e && e.skin==='traiter').length;
 
     // --- Appréciation personnalisée : constat + clés concrètes ---
     let appr = [];
