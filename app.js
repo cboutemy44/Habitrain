@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '17.4';
+  const APP_VERSION = '17.6';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -673,7 +673,7 @@
     opt = opt || {};
     const k = key || ('t'+prio+':'+Math.random());
     if ((talkActive && talkActive.key === k) || talkQueue.some(t => t.key === k)) return Promise.resolve(false);
-    const item = { prio, key:k, run, at: Date.now(), dead:false };
+    const item = { prio, key:k, run, at: Date.now(), dead:false, verifier: opt.verifier };
 
     // écran de connexion : tout attend, sans exception de priorité
     if (ecranVerrouille()) {
@@ -691,7 +691,11 @@
     }
     if (!talkActive) { talkDemarre(item); return Promise.resolve(true); }
 
-    if (prio < talkActive.prio) {          // plus important que ce qui parle → on annonce et on coupe
+    // Couper la parole n'est PAS automatique : seule une discussion qui a
+    // explicitement le droit d'interrompre le fait. Sans ça, un contrôle
+    // périodique se déclarait prioritaire chaque minute, coupait une séquence
+    // en cours, puis n'avait rien à dire — d'où le « Stop » suivi de rien.
+    if (prio < talkActive.prio && opt.coupe) {
       talkCoupe(item);
       return Promise.resolve(true);
     }
@@ -720,12 +724,23 @@
 
   function talkDemarre(item) { talkActive = item; talkLance(item); }
 
-  // exécute réellement la discussion et rend la parole à la fin
+  // exécute réellement la discussion et rend la parole à la fin.
+  // Le vérificateur, quand il y en a un, décide juste avant : une discussion
+  // qui n'a finalement rien à dire rend la parole sans l'avoir prise.
   function talkLance(item) {
-    let p;
-    try { p = item.run(); } catch(e) { p = null; }
     const fin = () => { if (talkActive === item) { talkActive = null; talkSuivante(); } };
-    if (p && p.then) p.then(fin, fin); else fin();
+    const go = () => {
+      let p;
+      try { p = item.run(); } catch(e) { p = null; }
+      if (p && p.then) p.then(fin, fin); else fin();
+    };
+    if (typeof item.verifier === 'function') {
+      let v;
+      try { v = item.verifier(); } catch(e) { v = false; }
+      Promise.resolve(v).then(ok => { if (ok) go(); else fin(); }, () => fin());
+      return;
+    }
+    go();
   }
 
   // passe à la discussion suivante, en jetant celles qui ont trop attendu
@@ -3249,7 +3264,10 @@
     // rendus muets : ils ne prennent jamais la parole, ils peuvent tourner librement
     renderSince(); renderTimeline();
     // discussions : chacune passe par le chef d'orchestre, à son niveau
-    talk(TALK.SECU,     'lock:alert',  () => checkLockAlerts());
+    // Le contrôle des serrures tourne toutes les minutes mais n'a presque
+    // jamais rien à dire : il ne prend la parole que s'il existe une serrure
+    // active, et il ne coupe personne.
+    talk(TALK.SECU, 'lock:alert', () => checkLockAlerts(), { verifier: serrureActive });
     talk(TALK.CADRE,    'bilan',       () => maybeRedirectBilan());
     // le soir, une fois la journée assez avancée : entorses relevées puis discipline
     if (new Date().getHours() >= 20 && !paused) {
@@ -3422,6 +3440,15 @@
 
   // ===== Veille des serrures : fenêtre qui approche/se ferme, quota bientôt épuisé =====
   let lockAlertSent = {};
+  // y a-t-il seulement une serrure susceptible d'alerter ?
+  async function serrureActive() {
+    if (paused || !window.HabitrainLock) return false;
+    try {
+      const locks = await window.HabitrainLock.getLocks();
+      return !!(locks && locks.some(l => l.enabled));
+    } catch(e) { return false; }
+  }
+
   async function checkLockAlerts() {
     if (paused || !window.HabitrainLock) return;
     const PIL = [9*60, 16*60, 22*60+30];
@@ -5761,6 +5788,27 @@
     diner:'C\'est l\'heure du dîner ! Un petit check si besoin.',
     surprise:'Vérif surprise ! Ta couche est comment ?'
   };
+  /* Plan de notifications exposé au pont natif.
+     En PWA les rappels sont des setTimeout : ils meurent avec l'onglet.
+     En natif, ce plan est confié au système, qui les déclenche même
+     application fermée. Une seule source, deux exécutions. */
+  window.__habitrainNotifPlan = function () {
+    const items = [];
+    try {
+      NOTIF_CATEGORIES.forEach(c => c.items.forEach(it => {
+        if (it.m == null || !notifPrefs[it.id]) return;
+        items.push({
+          cle: it.id,
+          titre: '🦊 ' + it.n,
+          corps: (FOXY_NOTIF && FOXY_NOTIF[it.id]) ? FOXY_NOTIF[it.id] : (it.body || it.n),
+          heure: Math.floor(it.m / 60),
+          minute: it.m % 60
+        });
+      }));
+    } catch (e) {}
+    return { pause: !!paused, items };
+  };
+
   function scheduleNotifications() {
     clearNotifTimers();
     if (notifPermState() !== 'granted') return;
@@ -8934,7 +8982,10 @@
     // snoozé (Plus tard récent) ?
     if (dueSnooze[due.key] && Date.now() < dueSnooze[due.key]) return;
     // pilier = niveau 2, check = niveau 3
-    talk(due.ctx === 'pilier' ? TALK.PILIER : TALK.CHECK, 'due:'+due.key, () => { popChangeDue(due); return attendreOverlay(); });
+    // un change dû ouvre toujours une fenêtre : lui, il a vraiment quelque
+    // chose à dire, et il a le droit de couper une discussion moins importante.
+    talk(due.ctx === 'pilier' ? TALK.PILIER : TALK.CHECK, 'due:'+due.key,
+         () => { popChangeDue(due); return attendreOverlay(); }, { coupe: true });
   }
 
   // Enregistrement du service worker (mode hors-ligne / installable)
