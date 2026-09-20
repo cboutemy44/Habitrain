@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '18.6';
+  const APP_VERSION = '18.7';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -569,7 +569,11 @@
       // récapitulatif t'imposait une tenue que personne ne vérifiait.
       if ((bascule || nuitAnticipee || opts.exigerTenue) && window.HabitrainWardrobe) etapes.push('tenue');
     } catch(e) {}
-    const prouve = await exigerPreuves(etapes);
+    // ce qui vient d'être prouvé pendant la reprise n'est pas redemandé
+    const restantes = opts.dejaProuve
+      ? etapes.filter(k => opts.dejaProuve.indexOf(k) === -1)
+      : etapes;
+    const prouve = restantes.length ? await exigerPreuves(restantes) : true;
     await finalizeChange(prouve);
     return prouve;
   }
@@ -6990,6 +6994,64 @@
     await imSay(lignes.join('<br>'), 1100, 'teach');
   }
 
+  /* Validation d'une étape de reprise.
+     Sans élément vérifiable : une simple confirmation suffit, on ne va pas
+     te demander de prouver que tu as regardé ta peau.
+     Avec : la preuve est exigée pour avancer. */
+  async function validerEtapeReprise(e) {
+    if (!e.verif) {
+      return new Promise(res => {
+        imSetActions([{ label:'✓ C\'est fait', onClick: () => { imAddMe('C\'est fait.'); res('ok'); } }]);
+      });
+    }
+
+    // capteurs : on lit leur état en direct, aucun scan à faire de ta part
+    if (e.verif === 'capteur_couche' || e.verif === 'capteur_tenue') {
+      return new Promise(res => {
+        imSetActions([
+          { label:'📡 Vérifier le capteur', onClick: async () => {
+            imAddMe('Vérifie le capteur.');
+            const ok = await lireCapteurPourReprise(e.verif);
+            if (ok) { await imSay(broOn() ? 'Il répond. Bien.' : 'Il répond, il est en place ! 🦊', 800, 'proud'); res('ok'); return; }
+            await imSay(broOn()
+              ? 'Aucune réponse. Il n\'est pas connecté, ou pas en place.'
+              : 'Je n\'ai aucune réponse de lui... Il est connecté ? Sinon passe par le menu des réglages. 🦊', 950, 'concern');
+            const suite = await validerEtapeReprise(e);
+            res(suite);
+          }},
+          { soft:true, label:'Je ne l\'utilise pas là', onClick: async () => {
+            imAddMe('Je ne l\'utilise pas là.');
+            try { await marquerEntorse('b_capteur_muet'); } catch(e2) {}
+            res('force');
+          }}
+        ]);
+      });
+    }
+
+    // le reste passe par le moteur de preuve : QR ou tag
+    return new Promise(res => {
+      imSetActions([{ label:'📷 Je le scanne', onClick: async () => {
+        imAddMe('Je le scanne.');
+        const ok = await exigerPreuves([e.verif]);
+        res(ok ? 'ok' : 'force');
+      }}]);
+    });
+  }
+
+  async function lireCapteurPourReprise(quoi) {
+    try {
+      if (quoi === 'capteur_tenue') {
+        const TS = window.HabitrainTenueSensor;
+        if (!TS || !TS.connecte()) return false;
+        const ouvert = await TS.lireEtat();
+        return ouvert === false;           // on veut « fermée »
+      }
+      // capteur de couche : une mesure de moins de 10 minutes vaut présence
+      const m = await etatMesure(10);
+      return !!m;
+    } catch(e) { return false; }
+  }
+
   async function reentryInterne(niveau) {
     // on note que la couche est en train d'être remise, mais pas encore confirmée
     try { await window.storage.set('reentry:pending', JSON.stringify({ start: Date.now(), niveau })); } catch(e) {}
@@ -7068,41 +7130,72 @@
     if (braceletActif) recap += '\n🔒 Ton bracelet (QR/NFC) : à remettre au poignet — obligatoire.';
     await imSay(recap, 1100, 'explain');
 
-    // 3) la marche à suivre
-    await imSay('Voilà la marche à suivre, dans l\'ordre :', 850, 'teach');
+    // quels capteurs sont en service ? on ne fait vérifier que ce que tu as
+    let capteurCouche = false, capteurTenue = false;
+    try { const r = await window.storage.get('sensor:vu'); capteurCouche = !!(r && r.value); } catch(e) {}
+    try { capteurTenue = await capteurTenueEnService(); } catch(e) {}
+
+    // 3) la marche à suivre, VÉRIFIÉE étape par étape.
+    // Réciter la liste ne prouve rien : chaque étape qui porte un élément
+    // vérifiable exige sa preuve avant qu'on avance à la suivante.
+    await imSay('On y va ensemble, une étape à la fois. Je vérifie au fur et à mesure.', 900, 'teach');
+
     const etapes = [
-      '1. Va à ton espace de change et prépare tout : couche, crème, lingettes.',
-      '2. Enlève ce que tu portes. On repart de zéro.',
-      '3. Vérifie ta peau avant de commencer — elle doit être propre et sèche.',
-      '4. Applique la crème barrière, généreusement.',
-      '5. Mets ta couche bien en place, en suivant le guide des 4 languettes.',
-      '6. Enfile la tenue que je t\'ai tirée.',
-      braceletActif ? '7. Remets ton bracelet au poignet — sans lui, l\'appli restera verrouillée.' : null,
-      access.length ? '8. Reprends tes accessoires : ' + access.join(', ') + '.' : null,
-      '9. Si tu utilises le capteur, reclipse-le et reconnecte-le dans le menu 📡.',
-      niveau === 'tres_long'
-        ? '7. Et prends un moment pour te réhabituer. Ton corps a perdu le réflexe, c\'est normal — ne force pas, laisse revenir.'
-        : '7. Reprends ton rythme normal : le prochain créneau te sera rappelé.'
-    ];
-    const liste = etapes.filter(Boolean).map((t, i) => t.replace(/^\d+\./, (i+1) + '.'));
-    for (const e of liste) { await imSay(e, 800, 'explain'); }
+      { t:'Va à ton espace de change et prépare tout : couche, crème, lingettes.' },
+      { t:'Enlève ce que tu portes. On repart de zéro.' },
+      { t:'Regarde ta peau avant de commencer — elle doit être propre et sèche.' },
+      { t:'Applique la crème barrière, généreusement.' },
+      { t:'Mets ta couche bien en place, en suivant le guide des 4 languettes.'
+          + (modele ? ' Ce sera une ' + modele.name + '.' : ''),
+        verif:'change_pilier' },
+      { t:'Enfile la tenue que je t\'ai tirée' + (tenueDuMoment ? ' : ' + tenueDuMoment + '.' : '.'),
+        verif:'tenue' },
+      braceletActif
+        ? { t:'Remets ton bracelet au poignet — sans lui, l\'appli restera verrouillée.', verif:'unlock' }
+        : null,
+      access.length ? { t:'Reprends tes accessoires : ' + access.join(', ') + '.' } : null,
+      capteurCouche
+        ? { t:'Reclipse ton capteur de couche à l\'avant, sous la ceinture, et reconnecte-le dans le menu 📡.',
+            verif:'capteur_couche' }
+        : null,
+      capteurTenue
+        ? { t:'Reclipse le module de tenue en butée de fermeture, une fois la tenue fermée.',
+            verif:'capteur_tenue' }
+        : null,
+      { t: niveau === 'tres_long'
+          ? 'Prends un moment pour te réhabituer. Ton corps a perdu le réflexe, c\'est normal — ne force pas, laisse revenir.'
+          : 'Reprends ton rythme normal : le prochain créneau te sera rappelé.' }
+    ].filter(Boolean);
+
+    const prouves = {};
+    for (let i = 0; i < etapes.length; i++) {
+      const e = etapes[i];
+      await imSay('<b>Étape ' + (i+1) + ' / ' + etapes.length + '</b><br>' + e.t, 950, 'explain');
+      const r = await validerEtapeReprise(e);
+      if (r === 'ok' && e.verif) prouves[e.verif] = true;
+    }
 
     if (niveau === 'long' || niveau === 'tres_long') {
       await imSay('Et n\'oublie pas : contention douce sur ta prochaine fenêtre de régression, et je te surveille de près pour le reste de la journée.', 950, 'calm');
     }
 
     imSetActions([
-      { label:'🦊 Ça y est, j\'ai remis ma couche', onClick: async () => {
-        imAddMe('Ça y est, j\'ai remis ma couche.');
+      { label:'🦊 Terminer ma reprise', onClick: async () => {
+        imAddMe('Je termine ma reprise.');
 
         // On vérifie AVANT de lever la pause. Jusqu'ici la reprise était
         // validée sur ta seule parole, et le change ne venait qu'après :
         // un scan raté laissait quand même le programme repris.
-        await imSay(broOn()
-          ? 'Pas si vite. Montre-moi.'
-          : 'Attends, je vérifie avec toi — c\'est la reprise, je ne veux rien laisser au hasard. 🦊', 800, 'curious');
+        if (!(prouves.change_pilier && prouves.tenue)) {
+          await imSay(broOn()
+            ? 'Pas si vite. Montre-moi.'
+            : 'Attends, je vérifie avec toi — c\'est la reprise, je ne veux rien laisser au hasard. 🦊', 800, 'curious');
+        }
 
-        const prouve = await finishChange({ exigerTenue: true });
+        const prouve = await finishChange({
+          exigerTenue: true,
+          dejaProuve: (prouves.change_pilier && prouves.tenue) ? ['change_pilier','tenue'] : null
+        });
 
         if (!prouve) {
           await imSay(broOn()
