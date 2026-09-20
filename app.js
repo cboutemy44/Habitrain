@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '18.4';
+  const APP_VERSION = '18.5';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -452,7 +452,7 @@
       // même bascule que la carte du tirage et la vérification du scan :
       // 22h30 / 9h, pas 22h / 8h. Entre 8h et 9h, on proposait une couche de
       // jour alors que le cadre te garde en couche de nuit.
-      const period = estNuit(new Date()) ? 'nuit' : 'jour';
+      const period = couchageNuit(new Date()) ? 'nuit' : 'jour';
       const dispo = (await window.HabitrainWardrobe.modelsFor(period)).filter(m => m.qty > 0);
       if (!dispo.length) {
         const tous = await window.HabitrainWardrobe.getStock();
@@ -556,7 +556,10 @@
     opts = opts || {};
     // Un change se prouve, toujours. Sur les piliers du matin et du soir,
     // la tenue change aussi : deux preuves, l'une après l'autre.
-    const isPilier = (changeCtx === 'pilier') || !!pillarSlotForNow();
+    // À partir de 19h30, une remise en couche EST le change de nuit, avancé.
+    // On ne pose pas une couche de jour pour trois heures.
+    const nuitAnticipee = couchageNuit(new Date()) && !estNuit(new Date());
+    const isPilier = (changeCtx === 'pilier') || !!pillarSlotForNow() || nuitAnticipee;
     const etapes = [isPilier ? 'change_pilier' : 'change_tous'];
     try {
       const nowMin = new Date().getHours()*60 + new Date().getMinutes();
@@ -564,7 +567,7 @@
       // À la reprise, la tenue est TOUJOURS exigée quelle que soit l'heure :
       // tu sors du cadre entièrement, tu y rentres entièrement. Sans ça, le
       // récapitulatif t'imposait une tenue que personne ne vérifiait.
-      if ((bascule || opts.exigerTenue) && window.HabitrainWardrobe) etapes.push('tenue');
+      if ((bascule || nuitAnticipee || opts.exigerTenue) && window.HabitrainWardrobe) etapes.push('tenue');
     } catch(e) {}
     const prouve = await exigerPreuves(etapes);
     await finalizeChange(prouve);
@@ -574,6 +577,8 @@
     await saveCheck(proof ? 'change_fait' : 'change_fait_sanspreuve', 'change_'+(changeCtx||'check'));
     let slotKey = activeSlotKey;
     if (!slotKey) { const p = pillarSlotForNow(); if (p) slotKey = p.key; }
+    // change de nuit avancé : c'est bien le pilier de 22h30 qu'on valide
+    if (!slotKey && couchageNuit(new Date())) slotKey = 'c2230';
     await markSlotDoneKey(slotKey);
 
     // Le stock se décompte ICI, et nulle part ailleurs. Jusqu'à présent le
@@ -582,7 +587,7 @@
     // compteurs ne bougeaient donc pas d'un pouce depuis le début.
     try {
       if (window.HabitrainWardrobe && changeModel) {
-        const nuit = estNuit(new Date());
+        const nuit = couchageNuit(new Date());
         const r = await window.HabitrainWardrobe.consume(nuit ? 'nuit' : 'jour', changeModel.id);
         if (r && r.ok === false && voiceMode === 'foxy') {
           await imSay(broOn()
@@ -4958,6 +4963,20 @@
       document.getElementById('overlay').classList.add('show');
       return;
     }
+    // Dès 19h30, on annonce clairement qu'on passe au change de nuit.
+    // Sans ça tu te demanderais pourquoi Foxy réclame la couche de nuit à 20h.
+    (async () => {
+      try {
+        if (couchageNuit(new Date()) && !estNuit(new Date()) && voiceMode === 'foxy'
+            && !(await nuitDejaFaite())) {
+          await imSay(broOn()
+            ? 'Il est passé 19h30 : on ne met pas une couche de jour pour trois heures. C\'est le change de nuit, on l\'avance. Couche de nuit et tenue de nuit.'
+            : 'Il est déjà tard — te remettre une couche de jour pour trois heures, ça n\'a pas de sens. On fait directement ton change de nuit : couche de nuit et tenue de nuit. 🦊',
+            1000, 'explain');
+        }
+      } catch(e) {}
+    })();
+
     // écran 1 : état de la couche avant retrait.
     // Si le capteur a une mesure récente, on ne demande rien : on constate.
     // Ta parole ne sert que là où aucun capteur ne peut trancher.
@@ -5951,18 +5970,39 @@
      ------------------------------------------------------------ */
   const NUIT_DEBUT = 22*60 + 30;   // 22h30
   const NUIT_FIN   = 9*60;         // 9h
+  /* Bascule anticipée : à partir de 19h30, poser une couche de jour n'a plus
+     de sens — elle ne servirait que trois heures avant le change de nuit.
+     Toute remise en couche passée cette heure EST le pilier de 22h30, avancé.
+     Ça ne déplace pas la journée : seule la couche et la tenue basculent. */
+  const BASCULE_NUIT = 19*60 + 30; // 19h30
   const SIESTE = [14*60, 16*60];   // fenêtre où la tenue de repos est tolérée
 
   function estNuit(now) {
     const m = (now || new Date()).getHours()*60 + (now || new Date()).getMinutes();
     return m >= NUIT_DEBUT || m < NUIT_FIN;
   }
+  // Pour tout ce qu'on POSE sur toi : couche et tenue.
+  function couchageNuit(now) {
+    const d = now || new Date();
+    const m = d.getHours()*60 + d.getMinutes();
+    return m >= BASCULE_NUIT || m < NUIT_FIN;
+  }
+  // le change de nuit a-t-il déjà été fait aujourd'hui ?
+  async function nuitDejaFaite() {
+    try {
+      const r = await window.storage.get('slotdone:'+todayStr());
+      const done = (r && r.value) ? JSON.parse(r.value) : {};
+      return !!done.c2230;
+    } catch(e) { return false; }
+  }
   // renvoie { moment, nom, tolerees[] } — tolerees = noms acceptés sans remarque
-  function tenueAttendue(o, now) {
+  function tenueAttendue(o, now, nuitForcee) {
     now = now || new Date();
     if (!o) return null;
     const m = now.getHours()*60 + now.getMinutes();
-    const nuit = estNuit(now);
+    // Dès que le change de nuit est fait — y compris avancé à 19h30 — c'est
+    // la tenue de nuit qui est attendue, quelle que soit l'heure au mur.
+    const nuit = nuitForcee || estNuit(now);
     const moment = nuit ? 'nuit' : 'jour';
     const nom = nuit ? o.nuit : o.jour;
     const tolerees = [nom];
@@ -6920,7 +6960,7 @@
     const lignes = [];
     try {
       const o = await getOutfit(todayStr());
-      const att = tenueAttendue(o, new Date());
+      const att = tenueAttendue(o, new Date(), couchageNuit(new Date()));
       if (att && att.nom) lignes.push('👕 Tenue : <b>' + att.nom + '</b> (' + att.moment + ')');
     } catch(e) {}
     try {
@@ -6940,6 +6980,12 @@
     } catch(e) {}
 
     if (!lignes.length) return;
+    if (couchageNuit(new Date()) && !estNuit(new Date())) {
+      await imSay(broOn()
+        ? 'Il est trop tard pour une couche de jour. Tu repars directement en nuit.'
+        : 'Vu l\'heure, on ne s\'embête pas avec une couche de jour : tu repars directement en tenue et couche de nuit. 🦊',
+        900, 'calm');
+    }
     await imSay('Ce que tu dois avoir sur toi, là, maintenant :', 800, 'explain');
     await imSay(lignes.join('<br>'), 1100, 'teach');
   }
@@ -6950,7 +6996,7 @@
     imClear();
     const now = new Date();
     const h = now.getHours();
-    const periode = (h >= 22 || h < 8) ? 'nuit' : 'jour';
+    const periode = couchageNuit(now) ? 'nuit' : 'jour';
 
     // --- Accueil chaleureux : retour à la maison ---
     const ACCUEIL = broOn() ? [
@@ -7226,7 +7272,10 @@
       await WB.logWorn(todayStr(), item.cat, item.name);
       // conformité avec le tirage du jour — même règle que la carte du tirage
       let att = null;
-      try { att = tenueAttendue(await getOutfit(todayStr()), new Date()); } catch(e) {}
+      try {
+        const forcee = couchageNuit(new Date()) && (await nuitDejaFaite());
+        att = tenueAttendue(await getOutfit(todayStr()), new Date(), forcee);
+      } catch(e) {}
       const conforme = !att || !att.nom || att.tolerees.indexOf(item.name) >= 0;
 
       if (voiceMode === 'foxy') {
@@ -7306,7 +7355,10 @@
         await WB.logWorn(todayStr(), it.cat, it.name);
         // on rejuge sur l'heure courante : la correction a pu franchir une bascule
         let att2 = att;
-        try { att2 = tenueAttendue(await getOutfit(todayStr()), new Date()) || att; } catch(e) {}
+        try {
+          const forcee = couchageNuit(new Date()) && (await nuitDejaFaite());
+          att2 = tenueAttendue(await getOutfit(todayStr()), new Date(), forcee) || att;
+        } catch(e) {}
         if (att2.tolerees.indexOf(it.name) >= 0) {
           await imSay(broOn()
             ? 'Voilà. « ' + it.name + ' ». C\'est mieux quand tu ne discutes pas.'
