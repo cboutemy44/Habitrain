@@ -1,5 +1,5 @@
 // Service worker Habitrain — cache app-shell pour fonctionnement hors-ligne.
-const CACHE = 'habitrain-v18.5';
+const CACHE = 'habitrain-v18.6';
 const ASSETS = [
   './',
   './index.html',
@@ -39,9 +39,21 @@ const ASSETS = [
   './guide-steps.png'
 ];
 
+/* Mise en cache fichier par fichier, et non en bloc.
+   addAll() est atomique : un seul fichier manquant faisait échouer TOUTE
+   l'installation, le nouveau service worker n'était jamais activé, et
+   l'ancienne version continuait d'être servie sans fin ni message d'erreur.
+   Ici chaque fichier est indépendant : ce qui manque est simplement absent
+   du cache hors-ligne, et la mise à jour aboutit quand même. */
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE).then((c) =>
+      Promise.all(ASSETS.map((url) =>
+        c.add(url).catch((e) => {
+          console.warn('[Habitrain] non mis en cache :', url, e && e.message);
+        })
+      ))
+    ).then(() => self.skipWaiting())
   );
 });
 

@@ -1,0 +1,51 @@
+HABITRAIN v18.6 — livraison complète des fichiers de code
+=========================================================
+
+POURQUOI TU ÉTAIS BLOQUÉ EN 17.4
+--------------------------------
+Le service worker mettait tous les fichiers en cache en UNE SEULE
+opération (addAll). C'est atomique : un seul fichier manquant faisait
+échouer l'installation entière, le nouveau service worker n'était jamais
+activé, et l'ancienne version continuait de t'être servie — sans erreur
+visible, sans fin.
+
+J'avais ajouté native.js et tenue-sensor.js à la liste du cache. Si l'un
+des deux n'était pas sur ton serveur, tu étais figé. C'est mon erreur.
+
+Corrigé : chaque fichier est maintenant mis en cache indépendamment. Un
+fichier manquant est simplement absent du hors-ligne, et la mise à jour
+aboutit quand même.
+
+CE QUE TU DOIS FAIRE
+--------------------
+1. Remplace TOUS les fichiers de cette archive dans ton dépôt.
+   Les images (.png) n'ont pas changé : ne les touche pas.
+
+2. Sur ton téléphone, ferme complètement l'application (pas juste
+   l'arrière-plan : retire-la de la liste des applis récentes).
+
+3. Rouvre-la. Le numéro de version s'affiche maintenant sur l'écran de
+   connexion : tu dois y lire v18.6.
+
+SI TU VOIS ENCORE UN ANCIEN NUMÉRO
+----------------------------------
+Chrome → ⋮ → Paramètres → Paramètres des sites → Données stockées
+→ cherche ton domaine → Effacer les données.
+Puis rouvre. Tu perdras le cache hors-ligne, PAS tes données de suivi
+(elles sont dans IndexedDB, conservée séparément).
+
+FICHIERS
+--------
+app.js ................ cœur de l'application
+index.html ............ structure
+style.css ............. mise en forme
+service-worker.js ..... cache hors-ligne (LE correctif est ici)
+qr.js ................. scan et génération des QR
+native.js ............. pont Android (inerte dans un navigateur)
+tenue-sensor.js ....... capteur d'ouverture de tenue
+sensor.js ............. capteur de couche
+lock.js, nfc.js, wardrobe.js, missions.js, badges.js, tips.js,
+outfit-scan.js ........ modules inchangés, fournis pour être sûr
+jsQR.js, qrcode-gen.js  bibliothèques
+manifest.webmanifest .. manifeste PWA
+firmware-capteur-tenue.ino  firmware ESP32 du capteur de tenue
