@@ -880,3 +880,12 @@ body.qrsheet-on #qrSheet { display: block; }
 }
 #qrScanTools button.on { background: #e8a94a; }
 #qrZoom { width: 130px; accent-color: #e8894a; }
+
+/* ===== Numéro de version sur les écrans de connexion ===== */
+/* Discret mais lisible : sert à confirmer d'un coup d'œil quelle version
+   tourne réellement sur le téléphone après une mise à jour. */
+.lock-ver {
+  margin-top: 18px; font-size: 11px; font-weight: 800;
+  letter-spacing: .06em; color: rgba(255,255,255,.35);
+}
+.facade-ver { color: rgba(0,0,0,.28); margin-top: 14px; }

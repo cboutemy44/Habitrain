@@ -51,11 +51,18 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '18.3';
-  (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
-  document.addEventListener('DOMContentLoaded', () => {
-    const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
-  });
+  const APP_VERSION = '18.4';
+  // La version s'affiche aussi sur les deux écrans de connexion : c'est là
+  // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
+  // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
+  function afficherVersion() {
+    ['verBadge', 'qrLockVer', 'facadeVer'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = 'v' + APP_VERSION;
+    });
+  }
+  afficherVersion();
+  document.addEventListener('DOMContentLoaded', afficherVersion);
 
   /* ---- Modes de voix : reporting / caregiver / foxy ---- */
   // mode: 'report' | 'care' | 'foxy'
