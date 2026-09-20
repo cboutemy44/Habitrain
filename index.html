@@ -133,6 +133,7 @@
       <button class="settings-toggle-btn set-nav" data-target="wardrobeCard">👕 Garde-robe &amp; stock</button>
       <button class="settings-toggle-btn set-nav" data-target="qrCard">📷 QR, NFC &amp; bracelet</button>
       <button class="settings-toggle-btn set-nav" data-target="sensorCard">📡 Capteur de couche</button>
+      <button class="settings-toggle-btn set-nav" data-target="tenueSensorCard">🔒 Capteur de tenue</button>
       <button class="settings-toggle-btn set-nav" data-target="lockCard">🔐 Serrures</button>
       <button class="settings-toggle-btn set-nav" data-target="saveCard">💾 Sauvegarde</button>
       <button class="settings-toggle-btn set-nav" data-target="debugCard">🐞 Debug</button>
@@ -279,6 +280,25 @@
 
     <div class="set-note" style="background:#FBEBE5;border:1.5px solid var(--coral);color:#a8543b;font-weight:800">
       ⚠️ SÉCURITÉ : prévois TOUJOURS une clé de secours mécanique pour chaque serrure, rangée ailleurs. En cas de panne, batterie vide ou besoin urgent de matériel, tu dois pouvoir accéder sans l'électronique. Ne verrouille jamais autre chose qu'un contenant.
+    </div>
+  </div>
+
+  <div class="card" id="tenueSensorCard" style="display:none">
+    <h2>🔒 Capteur d'ouverture de tenue</h2>
+    <div class="sub">Un aimant cousu dans la fermeture, un contact ILS en face. Le module dort et ne se réveille qu'à l'ouverture. Il horodate, garde en mémoire, et transmet à la connexion.</div>
+    <div class="set-cat"><h4>Connexion</h4>
+      <button class="settings-toggle-btn" id="tsConnect">🔗 Connecter mon capteur de tenue</button>
+      <div class="set-row" style="margin-top:8px">
+        <div class="info"><div class="n">État</div><div class="d" id="tsStatus">Non connecté</div></div>
+        <div class="info" style="text-align:right"><div class="n" id="tsLive">—</div></div>
+      </div>
+    </div>
+    <div class="set-cat"><h4>Ouvertures relevées aujourd'hui</h4>
+      <div id="tsJournal" class="sub">Aucune donnée pour l'instant.</div>
+    </div>
+    <div class="set-cat">
+      <button class="settings-toggle-btn" id="tsGuideToggle" style="width:100%">📖 Guide de montage — afficher / masquer</button>
+      <div id="tsGuide" style="display:none;margin-top:10px"></div>
     </div>
   </div>
 
@@ -774,6 +794,7 @@
 <script src="nfc.js"></script>
 <script src="qr.js"></script>
 <script src="sensor.js"></script>
+<script src="tenue-sensor.js"></script>
 <script src="lock.js"></script>
 <script src="wardrobe.js"></script>
 <script src="missions.js"></script>
@@ -781,3 +802,5 @@
 <script src="tips.js"></script>
 <script src="outfit-scan.js"></script>
 <script src="app.js"></script>
+<!-- pont natif : inerte dans un navigateur, actif dans l'application Android -->
+<script src="native.js"></script>

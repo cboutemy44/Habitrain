@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '17.6';
+  const APP_VERSION = '18.3';
   (function(){ const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION; })();
   document.addEventListener('DOMContentLoaded', () => {
     const b = document.getElementById('verBadge'); if (b) b.textContent = 'v' + APP_VERSION;
@@ -390,6 +390,29 @@
     { cell:'done',    t:'Vérifie qu\'un doigt passe à la taille et que les élastiques épousent les cuisses sans serrer. Puis remets ta grenouillère propre. Et voilà... parfait ! 🦊✨' }
   ];
 
+  /* Consignes de capteurs, injectées dans les étapes qui les concernent.
+     Rien ne s'affiche si tu n'as pas le matériel : on ne te demande pas de
+     déplacer un capteur que tu ne possèdes pas. */
+  const CONSIGNES_CAPTEUR = {
+    1: { cle:'couche', t:'📡 <b>Récupère le capteur de couche</b> avant de jeter l\'ancienne. Décolle-le doucement, essuie la face qui touchait la couche avec un chiffon sec — jamais d\'eau, jamais d\'alcool sur la grille du capteur.' },
+    3: { cle:'couche', t:'📡 <b>Pose le capteur sur la couche fraîche</b> : à l\'avant, centré, à deux doigts sous la ceinture. La grille tournée vers l\'intérieur, contre le tissu, sans le coller à la zone absorbante.' },
+    7: { cle:'tenue',  t:'🔒 <b>Reclipse le module de tenue</b> en butée de fermeture, une fois la tenue remise et fermée. Vérifie que la diode clignote une fois : c\'est lui qui confirme qu\'il voit l\'aimant.' }
+  };
+
+  async function consigneCapteurPour(i) {
+    const c = CONSIGNES_CAPTEUR[i];
+    if (!c) return null;
+    try {
+      if (c.cle === 'couche') {
+        const r = await window.storage.get('sensor:vu');
+        if (!r || !r.value) return null;
+      } else if (c.cle === 'tenue') {
+        if (!(await capteurTenueEnService())) return null;
+      }
+    } catch(e) { return null; }
+    return c.t;
+  }
+
   // typewriter simple pour la ligne de pose
   let poseTypeTimer = null;
   function typeLine(el, text, done) {
@@ -419,8 +442,10 @@
     changeModel = null;
     try {
       if (!window.HabitrainWardrobe) return null;
-      const h = new Date().getHours();
-      const period = (h >= 22 || h < 8) ? 'nuit' : 'jour';
+      // même bascule que la carte du tirage et la vérification du scan :
+      // 22h30 / 9h, pas 22h / 8h. Entre 8h et 9h, on proposait une couche de
+      // jour alors que le cadre te garde en couche de nuit.
+      const period = estNuit(new Date()) ? 'nuit' : 'jour';
       const dispo = (await window.HabitrainWardrobe.modelsFor(period)).filter(m => m.qty > 0);
       if (!dispo.length) {
         const tous = await window.HabitrainWardrobe.getStock();
@@ -440,6 +465,8 @@
     document.getElementById('poseStepNum').textContent = 'Étape ' + (i+1) + ' / ' + CHANGE_STEPS.length;
     const acts = document.getElementById('poseActs');
     acts.innerHTML = '';
+    // on repart propre : sinon les consignes des étapes précédentes s'empilent
+    try { document.querySelectorAll('.consigne-capteur').forEach(e => e.remove()); } catch(e) {}
     // à la première étape, on annonce quel modèle prendre
     if (i === 0) {
       pickChangeModel().then(info => {
@@ -459,6 +486,19 @@
         line.parentNode.insertBefore(tag, line);
       });
     }
+    // consigne de capteur pour cette étape, s'il y en a une
+    consigneCapteurPour(i).then(txt => {
+      if (!txt) return;
+      const line = document.getElementById('poseLine');
+      if (!line) return;
+      const tag = document.createElement('div');
+      tag.className = 'consigne-capteur';
+      tag.style.cssText = 'font-size:12.5px;font-weight:700;color:#2a5a7a;background:#E8F2F8;'
+        + 'border:1px solid #bcd8e8;border-radius:10px;padding:8px 10px;margin-bottom:10px;line-height:1.45';
+      tag.innerHTML = txt;
+      line.parentNode.insertBefore(tag, line);
+    });
+
     // Foxy glisse parfois ce que ça lui fait, à lui
     if (!broOn() && Math.random() < 0.3) {
       const lot = FOXY_FEELS_STEP[i];
@@ -505,58 +545,135 @@
     } catch(e) {}
   }
 
-  async function finishChange() {
-    // ce change requiert-il une preuve par scan ?
-    let needScan = false;
+  async function finishChange(opts) {
+    opts = opts || {};
+    // Un change se prouve, toujours. Sur les piliers du matin et du soir,
+    // la tenue change aussi : deux preuves, l'une après l'autre.
+    const isPilier = (changeCtx === 'pilier') || !!pillarSlotForNow();
+    const etapes = [isPilier ? 'change_pilier' : 'change_tous'];
     try {
-      const QR = window.HabitrainQR;
-      if (QR) {
-        const isPilier = (changeCtx === 'pilier') || !!pillarSlotForNow();
-        needScan = await QR.actionRequiresScan(isPilier ? 'change_pilier' : 'change_tous');
-      }
+      const nowMin = new Date().getHours()*60 + new Date().getMinutes();
+      const bascule = isPilier && (Math.abs(nowMin - 9*60) <= 120 || Math.abs(nowMin - (22*60+30)) <= 120);
+      // À la reprise, la tenue est TOUJOURS exigée quelle que soit l'heure :
+      // tu sors du cadre entièrement, tu y rentres entièrement. Sans ça, le
+      // récapitulatif t'imposait une tenue que personne ne vérifiait.
+      if ((bascule || opts.exigerTenue) && window.HabitrainWardrobe) etapes.push('tenue');
     } catch(e) {}
-    if (needScan) {
-      // propose le scan ; secours = valider sans preuve
-      const proceed = (proof) => { finalizeChange(proof); };
-      showProofPrompt('change', proceed);
-      return;
-    }
-    await finalizeChange(true /* pas de scan requis = considéré validé */);
+    const prouve = await exigerPreuves(etapes);
+    await finalizeChange(prouve);
+    return prouve;
   }
   async function finalizeChange(proof) {
     await saveCheck(proof ? 'change_fait' : 'change_fait_sanspreuve', 'change_'+(changeCtx||'check'));
     let slotKey = activeSlotKey;
     if (!slotKey) { const p = pillarSlotForNow(); if (p) slotKey = p.key; }
     await markSlotDoneKey(slotKey);
+
+    // Le stock se décompte ICI, et nulle part ailleurs. Jusqu'à présent le
+    // modèle était réservé à l'étape 1 du change guidé... et jamais consommé :
+    // la fonction existait dans la garde-robe, personne ne l'appelait. Tes
+    // compteurs ne bougeaient donc pas d'un pouce depuis le début.
+    try {
+      if (window.HabitrainWardrobe && changeModel) {
+        const nuit = estNuit(new Date());
+        const r = await window.HabitrainWardrobe.consume(nuit ? 'nuit' : 'jour', changeModel.id);
+        if (r && r.ok === false && voiceMode === 'foxy') {
+          await imSay(broOn()
+            ? 'Stock épuisé sur ce modèle. Recommande, ce n\'est pas négociable.'
+            : '⚠️ Plus de « ' + (changeModel.name || 'ce modèle') + ' » en stock ! Pense à recommander. 🦊', 900, 'concern');
+        }
+      }
+    } catch(e) {}
+    changeModel = null;
+
+    // Le change n'est pas fini parce que tu l'as dit : il est fini quand le
+    // capteur voit une couche fraîche. On arme la vérification ici.
+    try { await armerVerifFraiche(slotKey); } catch(e) {}
+    try { if (changeCtx === 'pilier' || slotKey) await corroborerPilier(slotKey); } catch(e) {}
     activeSlotKey = null;
     closeCheck();
     try { await renderCheckStat(); } catch(e) {}
     try { await renderSince(); } catch(e) {}
   }
-  // petite invite : scanner pour valider, ou valider sans preuve
-  function showProofPrompt(kind, done) {
+  /* ============================================================
+     PREUVES PAR SCAN — strictes et nommées
+     Une action qui a un code associé ne se valide QUE par ce code.
+     Foxy dit lequel scanner et où il se trouve, une étape à la fois.
+     Le QR et le tag NFC sont équivalents : le scanner écoute les deux.
+     ============================================================ */
+  const PREUVE_DEF = {
+    change_pilier: { nom:'le QR de ton tapis à langer', ou:'Sur ton tapis à langer',
+                     accepte: k => k === 'change_pilier' || k === 'change_tous' },
+    change_tous:   { nom:'le QR de ton tapis à langer', ou:'Sur ton tapis à langer',
+                     accepte: k => k === 'change_pilier' || k === 'change_tous' },
+    biberon:       { nom:'le QR de ton biberon',        ou:'Près du frigo ou du plan de travail',
+                     accepte: k => k === 'biberon' },
+    coucher:       { nom:'le QR du coucher',            ou:'Sur la porte de ta chambre',
+                     accepte: k => k === 'coucher' },
+    tenue:         { nom:'l\'étiquette de ta tenue',    ou:'À l\'intérieur du col ou de la ceinture',
+                     accepte: k => /^wb/.test(String(k)) }
+  };
+
+  // Une étape. Résout 'ok' (scan valide) ou 'force' (abandon assumé, entorse notée).
+  function unePreuve(kind, rang, total, essai) {
     const QR = window.HabitrainQR;
-    const expected = kind === 'change' ? 'change_pilier' : kind;
-    const btns = [
-      { label:'📷 Scanner', onClick:() => {
-        foxyPopHide();
-        QR.startScan(null, (k) => {
-          if (k === 'change_pilier' || k === 'change_tous') { done(true); }
-          else { foxyPopShow(hardMode ? 'Non, c\'est pas le bon QR. En mode intensif, pas de raccourci : rescanne le vrai. 🦊' : 'Hmm, c\'est pas le bon QR ça ! Réessaie ou valide sans preuve.', 'pensive', proofButtons(kind, done)); }
-        });
-      }}
-    ];
-    if (!hardMode) btns.push({ soft:true, label:'Valider sans preuve', onClick:() => { foxyPopHide(); done(false); } });
-    foxyPopShow(hardMode ? 'Mode intensif : scan OBLIGATOIRE pour valider. Pas de preuve, pas de validation. Allez ! 🦊' : 'Scanne ton QR pour valider — c\'est ta preuve que tu l\'as bien fait ! 🦊', hardMode?'proud':'joy', btns);
+    const def = PREUVE_DEF[kind];
+    if (!QR || !def) return Promise.resolve('ok');   // rien à prouver : on ne bloque pas
+    essai = essai || 1;
+
+    const etape = total > 1 ? ('Étape ' + rang + ' sur ' + total + ' — ') : '';
+    const entete = essai === 1
+      ? (etape + 'scanne ' + def.nom + '.')
+      : (etape + 'ce n\'est pas le bon code. Je veux ' + def.nom + '.');
+    const texte = entete + '\n📍 ' + def.ou
+                + (window.HabitrainNFC && window.HabitrainNFC.supported()
+                   ? '\nTu peux aussi approcher ton tag.' : '');
+
+    return new Promise(resolve => {
+      const boutons = [
+        { label:'📷 Scanner', onClick: () => {
+          foxyPopHide();
+          QR.startScan(null, async (k) => {
+            if (k && def.accepte(k)) { resolve('ok'); return; }
+            // mauvais code, ou scan abandonné : on redemande, sans se lasser
+            const suite = await unePreuve(kind, rang, total, essai + 1);
+            resolve(suite);
+          }, { petit: kind === 'tenue' });
+        }},
+        { soft:true, label:'Je ne peux pas scanner', onClick: async () => {
+          foxyPopHide();
+          foxyPopShow(broOn()
+            ? 'Alors ce sera noté comme validé sans preuve. Je ne fais pas semblant d\'y croire.'
+            : 'D\'accord... mais je le note comme « sans preuve ». Ça compte comme une entorse, tu le sais. 🦊',
+            'concern',
+            [{ label:'J\'ai compris', onClick: async () => {
+                foxyPopHide();
+                try { await marquerEntorse('b_preuve'); } catch(e) {}
+                resolve('force');
+              }},
+              { soft:true, label:'Finalement je scanne', onClick: async () => {
+                foxyPopHide();
+                const suite = await unePreuve(kind, rang, total, 1);
+                resolve(suite);
+              }}]);
+        }}
+      ];
+      foxyPopShow(texte, essai === 1 ? 'curious' : 'pensive', boutons);
+    });
   }
-  function proofButtons(kind, done) {
-    const QR = window.HabitrainQR;
-    const btns = [
-      { label:'📷 Rescanner', onClick:() => { foxyPopHide(); QR.startScan(null, (k) => { if (k) done(true); else if (!hardMode) done(false); else foxyPopShow('Toujours pas bon. On ne lâche pas : rescanne. 🦊','pensive', proofButtons(kind,done)); }); } }
-    ];
-    if (!hardMode) btns.push({ soft:true, label:'Valider sans preuve', onClick:() => { foxyPopHide(); done(false); } });
-    return btns;
+
+  // Chaîne d'étapes, dans l'ordre. Renvoie true si TOUT a été prouvé.
+  async function exigerPreuves(kinds) {
+    const liste = (kinds || []).filter(k => PREUVE_DEF[k]);
+    if (!liste.length) return true;
+    let tout = true;
+    for (let i = 0; i < liste.length; i++) {
+      const r = await unePreuve(liste[i], i + 1, liste.length, 1);
+      if (r !== 'ok') tout = false;
+    }
+    return tout;
   }
+
   // fabrique un dataURL d'une cellule (pour l'icône de notification)
   function foxyCellDataURL(expr, size) {
     size = size || 192;
@@ -1666,6 +1783,28 @@
         imAddMe('Je viens de m\'habiller.');
         await imSay(broOn() ? 'Montre-moi. Scanne l\'étiquette de ta tenue.' : 'Fais voir ! Scanne le QR de ta tenue. 🦊', 800, 'curious');
         try { await scanTenue(); } catch(e) {}
+      }}] : []),
+      // Deux actions qui avaient leur QR depuis le début sans rien pour les
+      // déclencher : on ne pouvait que les affirmer dans le bilan du soir.
+      ...(isFoxy ? [{ label:'🍼 J\'ai bu mon biberon', onClick: async () => {
+        imAddMe('J\'ai bu mon biberon.');
+        const ok = await exigerPreuves(['biberon']);
+        await saveCheck(ok ? 'biberon_bu' : 'biberon_sanspreuve', 'biberon');
+        const n = await biberonsDuJour(todayStr());
+        await imSay(ok
+          ? (broOn()
+              ? 'Bien. ' + n + ' aujourd\'hui. Continue, ton corps en a besoin.'
+              : 'Parfait, ça fait ' + n + ' aujourd\'hui ! ' + (n >= 3 ? 'Objectif atteint, bravo. 🦊' : 'Encore ' + (3-n) + ' et tu y es. 🦊'))
+          : 'Noté sans preuve. Ça compte quand même, mais moins bien.', 850, ok ? 'proud' : 'concern');
+        if (currentM) await imOfferHelp(currentM);
+      }}] : []),
+      ...(isFoxy ? [{ label:'🌙 Je vais me coucher', onClick: async () => {
+        imAddMe('Je vais me coucher.');
+        const ok = await exigerPreuves(['coucher']);
+        await saveCheck(ok ? 'coucher_fait' : 'coucher_sanspreuve', 'coucher');
+        await imSay(broOn()
+          ? 'Bonne nuit. Tu gardes ta couche, évidemment. Je veille.'
+          : 'Bonne nuit alors ! Ta couche de nuit va bien s\'occuper de toi. À demain. 🦊💛', 950, 'sleep');
       }}] : []),
       ...(isFoxy ? [{ label:'✍️ Écrire dans mon carnet', onClick: async () => {
         imAddMe('Je veux écrire dans mon carnet.');
@@ -3440,6 +3579,378 @@
 
   // ===== Veille des serrures : fenêtre qui approche/se ferme, quota bientôt épuisé =====
   let lockAlertSent = {};
+  /* ============================================================
+     CORROBORATION — la mesure prime sur la déclaration
+     Ce que tu dis n'est retenu que si aucun capteur ne peut le
+     contredire. Quand un capteur parle, c'est lui qui fait foi,
+     et l'écart entre les deux est enregistré.
+     ============================================================ */
+
+  // Dernier état mesuré par le capteur de couche, s'il est récent.
+  // Au-delà de 90 min sans mesure, on considère qu'on ne sait plus.
+  async function etatMesure(maxMinutes) {
+    const limite = (maxMinutes || 90) * 60000;
+    try {
+      const l = await getChecks(todayStr());
+      const capteur = l.filter(c => c.type === 'capteur' && /^etat_/.test(c.result || ''));
+      if (!capteur.length) return null;
+      const dernier = capteur[capteur.length - 1];
+      const t = new Date(dernier.t).getTime();
+      if (Date.now() - t > limite) return null;
+      return { etat: dernier.result.replace('etat_', ''), t };
+    } catch(e) { return null; }
+  }
+
+  // Le capteur de tenue a-t-il déjà été utilisé ? Sinon on ne lui reproche
+  // pas son silence : on ne va pas sanctionner un matériel que tu n'as pas.
+  async function capteurTenueEnService() {
+    try { const r = await window.storage.get('ts:vu'); return !!(r && r.value); } catch(e) { return false; }
+  }
+  async function marquerCapteurTenueVu() {
+    try { await window.storage.set('ts:vu', JSON.stringify(Date.now())); } catch(e) {}
+  }
+
+  // Une ouverture de tenue a-t-elle été relevée dans les N dernières minutes ?
+  async function ouvertureRecente(minutes) {
+    try {
+      const l = await getChecks(todayStr());
+      const lim = Date.now() - (minutes || 60) * 60000;
+      return l.some(c => /^tenue_ouverte_/.test(c.result || '') && new Date(c.t).getTime() >= lim);
+    } catch(e) { return false; }
+  }
+
+  /* ---- Après un change : la couche fraîche doit se voir ----
+     Un change validé arme une vérification. Le capteur doit repasser à
+     sec dans les 25 minutes. C'est la seule preuve que tu t'es remis en
+     couche, et pas seulement que tu as scanné un carré de papier. */
+  async function armerVerifFraiche(slotKey) {
+    try {
+      await window.storage.set('change:attente',
+        JSON.stringify({ t: Date.now(), slot: slotKey || null }));
+    } catch(e) {}
+  }
+
+  async function resoudreVerifFraiche(etat, quand) {
+    let att = null;
+    try { const r = await window.storage.get('change:attente'); if (r && r.value) att = JSON.parse(r.value); } catch(e) {}
+    if (!att) return;
+    const delai = (quand || Date.now()) - att.t;
+    if (delai < 0) return;
+    if (etat === 'sec' && delai <= 25 * 60000) {
+      try { await window.storage.delete('change:attente'); } catch(e) {}
+      try { await saveCheck('change_confirme', 'corroboration'); } catch(e) {}
+      return;
+    }
+    if (delai > 25 * 60000) {
+      // la fenêtre est passée sans retour au sec
+      try { await window.storage.delete('change:attente'); } catch(e) {}
+      try { await marquerEntorse('b_pas_recouche'); } catch(e) {}
+      try { await saveCheck('change_non_confirme', 'corroboration'); } catch(e) {}
+      talk(TALK.PILIER, 'verif:fraiche', async () => {
+        await imSay(broOn()
+          ? 'Ton change est validé, mais le capteur n\'a jamais vu de couche fraîche. Tu n\'es pas remis en couche. Je le note.'
+          : 'Dis... tu as validé ton change, mais le capteur n\'a rien vu revenir au sec. Tu t\'es bien remis en couche ? 🦊',
+          1000, 'concern');
+        imSetActions([
+          { label:'🦊 Je m\'y remets maintenant', onClick: async () => {
+            imAddMe('Je m\'y remets maintenant.');
+            try { startChange('pilier'); } catch(e) {}
+          }},
+          { soft:true, label:'Le capteur n\'était pas en place', onClick: async () => {
+            imAddMe('Le capteur n\'était pas en place.');
+            await imSay(broOn()
+              ? 'Alors remets-le. Sans lui, ta parole ne vaut rien ici.'
+              : 'D\'accord — mais remets-le, sinon je ne peux rien vérifier pour toi. 🦊', 900, 'calm');
+            if (currentM) await imOfferHelp(currentM);
+          }}
+        ]);
+      });
+    }
+  }
+
+  // appelé à chaque état reçu du capteur de couche (direct ou journal)
+  async function corroborerEtat(etat, quand) {
+    try { await resoudreVerifFraiche(etat, quand); } catch(e) {}
+  }
+
+  // filet : si l'appli était fermée, on tranche au retour
+  async function verifierFraicheEnRetard() {
+    let att = null;
+    try { const r = await window.storage.get('change:attente'); if (r && r.value) att = JSON.parse(r.value); } catch(e) {}
+    if (!att) return;
+    if (Date.now() - att.t > 25 * 60000) {
+      const m = await etatMesure(24 * 60);
+      // un passage au sec dans la fenêtre a pu être journalisé entre-temps
+      if (m && m.etat === 'sec' && m.t - att.t <= 25 * 60000 && m.t >= att.t) {
+        try { await window.storage.delete('change:attente'); } catch(e) {}
+        try { await saveCheck('change_confirme', 'corroboration'); } catch(e) {}
+        return;
+      }
+      await resoudreVerifFraiche(null, Date.now());
+    }
+  }
+
+  /* ---- Un pilier doit laisser une trace sur les capteurs ---- */
+  async function corroborerPilier(slotKey) {
+    // 1) la tenue s'ouvre forcément au matin et au soir
+    try {
+      const nowMin = new Date().getHours()*60 + new Date().getMinutes();
+      const bascule = Math.abs(nowMin - 9*60) <= 120 || Math.abs(nowMin - (22*60+30)) <= 120;
+      if (bascule && await capteurTenueEnService() && !(await ouvertureRecente(60))) {
+        await marquerEntorse('b_incoherence');
+        talk(TALK.CADRE, 'incoherence:tenue', async () => {
+          await imSay(broOn()
+            ? 'Tu as validé ton change, mais ta tenue ne s\'est jamais ouverte. L\'un des deux ment, et ce n\'est pas le capteur.'
+            : 'Attends... tu as validé ton change, mais le capteur de tenue n\'a vu aucune ouverture. Le module était déclipsé ? 🦊',
+            1000, 'puzzled');
+          if (currentM) await imOfferHelp(currentM);
+        });
+      }
+    } catch(e) {}
+  }
+
+  /* ============================================================
+     CAPTEUR D'OUVERTURE DE TENUE
+     Le module dit QUAND la fermeture s'est ouverte. C'est ici qu'on
+     décide si elle avait le droit de s'ouvrir à ce moment-là.
+
+     Fenêtres autorisées : les trois changes piliers et les trois checks,
+     avec la tolérance du créneau. Tout le reste est une entorse.
+
+     Limite assumée, à ne pas se raconter d'histoires : le capteur
+     prouve que la fermeture s'est ouverte, pas que la tenue a été
+     retirée — ni l'inverse. Une tenue peut être baissée sans toucher
+     à la fermeture surveillée. C'est un garde-fou, pas un juge.
+     ============================================================ */
+  const TS_FENETRES = [
+    { m: 9*60,      tol: 45, nom:'change du matin' },
+    { m: 11*60+30,  tol: 30, nom:'check de 11h30' },
+    { m: 13*60+30,  tol: 30, nom:'check du déjeuner' },
+    { m: 16*60,     tol: 45, nom:'change de sortie de sieste' },
+    { m: 19*60+30,  tol: 30, nom:'check du dîner' },
+    { m: 22*60+30,  tol: 45, nom:'change de nuit' }
+  ];
+
+  function fenetreTenue(date) {
+    const m = date.getHours()*60 + date.getMinutes();
+    return TS_FENETRES.find(f => Math.abs(m - f.m) <= f.tol) || null;
+  }
+
+  // Traite les ouvertures rapportées par le module. Une seule remarque
+  // par lot : Foxy ne récite pas dix lignes pour dix évènements.
+  async function traiterOuverturesTenue(evts) {
+    if (!evts || !evts.length) return;
+    const ouvertures = evts.filter(e => e.ouvert);
+    if (!ouvertures.length) return;
+
+    const horsCadre = [];
+    for (const o of ouvertures) {
+      const d = new Date(o.t);
+      if (!fenetreTenue(d)) horsCadre.push(d);
+    }
+
+    // trace systématique, autorisée ou non : le journal doit être complet
+    try {
+      for (const o of ouvertures) {
+        const d = new Date(o.t);
+        const f = fenetreTenue(d);
+        await saveCheck(f ? 'tenue_ouverte_ok' : 'tenue_ouverte_hors', 'tenue_capteur');
+      }
+    } catch(e) {}
+
+    if (!horsCadre.length) return;
+
+    try { await marquerEntorse('b_tenue_ouverte'); } catch(e) {}
+
+    const quand = horsCadre.map(d =>
+      String(d.getHours()).padStart(2,'0') + 'h' + String(d.getMinutes()).padStart(2,'0')
+    ).join(', ');
+    const n = horsCadre.length;
+
+    talk(TALK.CADRE, 'tenue:ouverture', async () => {
+      await imSay(broOn()
+        ? (n === 1
+            ? 'Ta tenue s\'est ouverte à ' + quand + '. Ce n\'était pas une heure autorisée. Je le sais, c\'est tout.'
+            : 'Ta tenue s\'est ouverte ' + n + ' fois hors des heures prévues : ' + quand + '. Inutile de chercher une explication.')
+        : (n === 1
+            ? 'Dis... ta tenue s\'est ouverte à ' + quand + ', et ce n\'était pas un moment prévu. Je ne te gronde pas, mais je l\'ai vu. 🦊'
+            : 'Ta tenue s\'est ouverte ' + n + ' fois en dehors des créneaux : ' + quand + '. On en reparle ce soir, d\'accord ? 🦊'),
+        1000, 'concern');
+      await imSay(broOn()
+        ? 'C\'est noté dans tes entorses. Tu peux continuer comme ça, mais la session de discipline viendra toute seule.'
+        : 'C\'est noté comme entorse. Rien de dramatique une fois — mais si ça se répète, la session de discipline se déclenchera d\'elle-même. 🦊',
+        950, 'calm');
+      if (currentM) await imOfferHelp(currentM);
+    });
+  }
+
+  // ---- Écran de réglages du capteur de tenue ----
+  let tsEtatCourant = null;
+  function renderTenueSensor() {
+    const TS = window.HabitrainTenueSensor;
+    const statut = document.getElementById('tsStatus');
+    const live = document.getElementById('tsLive');
+    const btn = document.getElementById('tsConnect');
+    if (!statut) return;
+
+    if (!TS || !TS.supported()) {
+      statut.textContent = 'Bluetooth indisponible sur ce navigateur (Android/Chrome requis)';
+      if (btn) btn.disabled = true;
+    } else {
+      statut.textContent = TS.connecte() ? 'Connecté' : 'Non connecté';
+      if (btn && !btn.dataset.pret) {
+        btn.dataset.pret = '1';
+        btn.addEventListener('click', async () => {
+          try {
+            statut.textContent = 'Recherche…';
+            await TS.connect();
+            statut.textContent = 'Connecté';
+            const e = await TS.lireEtat();
+            if (live) live.textContent = e === null ? '—' : (e ? '🔓 Ouverte' : '🔒 Fermée');
+          } catch (err) {
+            statut.textContent = 'Échec : ' + (err && err.message ? err.message : 'capteur introuvable');
+          }
+        });
+      }
+      if (live) live.textContent = tsEtatCourant === null ? '—' : (tsEtatCourant ? '🔓 Ouverte' : '🔒 Fermée');
+    }
+
+    // journal du jour
+    (async () => {
+      const box = document.getElementById('tsJournal');
+      if (!box) return;
+      try {
+        const l = await getChecks(todayStr());
+        const ouv = l.filter(c => c.result === 'tenue_ouverte_ok' || c.result === 'tenue_ouverte_hors');
+        if (!ouv.length) { box.textContent = 'Aucune ouverture relevée aujourd\'hui.'; return; }
+        box.innerHTML = ouv.map(c => {
+          const d = new Date(c.t);
+          const h = String(d.getHours()).padStart(2,'0') + 'h' + String(d.getMinutes()).padStart(2,'0');
+          const ok = c.result === 'tenue_ouverte_ok';
+          return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0">'
+               + '<span>' + (ok ? '✅' : '⚠️') + '</span><b>' + h + '</b>'
+               + '<span style="color:var(--muted)">' + (ok ? 'dans un créneau' : 'hors créneau') + '</span></div>';
+        }).join('');
+      } catch(e) {}
+    })();
+
+    const g = document.getElementById('tsGuide');
+    const gb = document.getElementById('tsGuideToggle');
+    if (g && gb && !gb.dataset.pret) {
+      gb.dataset.pret = '1';
+      g.innerHTML = GUIDE_TENUE_SENSOR;
+      gb.addEventListener('click', () => {
+        g.style.display = g.style.display === 'none' ? '' : 'none';
+      });
+    }
+  }
+
+  const GUIDE_TENUE_SENSOR = [
+    '<div class="sub" style="line-height:1.6">',
+    '<b>Ce qu\'il te faut</b><br>',
+    '· 1 ESP32-C3 mini (~6 €)<br>',
+    '· 1 contact ILS (reed) miniature (~1 €)<br>',
+    '· des aimants néodyme Ø6×2 mm, un par tenue (~0,20 € pièce)<br>',
+    '· 1 batterie LiPo 150 mAh + module de charge TP4056<br>',
+    '· 1 pince ou clip plastique pour fixer le module<br><br>',
+    '<b>Câblage</b><br>',
+    '· une patte du contact ILS sur <b>GPIO3</b>, l\'autre sur <b>GND</b><br>',
+    '· le bouton de réveil entre <b>GPIO9</b> et <b>GND</b><br>',
+    '· la LiPo sur 3V3 et GND, via le TP4056<br>',
+    'Aucune résistance à ajouter : le tirage interne suffit.<br><br>',
+    '<b>Où va l\'aimant — c\'est LUI qui bouge</b><br>',
+    'Le module reste fixe, l\'aimant se déplace avec la fermeture. Le contact ',
+    'ne voit donc plus rien dès que tu ouvres.<br><br>',
+    '<u>Fermeture éclair</u> — l\'aimant est solidaire du <b>curseur</b> : ',
+    'monté sur le tirant, ou cousu sur une languette de 2 cm fixée au tirant. ',
+    'Le module se clipse à l\'extrémité fermée de la glissière (nuque pour une ',
+    'fermeture dorsale, col pour une fermeture devant). Curseur en butée = aimant ',
+    'contre le contact. Deux ou trois centimètres d\'ouverture suffisent à déclencher.<br>',
+    '⚠️ <b>Glissière métallique</b> : l\'aimant colle aux dents et les dents font ',
+    'écran. Déporte-le de 15 à 20 mm du côté du tissu, sur sa languette, plutôt ',
+    'que de le poser à même le curseur.<br><br>',
+    '<u>Pressions d\'entrejambe</u> — là c\'est plus simple : aimant cousu dans un ',
+    'pan, module sur l\'autre, à côté de la pression la plus extérieure. Les deux ',
+    's\'écartent dès que tu défais.<br><br>',
+    '<b>Le réglage</b><br>',
+    'Fermeture close, l\'aimant doit être <b>à moins de 8 mm</b> du contact. ',
+    'Fais l\'essai avant de coudre définitivement : la distance de déclenchement ',
+    'varie beaucoup d\'un contact ILS à l\'autre, et la couture est difficile à défaire.<br><br>',
+    '<b>Un point de montage par type de fermeture</b><br>',
+    'Le module unique impose que toutes tes tenues aient leur aimant au même ',
+    'endroit relatif. Regroupe-les par type : les fermetures dorsales ensemble, ',
+    'les fermetures devant ensemble. Si tu mélanges, il te faudra deux modules.<br><br>',
+    '<b>Au change</b><br>',
+    'Tu déclipses le module de l\'ancienne tenue et tu le clipses sur la nouvelle. ',
+    'L\'appli sait de quelle tenue il s\'agit grâce au scan de l\'étiquette.<br><br>',
+    '<b>Ce que ça prouve, et ce que ça ne prouve pas</b><br>',
+    'Le capteur atteste que la fermeture s\'est ouverte, et à quelle heure. ',
+    'Il n\'atteste pas que tu portes encore la tenue : une tenue peut être baissée ',
+    'sans toucher à la fermeture surveillée, et le module peut être déclipsé. ',
+    'C\'est un garde-fou honnête, pas une preuve irréfutable — et un long silence ',
+    'du capteur est en soi une information.',
+    '</div>'
+  ].join('');
+
+  /* ---- Ligne de vie : le silence d'un module devient une information ----
+     Le module signe sa présence toutes les heures, sans rien allumer. À la
+     connexion, on compare le nombre de signatures au temps réellement écoulé
+     depuis le dernier accusé de réception. S'il en manque, le module était
+     éteint, déchargé, ou sur une autre tenue. */
+  async function analyserVie(vie) {
+    if (!vie || !vie.dernier) return;
+    let ack = null;
+    try { const r = await window.storage.get('ts:ack'); if (r && r.value) ack = JSON.parse(r.value); } catch(e) {}
+    // nouvelle date d'accusé de réception pour la prochaine fois
+    try { await window.storage.set('ts:ack', JSON.stringify(Date.now())); } catch(e) {}
+    if (!ack) return;                          // première synchro : rien à comparer
+
+    const ecoulees = Math.floor((vie.dernier - ack) / 3600000);
+    if (ecoulees < 3) return;                  // trop court pour conclure
+    const manquants = ecoulees - vie.battements;
+    // tolérance de 2 : dérive d'horloge et battement de bordure
+    if (manquants <= 2) return;
+
+    try { await marquerEntorse('b_capteur_muet'); } catch(e) {}
+    try { await saveCheck('capteur_trou', 'tenue_capteur'); } catch(e) {}
+
+    talk(TALK.CADRE, 'capteur:trou', async () => {
+      await imSay(broOn()
+        ? 'Ton capteur de tenue est resté muet ' + manquants + ' heures. Éteint, déchargé, ou sur une autre tenue — dans tous les cas, ces heures-là ne comptent pas pour toi.'
+        : 'Dis, ton capteur de tenue n\'a rien signé pendant ' + manquants + ' heures. Batterie à plat, ou module resté sur l\'autre tenue ? 🦊',
+        1000, 'puzzled');
+      await imSay(broOn()
+        ? 'Recharge-le et reclipse-le. Un capteur muet, c\'est une entorse, pas un alibi.'
+        : 'Pense à le recharger et à le reclipser au prochain change — sinon je ne peux rien vérifier pour toi. C\'est noté comme entorse. 🦊',
+        950, 'calm');
+      if (currentM) await imOfferHelp(currentM);
+    });
+  }
+
+  // branchement du capteur : une fois, au démarrage
+  function brancherCapteurTenue() {
+    const TS = window.HabitrainTenueSensor;
+    if (!TS) return;
+    try {
+      TS.surEvenements(evts => { traiterOuverturesTenue(evts).catch(()=>{}); });
+      TS.surVie(vie => { analyserVie(vie).catch(()=>{}); });
+      TS.surEtat(st => {
+        // ouverture constatée en direct, application ouverte
+        if (!st) return;
+        tsEtatCourant = st.ouvert;
+        try { const l = document.getElementById('tsLive');
+              if (l) l.textContent = st.ouvert ? '🔓 Ouverte' : '🔒 Fermée'; } catch(e) {}
+        if (st.ouvert) traiterOuverturesTenue([{ t: st.a, ouvert: true }]).catch(()=>{});
+      });
+      TS.surLien(ok => {
+        try { const s = document.getElementById('tsStatus');
+              if (s) s.textContent = ok ? 'Connecté' : 'Non connecté'; } catch(e) {}
+        // dès la première connexion, son silence devient significatif
+        if (ok) marquerCapteurTenueVu().catch(()=>{});
+      });
+    } catch(e) {}
+  }
+
   // y a-t-il seulement une serrure susceptible d'alerter ?
   async function serrureActive() {
     if (paused || !window.HabitrainLock) return false;
@@ -3624,6 +4135,11 @@
     { id:'b_sature',          n:'Couche saturée gardée',                 grav:'grave',   w:12 },
     { id:'b_tenue',           n:'Aucune tenue scannée',                  grav:'legere',  w:3 },
     { id:'b_tenue_hs',        n:'Tenue non conforme au tirage',          grav:'legere',  w:3 },
+    { id:'b_preuve',          n:'Action validée sans preuve de scan',    grav:'moyenne', w:7 },
+    { id:'b_tenue_ouverte',   n:'Tenue ouverte hors créneau',            grav:'grave',   w:12 },
+    { id:'b_pas_recouche',    n:'Pas de couche fraîche après un change', grav:'grave',   w:12 },
+    { id:'b_incoherence',     n:'Déclaration contredite par un capteur',  grav:'grave',   w:12 },
+    { id:'b_capteur_muet',    n:'Capteur silencieux sur une fenêtre',     grav:'moyenne', w:7 },
     { id:'b_urgence',         n:'Serrure ouverte en urgence',            grav:'legere',  w:3 }
   ];
   const GRAV_LABEL = { grave:'Grave', moyenne:'Moyenne', legere:'Légère' };
@@ -4077,10 +4593,15 @@
       setTimeout(()=>{ flash.textContent=''; flash.style.color='var(--green)'; }, 2200);
       return;
     }
+    // Les biberons scannés font foi : si tu n'as rien coché ce soir, c'est le
+    // nombre réellement prouvé dans la journée qui est retenu, pas un blanc.
+    let bibScannes = 0;
+    try { bibScannes = await biberonsDuJour(date); } catch(e) {}
     const entry = {
       date,
       skin: sel.skin,
-      bib: sel.bib !== undefined ? Number(sel.bib) : undefined,
+      bib: sel.bib !== undefined ? Math.max(Number(sel.bib), bibScannes)
+                                 : (bibScannes || undefined),
       nuit: sel.nuit,
       type: sel.type,
       note: document.getElementById('note').value.trim()
@@ -4184,6 +4705,14 @@
   };
 
   let currentType = null;
+
+  // nombre de biberons réellement prouvés dans la journée
+  async function biberonsDuJour(date) {
+    try {
+      const l = await getChecks(date);
+      return l.filter(c => c.result === 'biberon_bu' || c.result === 'biberon_sanspreuve').length;
+    } catch(e) { return 0; }
+  }
 
   async function getChecks(date) {
     try {
@@ -4422,7 +4951,44 @@
       document.getElementById('overlay').classList.add('show');
       return;
     }
-    // écran 1 : état de la couche avant retrait (cas d'un change lancé sans check préalable)
+    // écran 1 : état de la couche avant retrait.
+    // Si le capteur a une mesure récente, on ne demande rien : on constate.
+    // Ta parole ne sert que là où aucun capteur ne peut trancher.
+    (async () => {
+      try {
+        const m = await etatMesure(90);
+        if (m) {
+          const LBL = { sec:'☀️ sèche', mouille:'💧 bien mouillée', sature:'🌊 saturée' };
+          document.getElementById('chQ').textContent =
+            'Le capteur la donne ' + (LBL[m.etat] || m.etat) + '. On y va.';
+          const a2 = document.getElementById('chActs');
+          a2.innerHTML = '';
+          const b2 = document.createElement('button');
+          b2.className = 'g';
+          b2.textContent = '🦊 Continuer';
+          b2.addEventListener('click', async () => { await saveChangeState(m.etat); showPose(); });
+          a2.appendChild(b2);
+          const b3 = document.createElement('button');
+          b3.className = 'adj';
+          b3.textContent = 'Le capteur n\'est pas en place';
+          b3.addEventListener('click', () => { remplirEtatManuel(ctx); });
+          a2.appendChild(b3);
+          document.getElementById('modalCheck').style.display = 'none';
+          document.getElementById('modalFix').style.display = 'none';
+          document.getElementById('modalPose').style.display = 'none';
+          document.getElementById('modalDue').style.display = 'none';
+          document.getElementById('modalChange').style.display = '';
+          document.getElementById('overlay').classList.add('show');
+          return;
+        }
+      } catch(e) {}
+      remplirEtatManuel(ctx);
+    })();
+    return;
+  }
+
+  // Saisie manuelle : uniquement quand aucun capteur ne peut répondre.
+  function remplirEtatManuel(ctx) {
     document.getElementById('chQ').textContent = ctx === 'pilier'
       ? 'Change pilier. Avant de retirer, elle est comment ?'
       : 'Avant de la retirer, elle est comment ?';
@@ -5346,16 +5912,25 @@
   async function loadLiveWardrobe() {
     try { if (window.HabitrainWardrobe) liveWardrobe = await window.HabitrainWardrobe.getWardrobe(); } catch(e) {}
   }
+  // Ta garde-robe réelle fait foi. La liste d'exemple ne sert que tant que tu
+  // n'as rien saisi — sinon le tirage t'imposait des tenues que tu ne possèdes
+  // pas, et « la tenue du jour » devenait une fiction.
   function wb(cat) {
-    const src = (liveWardrobe && liveWardrobe[cat] && liveWardrobe[cat].length) ? liveWardrobe[cat] : WARDROBE[cat];
-    return src || [];
+    if (liveWardrobe && Array.isArray(liveWardrobe[cat])) return liveWardrobe[cat];
+    return WARDROBE[cat] || [];
+  }
+  function gardeRobeRenseignee() {
+    return !!(liveWardrobe && ['nuit','jour','sieste'].some(c => Array.isArray(liveWardrobe[c]) && liveWardrobe[c].length));
   }
   function drawOutfit() {
-    return {
-      nuit: pickOne(wb('nuit')),
-      jour: pickOne(wb('jour')),
-      sieste: pickOne(wb('sieste'))
-    };
+    // une catégorie vide ne doit pas produire « undefined » silencieusement
+    const tire = (cat) => { const l = wb(cat); return l.length ? pickOne(l) : null; };
+    const jour = tire('jour');
+    const nuit = tire('nuit');
+    // pas de tenue de sieste déclarée : on retombe sur celle de nuit, qui est
+    // de toute façon la tolérance prévue pendant la sieste.
+    const sieste = tire('sieste') || nuit;
+    return { nuit, jour, sieste };
   }
 
   /* ------------------------------------------------------------
@@ -5845,6 +6420,7 @@
     wardrobeCard: async () => { await renderWardrobe(); await renderStock(); },
     qrCard:       async () => { await renderQrConfig(); await renderNfcWriter(); },
     sensorCard:   async () => { renderSensorGuide(); },
+    tenueSensorCard: async () => { renderTenueSensor(); },
     lockCard:     async () => { await renderLockList(); renderLockGuide(); },
     debugCard:    async () => { await loadFoxyOutfit(); renderDebugOutfits(); }
   };
@@ -6321,7 +6897,47 @@
     );
   }
 
+  /* La reprise après pause prend la parole et ne la rend qu'à la fin.
+     Elle tournait jusqu'ici HORS du chef d'orchestre : n'importe quelle
+     discussion programmée pouvait donc s'installer par-dessus, en plein
+     milieu. C'est ce qui la hachait. */
   async function runReentryProtocol(niveau) {
+    return talk(TALK.ACCES, 'reentry:protocole',
+                () => reentryInterne(niveau), { coupe: true });
+  }
+
+  /* Récapitulatif de reprise : Foxy énumère ce que tu dois avoir sur toi
+     MAINTENANT, en lisant les données réelles — modèle de couche restant,
+     tenue tirée, capteurs déclarés — au lieu d'une formule générique. */
+  async function recapReprise() {
+    const lignes = [];
+    try {
+      const o = await getOutfit(todayStr());
+      const att = tenueAttendue(o, new Date());
+      if (att && att.nom) lignes.push('👕 Tenue : <b>' + att.nom + '</b> (' + att.moment + ')');
+    } catch(e) {}
+    try {
+      if (window.HabitrainWardrobe) {
+        const per = estNuit(new Date()) ? 'nuit' : 'jour';
+        const dispo = (await window.HabitrainWardrobe.modelsFor(per)).filter(m => m.qty > 0);
+        if (dispo.length) lignes.push('🍼 Couche : <b>' + dispo[0].name + '</b> — ' + dispo[0].qty + ' restantes après celle-ci');
+        else lignes.push('🍼 Couche : <b>stock épuisé</b> pour la période, pense à recommander');
+      }
+    } catch(e) {}
+    try {
+      const r = await window.storage.get('sensor:vu');
+      if (r && r.value) lignes.push('📡 Capteur de couche : à replacer à l\'avant de la couche fraîche');
+    } catch(e) {}
+    try {
+      if (await capteurTenueEnService()) lignes.push('🔒 Module de tenue : à reclipser en butée de fermeture');
+    } catch(e) {}
+
+    if (!lignes.length) return;
+    await imSay('Ce que tu dois avoir sur toi, là, maintenant :', 800, 'explain');
+    await imSay(lignes.join('<br>'), 1100, 'teach');
+  }
+
+  async function reentryInterne(niveau) {
     // on note que la couche est en train d'être remise, mais pas encore confirmée
     try { await window.storage.set('reentry:pending', JSON.stringify({ start: Date.now(), niveau })); } catch(e) {}
     imClear();
@@ -6425,17 +7041,37 @@
     imSetActions([
       { label:'🦊 Ça y est, j\'ai remis ma couche', onClick: async () => {
         imAddMe('Ça y est, j\'ai remis ma couche.');
-        // protocole mené à son terme : c'est ici que la pause est vraiment levée
+
+        // On vérifie AVANT de lever la pause. Jusqu'ici la reprise était
+        // validée sur ta seule parole, et le change ne venait qu'après :
+        // un scan raté laissait quand même le programme repris.
+        await imSay(broOn()
+          ? 'Pas si vite. Montre-moi.'
+          : 'Attends, je vérifie avec toi — c\'est la reprise, je ne veux rien laisser au hasard. 🦊', 800, 'curious');
+
+        const prouve = await finishChange({ exigerTenue: true });
+
+        if (!prouve) {
+          await imSay(broOn()
+            ? 'Sans preuve, la reprise n\'est pas actée. Tu restes en pause jusqu\'à ce que tu me montres.'
+            : 'Je n\'ai pas pu vérifier... Je préfère te laisser en pause plutôt que de faire semblant. Reviens me voir quand tu peux scanner. 🦊', 1000, 'concern');
+          imSetActions([
+            { label:'📷 Je réessaie maintenant', onClick: async () => { await reentryInterne(niveau); } },
+            { soft:true, label:'Plus tard', onClick: async () => { foxyPopHide(); } }
+          ]);
+          return;
+        }
+
+        // protocole mené à son terme : c'est maintenant que la pause est levée
         try { await window.storage.delete('reentry:pending'); } catch(e) {}
         await confirmerReprise();
-        // on compte ça comme un change effectif
-        try { await finishChange(); } catch(e) {}
+        await recapReprise();
         await imSay(broOn()
           ? 'Bien. Te revoilà où tu dois être, comme il faut. Maintenant tu ne ressors plus du cadre — laisse-toi porter, c\'est tout ce que tu as à faire.'
           : 'Voilààà ! Te revoilà tout bien installé. 🦊 Tu es à la maison, en sécurité, et je m\'occupe de tout maintenant. Content de t\'avoir retrouvé, vraiment. 💛', 1000, 'proud');
         try { await imRunMoment(); } catch(e) {}
       }},
-      { soft:true, label:'Répète-moi les étapes', onClick: async () => { await runReentryProtocol(niveau); } }
+      { soft:true, label:'Répète-moi les étapes', onClick: async () => { await reentryInterne(niveau); } }
     ]);
   }
   // --- câblage de l'écran de connexion ---
@@ -8361,6 +8997,7 @@
       await S.connect();
       statusEl.textContent = '🟢 Connecté';
       try { await flagBadge('sensor'); } catch(e) {}
+      try { await window.storage.set('sensor:vu', JSON.stringify(Date.now())); } catch(e) {}
       document.getElementById('sensorConnect').textContent = '🔄 Resynchroniser';
     } catch (e) {
       statusEl.textContent = 'Échec / annulé';
@@ -8379,8 +9016,11 @@
         list.push({ t: ev.t, result: 'etat_'+ev.state, type: 'capteur' });
         await window.storage.set('check:'+dateKey, JSON.stringify(list));
         n++;
+        // un retour au sec journalisé pendant l'absence vaut confirmation
+        try { await corroborerEtat(ev.state, new Date(ev.t).getTime()); } catch(e) {}
       } catch(e) {}
     }
+    try { await verifierFraicheEnRetard(); } catch(e) {}
     try { await refresh(); } catch(e) {}
     const statusEl = document.getElementById('sensorStatus');
     if (statusEl) statusEl.textContent = '🟢 Connecté · ' + n + ' événement' + (n>1?'s':'') + ' synchronisé' + (n>1?'s':'');
@@ -8405,6 +9045,7 @@
     lastSensorState = state;
     // enregistre l'état comme un check automatique
     try { await saveCheck('etat_'+state, 'capteur'); } catch(e) {}
+    try { await corroborerEtat(state, Date.now()); } catch(e) {}
     try { await renderSince(); } catch(e) {}
     // Foxy réagit en temps réel si on est en mode Foxy et pas en pause
     if (voiceMode === 'foxy' && !paused) {
@@ -8854,6 +9495,8 @@
     } catch(e) {}
     try { await loadLiveWardrobe(); } catch(e) {}
     try { await scheduleBraceletChecks(); } catch(e) {}
+    try { brancherCapteurTenue(); } catch(e) {}
+    try { await verifierFraicheEnRetard(); } catch(e) {}
     scheduleNotifications();
     await renderCheckStat();
     await renderMoment();
