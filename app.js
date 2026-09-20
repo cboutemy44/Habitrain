@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '19.2';
+  const APP_VERSION = '19.5';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -1859,9 +1859,19 @@
       }}] : []),
       // Deux actions qui avaient leur QR depuis le début sans rien pour les
       // déclencher : on ne pouvait que les affirmer dans le bilan du soir.
+      ...(isFoxy ? [{ label:'🌱 Où j\'en suis vraiment ?', onClick: async () => {
+        imAddMe('Où j\'en suis vraiment ?');
+        await parlerTransformation(true);
+        if (currentM) await imOfferHelp(currentM);
+      }}] : []),
       ...(isFoxy ? [{ label:'🍼 Pourquoi cette couche ?', onClick: async () => {
         imAddMe('Pourquoi cette couche ?');
         await expliquerCouche();
+        if (currentM) await imOfferHelp(currentM);
+      }}] : []),
+      ...(isFoxy ? [{ label:'👕 Pourquoi cette tenue ?', onClick: async () => {
+        imAddMe('Pourquoi cette tenue ?');
+        await expliquerTenue();
         if (currentM) await imOfferHelp(currentM);
       }}] : []),
       ...(isFoxy ? [{ label:'🍼 J\'ai bu mon biberon', onClick: async () => {
@@ -2121,6 +2131,12 @@
       ]},
     { id:'histoire', kw:['histoire','raconte','voyage','ton mois','aventure','souvenir','vecu','vécu'],
       expr:'teach', rep:[], action:'story'},
+    // Le « pourquoi » se tape aussi bien qu'il se clique. Deux intentions
+    // distinctes : la couche et la tenue n'ont pas les mêmes raisons.
+    { id:'pourquoi_couche', kw:['pourquoi cette couche','pourquoi ce modele','pourquoi ce modèle','pourquoi cette proteection','pourquoi je porte ca','pourquoi je porte ça','jusqu\'a quand la couche','jusqu\'à quand la couche','pourquoi couche de nuit','pourquoi une couche de nuit','pourquoi cette protection'],
+      expr:'explain', rep:[], action:'why_couche'},
+    { id:'pourquoi_tenue', kw:['pourquoi cette tenue','pourquoi ce vetement','pourquoi ce vêtement','pourquoi cette grenouillere','pourquoi cette grenouillère','pourquoi ce pyjama','pourquoi ce romper','pourquoi ce body','a quoi sert cette tenue','à quoi sert cette tenue','pourquoi je dois porter ca','pourquoi je dois porter ça'],
+      expr:'explain', rep:[], action:'why_tenue'},
     { id:'merci', kw:['merci','t\'es cool','tes cool','gentil','adorable','love','je t\'aime','jtaime'],
       expr:'happy', rep:[
         'Aww, ça me touche ! C\'est un plaisir de faire ce bout de chemin avec toi, franchement. 💛',
@@ -3097,6 +3113,16 @@
       if (currentM) await imOfferHelp(currentM);
       return;
     }
+    if (intent.action === 'why_couche') {
+      await expliquerCouche();
+      if (currentM) await imOfferHelp(currentM);
+      return;
+    }
+    if (intent.action === 'why_tenue') {
+      await expliquerTenue();
+      if (currentM) await imOfferHelp(currentM);
+      return;
+    }
     if (intent.action === 'story') {
       await imSay('Avec plaisir, laisse-moi te raconter...', 700, 'teach');
       await tellTodaySubchapter();
@@ -3397,6 +3423,7 @@
 
   async function refresh() {
     const entries = await getAll();
+    try { await renderRegles(); } catch(e) {}
     renderStrip(entries);
     await renderHistory(entries);
     const filled = entries.length;
@@ -3655,8 +3682,16 @@
     if (new Date().getHours() >= 20 && !paused) {
       talk(TALK.CADRE,  'breaches',    () => proposeBreaches());
       talk(TALK.CADRE,  'discipline',  () => checkDisciplineTrigger());
+      talk(TALK.CADRE,  'mictions',    () => corroborerMictions());
     }
+    talk(TALK.CHECK,    'check:rate',  () => verifierChecksRates());
     talk(TALK.PROGRES,  'milestone',   () => foxyMilestones());
+    // l'agent de transformation parle une fois par jour, en soirée, quand la
+    // journée de la veille est complète et comparable
+    if (new Date().getHours() >= 19 && !paused) {
+      talk(TALK.PROGRES, 'transfo',      () => parlerTransformation(false));
+      talk(TALK.AMBIANCE,'transfo:anniv',() => anniversaireJalon());
+    }
     talk(TALK.GUIDE,    'tip:'+new Date().getHours()+':'+new Date().getMinutes(), () => pushMomentTip());
     talk(TALK.AMBIANCE, 'ping',        () => foxyPing());
   }, 60000);
@@ -3851,8 +3886,51 @@
     return h + ' h' + (m ? String(m).padStart(2,'0') : '');
   }
 
+  /* ------------------------------------------------------------
+     LE POURQUOI DU CADRE — socle commun couche + tenue
+     Ces raisons ne changent pas avec l'heure : elles expliquent la
+     logique du programme. Elles sont piochées, jamais toutes dites
+     d'un coup, pour ne pas transformer une explication en cours.
+     ------------------------------------------------------------ */
+  const RAISONS_CADRE = {
+    horaire: [
+      { f:'Les heures sont fixes, et au début ça m\'agaçait autant que toi. Puis j\'ai compris : tant que c\'est moi qui choisis le moment, c\'est encore moi qui décide. Et décider, c\'est justement ce dont on vient se reposer ici. Une heure fixe, c\'est une chose en moins à porter. 🦊',
+        b:'Les heures sont fixes. Tant que tu choisis le moment, tu gardes la main — et c\'est la main qu\'on vient te prendre. Tu n\'as plus à décider. Laisse faire.' },
+      { f:'Si on changeait quand tu le demandes, tu deviendrais juste très bon pour demander. Moi je l\'ai fait, je sais. Là, tu n\'as rien à demander, il n\'y a rien à négocier — entre deux piliers il n\'y a que ta couche. C\'est vain de lutter contre ça, et c\'est plutôt reposant, tu verras.',
+        b:'Rien à demander, rien à négocier. Entre deux piliers, il y a ta couche, et c\'est tout. Inutile de chercher une sortie, il n\'y en a pas.' },
+      { f:'Ce n\'est pas de la rigidité pour le plaisir, tu sais. Ton corps ne s\'habitue qu\'à ce qu\'il peut prévoir. Des horaires qui bougent, il ne les comprend pas, et il ne lâche rien. Toujours les mêmes heures, et un matin il lâche sans te prévenir. Chez moi c\'est arrivé comme ça. 🦊',
+        b:'Ton corps ne s\'habitue qu\'à ce qu\'il prévoit. Mêmes heures, tous les jours. Il finira par lâcher — ce n\'est pas une menace, c\'est juste ce qui arrive.' }
+    ],
+    duree: [
+      { f:'Ce qui compte, c\'est la durée, pas le nombre de couches. Les trois premières heures, tu surveilles — tu y penses, tu te retiens un peu, tu gères. C\'est après que ça se passe. Quand tu as arrêté de compter, et que ça part sans que tu aies rien décidé. Moi c\'est toujours arrivé là, jamais avant.',
+        b:'La durée, pas le nombre. Les trois premières heures tu gères. Après, tu ne gères plus rien — et c\'est là que ça se joue.' },
+      { f:'Une couche portée une heure, ça ne t\'apprend rien : une heure, tu la tiens sans problème. Six heures, tu ne la tiens pas — c\'est elle qui te tient. C\'est toute la différence, et c\'est pour ça qu\'on fait des blocs longs. 🦊',
+        b:'Une heure, tu la tiens. Six, c\'est elle qui te tient. Voilà pourquoi les blocs sont longs.' },
+      { f:'Un réflexe, ça ne s\'oublie pas parce qu\'on le lui demande gentiment. Ça s\'oublie quand la vieille solution n\'est plus là, longtemps, et encore le lendemain. C\'est lent, c\'est doux, et c\'est imparable. Tu n\'as rien à forcer — laisse juste le temps faire son travail.',
+        b:'Un réflexe ne s\'oublie pas sur commande. Il s\'oublie quand il n\'y a plus d\'autre issue, longtemps. Tu n\'as rien à forcer, juste à rester dedans.' }
+    ],
+    peau: [
+      { f:'Et puis ça s\'arrête là où ta peau commence, hein. Avec le temps l\'urine se transforme, ça devient irritant — ce n\'est pas d\'être mouillé qui abîme, c\'est de le rester trop longtemps. Garder une couche saturée, ce n\'est pas être courageux, c\'est trois jours de rougeurs. Moi j\'ai appris ça à mes dépens.',
+        b:'Ça s\'arrête où ta peau commence. Une couche saturée, ce n\'est pas du mérite. Tu me préviens, et on change.' },
+      { f:'On ne pousse jamais plus loin que le raisonnable, toi et moi. Une peau abîmée, c\'est une pause forcée — et tu y perds bien plus de jours qu\'une couche gardée trop longtemps ne t\'en fait gagner. Ça aussi, ça fait partie du cadre. 💛',
+        b:'Jamais plus loin que le raisonnable. Une peau abîmée, c\'est une pause forcée. Ça ne sert personne.' }
+    ]
+  };
+  // pioche non répétitive dans la session
+  const _dejaDit = {};
+  function raison(cle) {
+    const l = RAISONS_CADRE[cle] || [];
+    if (!l.length) return '';
+    if (!_dejaDit[cle]) _dejaDit[cle] = [];
+    let reste = l.filter(x => !_dejaDit[cle].includes(x));
+    if (!reste.length) { _dejaDit[cle] = []; reste = l; }
+    const x = pickOne(reste);
+    _dejaDit[cle].push(x);
+    return typeof x === 'string' ? x : bro(x.f, x.b);
+  }
+
   /* Le raisonnement, dans l'ordre : quel modèle, pourquoi celui-là,
-     jusqu'à quand, et ce que ça implique. */
+     pourquoi le cadre le veut ainsi, jusqu'à quand, et ce que ça implique. */
   async function expliquerCouche() {
     const now = new Date();
     const nuit = couchageNuit(now);
@@ -3880,28 +3958,57 @@
 
     const lignes = [];
 
-    if (modele) {
-      lignes.push(nuit
-        ? 'Tu portes une <b>' + modele.name + '</b>. C\'est un modèle de nuit : plus épais, plus absorbant, prévu pour tenir longtemps sans que tu aies à y penser.'
-        : 'Tu portes une <b>' + modele.name + '</b>. C\'est un modèle de jour : plus fin, plus discret sous les vêtements, mais il demande d\'être changé plus souvent.');
+    // --- 1) Ce que tu portes, et ce que ce modèle sait faire ---
+    const nomModele = modele ? '<b>' + modele.name + '</b>' : null;
+    const intro = (q) => nomModele ? ('Tu portes ' + nomModele + ', un modèle de ' + q + '. ')
+                                   : ('Tu es en couche de ' + q + '. ');
+    if (nuit) {
+      lignes.push(bro(
+        intro('nuit') + 'Plus épaisse, plus de gel dedans, des barrières plus hautes sur les côtés. Elle est faite pour encaisser toute une nuit sans qu\'on ait à y revenir. 🦊',
+        intro('nuit') + 'Plus épaisse, plus de gel, barrières hautes. Elle tient la nuit entière. Tu n\'y reviens pas.'));
+      lignes.push(bro(
+        'Ce qui fait un bon modèle de nuit, ce n\'est pas tellement ce qu\'il avale — c\'est ce qu\'il en fait. Le gel attrape le liquide et le garde loin de ta peau, et l\'épaisseur entretient cette distance jusqu\'au matin. Une couche de jour, elle, se charge en surface : au bout de quelques heures tu la sens contre toi, et là ta peau commence à en souffrir.',
+        'Le gel garde le liquide loin de ta peau, l\'épaisseur tient cette distance jusqu\'au matin. Une couche de jour ne ferait pas ça.'));
     } else {
-      lignes.push(nuit
-        ? 'Tu es en couche de nuit — un modèle épais, fait pour tenir longtemps.'
-        : 'Tu es en couche de jour — plus fine, à changer plus souvent.');
+      lignes.push(bro(
+        intro('jour') + 'Plus fine, plus souple — elle ne fait pas de volume sous tes vêtements et elle te laisse bouger tranquillement.',
+        intro('jour') + 'Fine, souple, invisible sous la tenue. Elle te laisse bouger.'));
+      lignes.push(bro(
+        'Elle tient moins longtemps, et c\'est fait exprès. Debout, ça vient plus souvent, et le liquide se répartit moins bien que couché. Elle est calculée pour un bloc de journée entre deux piliers, pas pour la journée entière — comme ça on change à heures régulières et ta peau respire entre deux. 🦊',
+        'Elle tient moins longtemps, exprès. Debout ça vient plus souvent. Un bloc entre deux piliers, pas plus.'));
     }
 
+    // --- 2) Pourquoi celle-là, maintenant ---
     if (anticipee) {
-      lignes.push('Pourquoi maintenant, alors qu\'il n\'est que ' + fmtTime(now.getHours()*60+now.getMinutes()) + ' ? '
-        + 'Parce qu\'une couche de jour posée à cette heure ne servirait que trois heures avant ton change de nuit. '
-        + 'On ne gaspille pas, et on t\'évite un change pour rien : ton change de nuit est simplement avancé.');
+      const nowMin = now.getHours()*60 + now.getMinutes();
+      const restant = (22*60 + 30) - nowMin;          // ← calculé, plus écrit en dur
+      lignes.push(bro(
+        'Tu te demandes pourquoi la couche de nuit alors qu\'il n\'est que ' + fmtTime(nowMin) + ' ? Je me suis posé la même question, à l\'époque. '
+          + 'C\'est juste du calcul : une couche de jour posée maintenant ne servirait que <b>' + fmtDureeMin(restant) + '</b> avant ton change de 22h30.',
+        'Il est ' + fmtTime(nowMin) + '. Une couche de jour ne servirait que <b>' + fmtDureeMin(restant) + '</b> avant 22h30. Aucun intérêt.'));
+      lignes.push(bro(
+        'Et un change, ce n\'est pas juste une couche de plus dans le paquet. C\'est te déshabiller, te nettoyer, remettre de la crème, refermer — '
+          + 'ta peau manipulée deux fois à quelques heures d\'écart, pour rien du tout. Après 19h30 le calcul tombe toujours pareil : on avance ton change de nuit, on n\'en glisse pas un au milieu.',
+        'Un change, c\'est ta peau manipulée deux fois de plus pour rien. Après 19h30 on avance le change de nuit. C\'est tout.'));
+      lignes.push(bro(
+        'Ça ne raccourcit pas ta soirée et je ne t\'envoie pas au lit, hein. Seules ta couche et ta tenue basculent, le reste continue comme prévu. Tu passes juste la fin de journée déjà installé. 🦊',
+        'Ta soirée continue. Seules la couche et la tenue basculent. Tu finis la journée déjà installé.'));
     } else if (nuit) {
-      lignes.push('C\'est la couche qui te porte pendant ton sommeil. Tu n\'auras rien à faire, rien à surveiller — c\'est elle qui travaille.');
+      lignes.push(bro(
+        'Celle-là, c\'est celle qui te porte pendant que tu dors. Rien à faire, rien à surveiller — et surtout, plus aucun recours : endormi, tu ne décides plus rien. '
+          + 'C\'est le seul moment de la journée où ça travaille sans avoir besoin de ton accord. C\'est pour ça que les nuits comptent double. 🦊',
+        'Endormi, tu ne décides plus rien. C\'est le seul moment où ça avance sans ton accord. Les nuits comptent double.'));
+      lignes.push(raison('duree'));
     } else {
-      lignes.push('Sur la journée, on change plus souvent : la peau respire mieux, et tu restes à l\'aise sous tes vêtements.');
+      lignes.push(raison('horaire'));
     }
 
-    lignes.push('Tu la gardes jusqu\'à <b>' + fmtTime(jusqua.m) + '</b>, pour ' + jusqua.nom + '. '
-      + 'Ça fait <b>' + fmtDureeMin(duree) + '</b> à tenir à partir de maintenant.');
+    // --- 3) Jusqu'à quand, et ce que cette durée est censée produire ---
+    lignes.push(bro(
+      'Tu la gardes jusqu\'à <b>' + fmtTime(jusqua.m) + '</b>, pour ' + jusqua.nom + ' — ça te fait <b>' + fmtDureeMin(duree) + '</b> à partir de maintenant. Voilà, tu sais tout, tu n\'as plus à y penser.',
+      'Jusqu\'à <b>' + fmtTime(jusqua.m) + '</b>, pour ' + jusqua.nom + '. <b>' + fmtDureeMin(duree) + '</b>. Tu n\'y touches pas.'));
+    if (!anticipee && !nuit) lignes.push(raison('duree'));
+    else if (anticipee) lignes.push(raison('horaire'));
 
     // En journée, un check peut l'écourter : le dire évite de promettre
     // sept heures de port alors que le cadre prévoit de la changer avant.
@@ -3910,8 +4017,9 @@
       const nowMin = now.getHours()*60 + now.getMinutes();
       const prochain = CHECKS.find(m => m > nowMin);
       if (prochain != null && prochain < jusqua.m) {
-        lignes.push('Avec un passage par le check de <b>' + fmtTime(prochain) + '</b> : '
-          + 'si elle est mouillée à ce moment-là, on la change sans attendre l\'heure du pilier.');
+        lignes.push(bro(
+          'Avec un petit passage par le check de <b>' + fmtTime(prochain) + '</b> au milieu : si elle est bien mouillée à ce moment-là, on la change sans attendre l\'heure du pilier. Je ne te laisse pas dedans par principe. 💛',
+          'Check à <b>' + fmtTime(prochain) + '</b>. Mouillée, on change. Sinon elle continue.'));
       }
     }
 
@@ -3927,11 +4035,758 @@
 
     // garde-fou de santé : au-delà du plafond de port, on le dit
     if (duree > HARD.wearCapH * 60 && !nuit) {
-      lignes.push('Si elle devient lourde avant, tu me le dis : on ne laisse pas une couche saturée pour tenir un horaire.');
+      lignes.push(bro(
+        'Et si elle devient lourde avant l\'heure, tu me le dis, hein. On ne garde pas une couche saturée juste pour faire joli sur un horaire.',
+        'Lourde avant l\'heure, tu me le dis. On ne tient pas un horaire au prix d\'une couche saturée.'));
+      lignes.push(raison('peau'));
+    } else if (duree >= 6*60) {
+      lignes.push(raison('peau'));
     }
 
-    for (const l of lignes) { await imSay(l, 950, 'explain'); }
+    for (const l of lignes) { if (l) await imSay(l, 950, 'explain'); }
     return true;
+  }
+
+  /* ============================================================
+     POURQUOI CETTE TENUE
+     Même logique que pour la couche : Foxy ne se contente pas de
+     nommer le vêtement tiré, il dit ce que ce vêtement-là fait,
+     pourquoi c'est celui-là à cette heure-là, et jusqu'à quand.
+     Le raisonnement dépend de DEUX choses : le type de vêtement
+     (reconnu sur son nom) et le moment de la journée.
+     ============================================================ */
+
+  // Reconnaît le type d'une pièce sur son intitulé. Renvoie une clé
+  // de TENUE_TYPES, ou 'autre' si la garde-robe a été personnalisée.
+  function typeTenue(nom) {
+    const n = (nom || '').toLowerCase();
+    if (!n) return 'autre';
+    if (n.indexOf('keeper') >= 0) return 'keeper';
+    if (n.indexOf('grenouill') >= 0 || n.indexOf('pyjama') >= 0 || n.indexOf('sleeper') >= 0 || n.indexOf('combinaison') >= 0) {
+      if (n.indexOf('dorsale') >= 0 || n.indexOf('dos') >= 0 || n.indexOf('arrière') >= 0) return 'gren_dos';
+      if (n.indexOf('devant') >= 0 || n.indexOf('avant') >= 0 || n.indexOf('frontale') >= 0) return 'gren_devant';
+      return 'gren';
+    }
+    if (n.indexOf('romper') >= 0 || n.indexOf('barboteuse') >= 0 || n.indexOf('salopette') >= 0) return 'romper';
+    if (n.indexOf('body') >= 0 || n.indexOf('bodysuit') >= 0) return 'body';
+    if (n.indexOf('cache-couche') >= 0 || n.indexOf('cache couche') >= 0) return 'cache';
+    return 'autre';
+  }
+
+  // Ce que fait chaque type de vêtement. Trois registres, chacun en
+  // version douce (f) et en version grand frère (b) — c'est Foxy qui
+  // parle, pas une notice.
+  //   quoi  — ce que la pièce est, matériellement
+  //   role  — ce qu'elle travaille, et pourquoi le cadre l'a retenue
+  //   plus  — le détail qui n'est vrai que pour ce type-là
+  const TENUE_TYPES = {
+    gren_dos: {
+      quoi: { f:'une grenouillère à fermeture dorsale. Elle te couvre des pieds aux épaules, et le curseur, lui, est dans ton dos.',
+              b:'grenouillère à fermeture dorsale. Couverte des pieds aux épaules, curseur dans le dos.' },
+      role: { f:'Son travail, ce n\'est pas de t\'empêcher de l\'ouvrir — tu peux, si tu y tiens vraiment. Son travail, c\'est de rendre le geste lent. '
+                + 'Tu sais, presque personne ne craque sur une vraie décision : c\'est une main qui descend « juste pour vérifier », sans y penser. '
+                + 'Une fermeture dans le dos, ça met deux ou trois secondes entre l\'envie et le geste — et l\'envie ne survit jamais à ces secondes-là. Moi je n\'ai jamais réussi à les passer. 🦊',
+              b:'Elle ne t\'empêche pas de l\'ouvrir, elle rend le geste lent. Et l\'envie ne survit pas à ces secondes-là. Tu peux essayer, ça ne changera rien.' },
+      plus: { f:'Et c\'est la seule fermeture sur laquelle le capteur marche vraiment : l\'aimant sur le curseur, le contact dans la couture. Tout est daté tout seul. '
+                + 'Ce qui veut dire que tu n\'as rien à me déclarer, et moi rien à te croire sur parole. On est tranquilles tous les deux. 💛',
+              b:'Le capteur est dessus. Toute ouverture est datée. Tu n\'as rien à me déclarer et je n\'ai rien à te croire.' }
+    },
+    gren_devant: {
+      quoi: { f:'une grenouillère à fermeture devant. Même couverture complète, mais celle-là tu peux l\'ouvrir toi-même, sans effort.',
+              b:'grenouillère à fermeture devant. Couverture complète, ouverture facile.' },
+      role: { f:'Celle-là ne te retient pas, et c\'est voulu. Elle sort les jours où le cadre n\'a pas besoin de contrainte pour tenir — '
+                + 'ou ceux où tu pourrais avoir une vraie raison d\'ouvrir : une fuite qui démarre, une sangle qui gêne, un coup de chaud.',
+              b:'Elle ne te retient pas, exprès. Le cadre tient sans elle, ou tu as une vraie raison d\'ouvrir. Pas d\'autre usage.' },
+      plus: { f:'Et du coup elle mesure autre chose que les autres : ce que tu fais quand rien ne t\'en empêche. Une journée entière en fermeture devant sans l\'avoir ouverte une seule fois, ça vaut bien plus qu\'une journée dos fermé. C\'est la tenue qui te rend ton propre témoignage — et ça, ça fait quelque chose. 🦊',
+              b:'Elle mesure ce que tu fais quand rien ne t\'en empêche. Une journée sans l\'ouvrir vaut plus qu\'une journée dos fermé. À toi de voir.' }
+    },
+    keeper: {
+      quoi: { f:'une Little Keeper Sleeper. Fermeture inversée dans le dos, pieds couverts, et plus rien d\'accessible une fois qu\'elle est refermée.',
+              b:'fermeture inversée dans le dos, pieds couverts, rien d\'accessible une fois refermée.' },
+      role: { f:'Elle a été pensée pour exactement ça, et rien d\'autre. Pas de taille élastique à tirer, pas de bas à remonter, aucun passage par en dessous : ta couche est enfermée avec toi. '
+                + 'Sur une nuit, c\'est ce qui sépare une couche qu\'on garde d\'une couche qu\'on garde vraiment. Tu peux tourner le problème dans tous les sens, il n\'y a pas d\'issue — c\'est justement pour ça qu\'on dort bien dedans.',
+              b:'Rien à tirer, rien à remonter, aucun passage. Ta couche est enfermée avec toi. Cherche pas, il n\'y a pas d\'issue.' },
+      plus: { f:'Elle tient aussi la couche bien plaquée pendant que tu bouges en dormant. Une couche qui glisse, ça fuit par les cuisses bien avant d\'être pleine — c\'est presque toujours la tenue qui rate une nuit, pas la couche. J\'ai mis un moment à comprendre ça.',
+              b:'Elle plaque la couche pendant que tu bouges. Une couche qui glisse fuit avant d\'être pleine. C\'est la tenue qui rate les nuits.' }
+    },
+    gren: {
+      quoi: { f:'une grenouillère. Couverture complète, des pieds jusqu\'au cou.',
+              b:'grenouillère. Des pieds au cou.' },
+      role: { f:'Ce qu\'elle apporte, c\'est la continuité. Pas de taille, pas de haut et de bas séparés, rien qui se soulève quand tu t\'assieds : ta couche reste en place et reste couverte, quoi que tu fabriques.',
+              b:'Pas de taille, pas de séparation, rien qui se soulève. La couche reste en place, quoi que tu fasses.' },
+      plus: { f:'Et puis elle t\'enveloppe. Ce n\'est pas un détail, tu verras : cette pression douce et régulière sur tout le corps, c\'est ce qui fait retomber la vigilance. C\'est une bonne partie du repos que tu viens chercher ici. 💛',
+              b:'Elle t\'enveloppe. La pression fait retomber la vigilance. C\'est le repos que tu es venu chercher.' }
+    },
+    romper: {
+      quoi: { f:'un romper. Bras et jambes libres, mais une entrejambe à pressions qui se referme sous toi.',
+              b:'romper. Bras et jambes libres, entrejambe à pressions.' },
+      role: { f:'C\'est LA pièce de journée, pour moi. Les pressions plaquent ta couche contre toi pendant que tu marches, que tu t\'assieds, que tu te relèves — '
+                + 'et une couche bien plaquée absorbe là où il faut, au lieu de descendre et de fuir aux cuisses.',
+              b:'Les pressions plaquent la couche pendant que tu bouges. Bien plaquée, elle absorbe au bon endroit. Sinon elle fuit.' },
+      plus: { f:'Et les pressions, ça ne se rouvre pas discrètement : faut se pencher, les défaire une par une, et ça claque. Ce n\'est pas une serrure, c\'est juste un geste qu\'on ne peut pas faire distraitement. Sur une journée, crois-moi, c\'est bien suffisant. 🦊',
+              b:'Les pressions se défont une par une, et ça claque. Pas de geste distrait possible. Sur la journée, ça suffit.' }
+    },
+    body: {
+      quoi: { f:'un body. Discret, porté sous des vêtements normaux, entrejambe à pressions.',
+              b:'body. Discret, sous des vêtements normaux, pressions à l\'entrejambe.' },
+      role: { f:'Celui-là ne se voit pas, et c\'est tout son intérêt. Il est là pour les journées où tu sors, où quelqu\'un passe, où tu dois avoir l\'air de tout le monde.',
+              b:'Il ne se voit pas. Pour les jours où tu sors ou où quelqu\'un passe.' },
+      plus: { f:'Mais son vrai travail est ailleurs : il tient ta couche serrée, et il te la rappelle à chaque mouvement même quand personne ne devine rien. '
+                + 'C\'est la pièce qui m\'a le plus appris, en fait — elle prouve que le cadre tient sans décor. Plus besoin d\'une grenouillère pour qu\'il existe. Il est juste là, sous tes habits, toute la journée. 🦊',
+              b:'Il tient la couche serrée et te la rappelle à chaque mouvement. Le cadre tient sans décor. Il est là sous tes habits, c\'est tout.' }
+    },
+    cache: {
+      quoi: { f:'un cache-couche. Il ne ferme rien du tout, il recouvre.',
+              b:'cache-couche. Il recouvre, il ne ferme rien.' },
+      role: { f:'Il fait deux choses très concrètes : il étouffe le bruit du plastique, et il retient le début d\'une fuite assez longtemps pour que tu t\'en rendes compte avant tes vêtements.',
+              b:'Il étouffe le bruit et retient le début d\'une fuite. C\'est tout.' },
+      plus: { f:'Il se met par-dessus, jamais à la place. Ce n\'est pas une pièce de cadre, c\'est juste une sécurité en plus.',
+              b:'Par-dessus, jamais à la place. Sécurité, pas cadre.' }
+    },
+    autre: {
+      quoi: { f:'la pièce que j\'ai tirée pour ce moment-là.', b:'la pièce tirée pour ce moment.' },
+      role: { f:'Elle a le même travail que les autres : tenir ta couche en place, et t\'éviter d\'y revenir toutes les dix minutes.',
+              b:'Même travail que les autres : tenir la couche, t\'éviter d\'y revenir.' },
+      plus: { f:'', b:'' }
+    }
+  };
+
+  // Ce que le moment de la journée demande à la tenue
+  function attenteMoment(nuit, m) {
+    if (nuit) {
+      return bro(
+        'La nuit, je demande deux choses à une tenue : qu\'elle couvre tout, et qu\'elle ne laisse aucun accès. '
+          + 'Tu vas bouger, te retourner, te découvrir — sans même le savoir. Tout ce qui peut se soulever finira par se soulever, et une couche qui part de travers à 3h du matin, c\'est une nuit fichue et des draps à laver. Autant s\'éviter ça. 🦊',
+        'La nuit : tout couvrir, aucun accès. Tu bougeras sans le savoir. Ce qui peut se soulever se soulèvera.');
+    }
+    if (m >= SIESTE[0] && m < SIESTE[1]) {
+      return bro(
+        'On est dans la fenêtre de sieste, là. Celle-ci reste ta tenue de référence, mais si tu te couches pour de vrai, repasser en tenue de nuit ou de sieste, je le tolère. '
+          + 'La raison est toute bête : couché, ta couche prend une charge plus longue et sans surveillance, alors autant qu\'elle soit maintenue comme la nuit. '
+          + 'C\'est une tolérance, hein, pas une nouvelle consigne — et on ne fait pas l\'aller-retour trois fois. 🦊',
+        'Fenêtre de sieste. Celle-ci reste la référence. Si tu te couches vraiment, tenue de nuit ou de sieste, je tolère. Une fois, pas trois.');
+    }
+    if (m < 12*60) {
+      return bro(
+        'Le matin, la tenue a un rôle qu\'on sous-estime toujours : elle referme la question. Une fois que tu es habillé, il n\'y a plus rien à décider jusqu\'au prochain pilier. '
+          + 'Et c\'est exactement le moment de la journée où on a le plus envie de renégocier — moi le premier, à l\'époque.',
+        'Le matin, la tenue referme la question. Habillé, tu n\'as plus rien à décider. C\'est le moment où tu voudrais renégocier. Tu ne le feras pas.');
+    }
+    if (m < 19*60 + 30) {
+      return 'L\'après-midi, tu es debout, tu bouges, tu t\'assieds vingt fois. La tenue doit tenir la couche plaquée sans t\'entraver, et rester invisible sous ce que tu portes par-dessus. '
+           + 'C\'est le moment où une pièce mal choisie se paie tout de suite, en fuite ou en inconfort.';
+    }
+    return 'En soirée, on passe déjà sur la tenue de nuit. Le corps lit le vêtement avant de lire l\'heure : s\'habiller pour la nuit, c\'est ce qui commence à faire retomber la journée.';
+  }
+
+  async function expliquerTenue() {
+    const now = new Date();
+    const m = now.getHours()*60 + now.getMinutes();
+    const nuit = couchageNuit(now);
+
+    let o = null;
+    try { o = await getOutfit(todayStr()); } catch(e) {}
+    if (!o) {
+      await imSay(bro(
+        'Ah, je ne peux pas encore te répondre — le tirage du jour n\'est pas fait. Lance-le, et je te raconte tout. 🦊',
+        'Tirage du jour pas fait. Lance-le, on en reparle après.'), 900, 'calm');
+      return false;
+    }
+    const att = tenueAttendue(o, now, nuit);
+    const nom = (att && att.nom) || (nuit ? o.nuit : o.jour);
+    if (!nom) {
+      await imSay(bro(
+        'Ta garde-robe n\'a rien pour ce moment de la journée, du coup je tire dans le vide. Ajoute-moi au moins une pièce dans la bonne catégorie et on repart. 🦊',
+        'Rien dans ta garde-robe pour ce moment. Ajoute une pièce dans la bonne catégorie.'), 900, 'concern');
+      return false;
+    }
+
+    const t = TENUE_TYPES[typeTenue(nom)] || TENUE_TYPES.autre;
+    const dit = (x) => !x ? '' : (typeof x === 'string' ? x : bro(x.f, x.b));
+    const lignes = [];
+
+    lignes.push(bro('Ta tenue du moment, c\'est <b>' + nom + '</b> — ', 'Ta tenue : <b>' + nom + '</b> — ') + dit(t.quoi));
+    lignes.push(dit(t.role));
+    if (dit(t.plus)) lignes.push(dit(t.plus));
+    lignes.push(attenteMoment(nuit, m));
+
+    // jusqu'à quand : la tenue suit la même horloge que la couche
+    if (nuit) {
+      const duree = (m < NUIT_FIN) ? (NUIT_FIN - m) : ((24*60 - m) + NUIT_FIN);
+      lignes.push(bro(
+        'Tu la gardes jusqu\'à <b>' + fmtTime(NUIT_FIN) + '</b>, avec ton change du matin — <b>' + fmtDureeMin(duree) + '</b>. '
+          + 'Ta tenue et ta couche se posent ensemble et se retirent ensemble, toujours. C\'est la même séquence, on n\'en ouvre jamais une toute seule.',
+        'Jusqu\'à <b>' + fmtTime(NUIT_FIN) + '</b>, change du matin. <b>' + fmtDureeMin(duree) + '</b>. Tenue et couche, même séquence. Jamais l\'une sans l\'autre.'));
+    } else {
+      const duree = BASCULE_NUIT - m;
+      const q = duree > 0 ? ' — <b>' + fmtDureeMin(duree) + '</b>' : '';
+      lignes.push(bro(
+        'Tu la gardes jusqu\'à <b>' + fmtTime(BASCULE_NUIT) + '</b>' + q + ', et là tu passeras en tenue de nuit avec ton change du soir. '
+          + 'D\'ici là elle ne s\'ouvre pas, même pour jeter un œil — vérifier, c\'est mon boulot, pas le tien. Tu n\'as rien à surveiller. 💛',
+        'Jusqu\'à <b>' + fmtTime(BASCULE_NUIT) + '</b>' + q + ', puis tenue de nuit. Elle ne s\'ouvre pas d\'ici là, même pour vérifier. Vérifier, c\'est moi.'));
+    }
+
+    // le pourquoi du tirage lui-même
+    lignes.push(bro(
+      'Et pourquoi celle-là plutôt qu\'une autre ? Parce qu\'elle est tirée, pas choisie. Si c\'était toi qui choisissais, tu prendrais la plus confortable les jours durs — '
+        + 'c\'est-à-dire pile les jours où le cadre doit tenir. Le tirage t\'enlève ce petit calcul de la tête. C\'est une décision de moins, et ça fait du bien, tu verras. 🦊',
+      'Elle est tirée, pas choisie. Sinon tu prendrais la plus confortable les jours durs — pile ceux où le cadre doit tenir. Le tirage règle ça. Il n\'y a rien à discuter.'));
+
+    if (broOn()) lignes.push('Tu la gardes. Tu n\'y touches pas. On se revoit au prochain pilier.');
+
+    for (const l of lignes) { if (l) await imSay(l, 950, 'explain'); }
+    return true;
+  }
+
+
+
+  /* ============================================================
+     LES RÈGLES DU PROGRAMME
+     Elles étaient écrites en dur dans la page : la carte ne savait
+     pas ce que le code appliquait, et avait déjà dérivé (elle
+     annonçait 22h30 alors que la bascule se fait à 19h30).
+
+     Chaque règle est maintenant un objet qui porte son énoncé, les
+     entorses qui la sanctionnent, et son mode de vérification —
+     affiché tel quel, sans enjoliver :
+       'auto'    vérifiée par l'appli ou un capteur
+       'parole'  repose sur ce que tu déclares
+       'mixte'   partiellement vérifiée
+     ============================================================ */
+  const REGLES = [
+    { id:'r_couche', ic:'🍼', n:'Couche 24/7',
+      t:'Portée en permanence, jour et nuit. Elle ne s\'ouvre qu\'aux changes et checks prévus.',
+      mode:'auto', b:['b_retrait_hors','b_retrait_2h','b_pas_recouche','b_tenue_ouverte'] },
+
+    { id:'r_miction', ic:'💧', n:'Mictions dans la couche',
+      t:'Toutes. Les selles se font aux WC sur les deux fenêtres : change du matin et change de nuit.',
+      mode:'mixte', b:['b_hors_couche'] },
+
+    { id:'r_piliers', ic:'🔑', n:'Trois changes piliers obligatoires',
+      t:'9h (matin), 16h (sortie de sieste), et le change de nuit — avancé dès 19h30 si tu te remets en couche à ce moment-là. Toilette, vérif peau, crème, couche fraîche.',
+      mode:'auto', b:['b_pilier','b_pilier_c0900','b_pilier_c1600','b_pilier_c2230'] },
+
+    { id:'r_checks', ic:'✓', n:'Checks respectés',
+      t:'11h30, 13h30, 19h30 : on tâte, on change si mouillé. Jamais sautés.',
+      mode:'auto', b:['b_check'] },
+
+    { id:'r_preuve', ic:'📷', n:'Chaque action se prouve',
+      t:'Les changes, la tenue, le biberon et le coucher se valident au scan du QR ou du tag correspondant.',
+      mode:'auto', b:['b_preuve','b_incoherence','b_capteur_muet'] },
+
+    { id:'r_tenue', ic:'👕', n:'Tenue ABDL en continu',
+      t:'Pas de retour adulte vestimentaire pendant le mois. La tenue du jour est tirée, tu ne la choisis pas.',
+      mode:'auto', b:['b_cadre','b_tenue','b_tenue_hs'] },
+
+    { id:'r_hydra', ic:'🍼', n:'Trois biberons par jour',
+      t:'L\'hydratation fait le reste du travail : moins tu bois, plus tu te retiens sans le vouloir.',
+      mode:'auto', b:['b_hydra'] },
+
+    { id:'r_peau', ic:'🧴', n:'La peau passe avant l\'horaire',
+      t:'Une couche saturée se change, même hors créneau. Rougeur constatée, on traite dans la minute.',
+      mode:'mixte', b:['b_sature','b_portlong'] },
+
+    { id:'r_tetine', ic:'🍭', n:'Tétine sur les temps de repos',
+      t:'Fenêtres de régression, sieste, endormissement. Rien ne le vérifie : celle-là ne tient que sur toi.',
+      mode:'parole', b:[] }
+  ];
+
+  /* Les limites ne sont PAS des règles. Elles ne durcissent jamais, ne se
+     gagnent pas, ne s'assouplissent à aucun palier, et rien dans l'appli ne
+     peut les contourner. Les mélanger aux règles les banaliserait. */
+  const LIMITES = [
+    { ic:'🚫', n:'Sommeil toujours libre',
+      t:'Aucune contention verrouillée pendant la sieste ou la nuit. Jamais, à aucun palier.' },
+    { ic:'🔒', n:'Contention verrouillée : superviseur présent',
+      t:'Uniquement avec quelqu\'un d\'éveillé, présent, et qui a les clés. Chaque serrure garde son ouverture manuelle.' },
+    { ic:'🛑', n:'Le safeword coupe tout',
+      t:'« Stop Foxy » ramène le Foxy doux immédiatement, vide la file et efface ce qui attendait. Sans discussion, sans conséquence.' },
+    { ic:'🔓', n:'Secours anti-blocage',
+      t:'Trois tapes sur le titre de l\'écran de connexion, toujours actif. L\'appli ne peut pas t\'enfermer dehors.' }
+  ];
+
+  const MODE_LABEL = {
+    auto:   { txt:'vérifiée automatiquement', c:'#2e7d4f', bg:'#E8F5EC' },
+    mixte:  { txt:'partiellement vérifiée',   c:'#8a6a20', bg:'#FBF3E0' },
+    parole: { txt:'sur ta parole',            c:'#8A8391', bg:'#F1EEF3' }
+  };
+
+  // Respect d'une règle sur les 7 derniers jours : nombre de jours touchés
+  async function etatRegle(regle) {
+    if (!regle.b.length) return null;
+    let jours = 0, vus = 0;
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date(); d.setDate(d.getDate()-i);
+      const k = d.toISOString().slice(0,10);
+      try {
+        const r = await window.storage.get('breach:'+k);
+        if (!r || !r.value) continue;
+        vus++;
+        const b = JSON.parse(r.value);
+        if (regle.b.some(x => b[x])) jours++;
+      } catch(e) {}
+    }
+    if (!vus) return null;
+    return { touchee: jours, sur: vus };
+  }
+
+  async function renderRegles() {
+    const box = document.getElementById('rulesList');
+    const lim = document.getElementById('limitesList');
+    if (!box) return;
+
+    box.innerHTML = '';
+    for (let i = 0; i < REGLES.length; i++) {
+      const r = REGLES[i];
+      const m = MODE_LABEL[r.mode] || MODE_LABEL.parole;
+      const e = await etatRegle(r);
+      let etat = '';
+      if (e) {
+        const ok = e.touchee === 0;
+        etat = '<span style="font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:20px;'
+             + 'background:' + (ok ? '#E8F5EC' : '#FBEBE5') + ';color:' + (ok ? '#2e7d4f' : '#a8543b') + '">'
+             + (ok ? '✓ tenue sur ' + e.sur + ' jours'
+                   : '⚠ ' + e.touchee + ' jour' + (e.touchee>1?'s':'') + ' sur ' + e.sur)
+             + '</span>';
+      }
+      box.innerHTML +=
+        '<div style="padding:10px 0;border-top:' + (i ? '1px solid var(--line)' : 'none') + '">'
+        + '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">'
+        + '<span style="font-size:15px">' + r.ic + '</span>'
+        + '<b style="font-size:13.5px;color:var(--ink)">' + r.n + '</b>'
+        + '<span style="font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:20px;'
+        + 'background:' + m.bg + ';color:' + m.c + '">' + m.txt + '</span>'
+        + etat + '</div>'
+        + '<div style="font-size:12.5px;font-weight:600;color:var(--muted);line-height:1.45;margin-top:3px">'
+        + r.t + '</div></div>';
+    }
+
+    if (lim) {
+      lim.innerHTML = '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:14.5px;color:#a8543b;margin-bottom:3px">Les limites</div>'
+        + '<div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:10px">'
+        + 'Ce ne sont pas des règles du programme. Elles ne durcissent jamais, ne se gagnent pas, '
+        + 'et rien dans l\'appli ne peut les contourner.</div>'
+        + LIMITES.map(l =>
+            '<div style="display:flex;gap:8px;padding:6px 0">'
+            + '<span style="font-size:15px">' + l.ic + '</span>'
+            + '<div><b style="font-size:13px;color:var(--ink)">' + l.n + '</b>'
+            + '<div style="font-size:12px;font-weight:600;color:var(--muted);line-height:1.4">' + l.t + '</div></div></div>'
+          ).join('');
+    }
+  }
+
+  // À quelle règle se rattache une entorse ? Foxy la cite en la relevant.
+  function regleDe(idEntorse) {
+    const i = REGLES.findIndex(r => r.b.indexOf(idEntorse) >= 0);
+    return i < 0 ? null : { num: i + 1, regle: REGLES[i] };
+  }
+  function citerRegle(idEntorse) {
+    const r = regleDe(idEntorse);
+    if (!r) return '';
+    return 'Règle ' + r.num + ' — ' + r.regle.n + '.';
+  }
+
+
+  /* ---- Les deux règles qui ne tenaient sur rien ----
+     « Checks respectés · jamais sautés » n'avait aucune entorse : sauter un
+     check ne coûtait rien. Et « mictions dans la couche » reposait sur une
+     case que tu cochais toi-même, alors que ton capteur peut trancher. */
+
+  const CHECKS_MIN = [11*60+30, 13*60+30, 19*60+30];
+
+  // Un check dont la fenêtre est passée sans rien faire est une entorse.
+  // On vérifie a posteriori, une fois la fenêtre de 45 min refermée.
+  async function verifierChecksRates() {
+    if (paused) return false;
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    let done = {};
+    try {
+      const r = await window.storage.get('slotdone:'+todayStr());
+      if (r && r.value) done = JSON.parse(r.value);
+    } catch(e) {}
+    const CLES = { [11*60+30]:'c1130', [13*60+30]:'c1330', [19*60+30]:'c1930' };
+
+    let rate = null;
+    for (const m of CHECKS_MIN) {
+      if (nowMin < m + 45) continue;          // fenêtre encore ouverte
+      const cle = CLES[m];
+      if (done[cle]) continue;                // fait
+      // déjà signalé aujourd'hui ?
+      let vus = {};
+      try { const r = await window.storage.get('check:rate:'+todayStr()); if (r && r.value) vus = JSON.parse(r.value); } catch(e) {}
+      if (vus[cle]) continue;
+      vus[cle] = true;
+      try { await window.storage.set('check:rate:'+todayStr(), JSON.stringify(vus)); } catch(e) {}
+      rate = m;
+      break;
+    }
+    if (rate === null) return false;
+
+    await marquerEntorse('b_check');
+    await imSay(broOn()
+      ? 'Ton check de ' + fmtTime(rate) + ' est passé sans toi. Ce n\'est pas facultatif.'
+      : 'Ton check de ' + fmtTime(rate) + ' est passé et tu ne l\'as pas fait... Ce n\'est pas grand-chose à faire, mais c\'est ce qui tient le reste. 🦊', 1000, 'concern');
+    if (currentM) await imOfferHelp(currentM);
+    return true;
+  }
+
+  /* Mictions : si tu as bu et que le capteur n'a rien vu de la journée,
+     la règle n'a pas été tenue — et ça ne dépend plus de ce que tu coches. */
+  async function corroborerMictions() {
+    if (paused) return false;
+    try {
+      const r = await window.storage.get('sensor:vu');
+      if (!r || !r.value) return false;                 // pas de capteur : rien à dire
+    } catch(e) { return false; }
+
+    const hier = new Date(); hier.setDate(hier.getDate()-1);
+    const k = hier.toISOString().slice(0,10);
+    let checks = [];
+    try { checks = await getChecks(k); } catch(e) {}
+    if (!checks.length) return false;
+
+    const mesures = checks.filter(c => c.type === 'capteur' && /^etat_/.test(c.result||''));
+    if (mesures.length < 3) return false;               // capteur trop peu présent pour juger
+    const mouille = mesures.some(c => /mouille$|sature$/.test(c.result));
+    if (mouille) return false;
+
+    const bus = checks.filter(c => /^biberon_/.test(c.result||'')).length;
+    if (bus < 2) return false;                          // peu bu : l'absence s'explique
+
+    await marquerEntorse('b_hors_couche');
+    await imSay(broOn()
+      ? 'Hier, tu as bu ' + bus + ' biberons et ton capteur n\'a pas vu une seule couche mouillée. Ça n\'est pas allé dans ta couche. Inutile de me dire le contraire.'
+      : 'Dis... hier tu as bu ' + bus + ' biberons, et ton capteur n\'a rien vu venir de la journée. Ça veut dire que c\'est allé ailleurs. 🦊', 1100, 'puzzled');
+    await imSay(broOn()
+      ? 'Tu te retiens jusqu\'aux toilettes. C\'est exactement ce qu\'on est en train de défaire.'
+      : 'Je ne te gronde pas — mais c\'est précisément l\'habitude qu\'on essaie de défaire ensemble. Laisse venir, c\'est tout ce qu\'il y a à faire. 💛', 1050, 'calm');
+    if (currentM) await imOfferHelp(currentM);
+    return true;
+  }
+
+  /* ============================================================
+     AGENT DE TRANSFORMATION
+     De l'intérieur, on ne voit jamais son propre changement : on ne
+     voit que la journée d'aujourd'hui. Ce module compare ce que tu
+     fais cette semaine à ce que tu faisais il y a trois semaines,
+     date les bascules au moment où elles arrivent, et quand un
+     indicateur se dégrade, nomme la difficulté et donne une clé.
+
+     Rien n'est déclaratif : tout est reconstruit depuis tes changes
+     horodatés, tes états rapportés, tes entorses et tes preuves.
+     ============================================================ */
+
+  const PILIERS_MIN = [9*60, 16*60, 22*60+30];
+
+  // Mesures sur une fenêtre de jours : [ilya + duree ; ilya] jours en arrière
+  async function mesuresTransfo(ilya, duree) {
+    const out = { n:0, retard:null, tauxSec:null, portH:null,
+                  entorses:null, tauxPreuve:null, biberons:null };
+    let nbJours = 0;
+    let retards = [], etats = { sec:0, total:0 }, ports = [];
+    let entorses = 0, preuves = { ok:0, total:0 }, bibs = [];
+
+    for (let i = ilya; i < ilya + duree; i++) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const k = d.toISOString().slice(0,10);
+      let checks = [];
+      try { checks = await getChecks(k); } catch(e) {}
+      if (!checks.length) continue;
+      nbJours++;
+
+      // retard aux piliers : écart entre l'heure du change et l'heure prévue
+      const changes = checks.filter(c => /^change_fait/.test(c.result || ''));
+      changes.forEach(c => {
+        const t = new Date(c.t);
+        const m = t.getHours()*60 + t.getMinutes();
+        let meilleur = null;
+        PILIERS_MIN.forEach(p => {
+          const ecart = m - p;
+          if (ecart >= 0 && ecart <= 180 && (meilleur === null || ecart < meilleur)) meilleur = ecart;
+        });
+        if (meilleur !== null) retards.push(meilleur);
+      });
+
+      // taux de « encore sèche » : mesure du lâcher-prise
+      checks.forEach(c => {
+        if (/^etat_/.test(c.result || '') || ['sec','mouille','sature'].includes(c.result)) {
+          etats.total++;
+          if (/sec$/.test(c.result)) etats.sec++;
+        }
+      });
+
+      // durée de port : intervalles entre deux changes successifs
+      const ts = changes.map(c => new Date(c.t).getTime()).sort((a,b) => a-b);
+      for (let j = 1; j < ts.length; j++) {
+        const h = (ts[j] - ts[j-1]) / 3600000;
+        if (h > 0.5 && h < 16) ports.push(h);
+      }
+
+      // preuves réellement fournies
+      changes.forEach(c => {
+        preuves.total++;
+        if (c.result === 'change_fait') preuves.ok++;
+      });
+
+      // biberons prouvés
+      bibs.push(checks.filter(c => /^biberon_/.test(c.result || '')).length);
+
+      // entorses du jour
+      try {
+        const r = await window.storage.get('breach:'+k);
+        const b = (r && r.value) ? JSON.parse(r.value) : {};
+        entorses += Object.keys(b).filter(x => b[x]).length;
+      } catch(e) {}
+    }
+
+    const moy = (a) => a.length ? a.reduce((x,y)=>x+y,0) / a.length : null;
+    out.n = nbJours;
+    out.retard = moy(retards);
+    out.tauxSec = etats.total >= 3 ? etats.sec / etats.total : null;
+    out.portH = moy(ports);
+    out.entorses = nbJours ? entorses / nbJours : null;
+    out.tauxPreuve = preuves.total >= 3 ? preuves.ok / preuves.total : null;
+    out.biberons = moy(bibs);
+    return out;
+  }
+
+  /* Chaque indicateur sait se raconter : ce qu'il mesure, dans quel sens
+     il s'améliore, à partir de quel écart ça vaut la peine d'en parler,
+     et — quand il se dégrade — quelle clé donner. */
+  const INDIC = [
+    { id:'retard', sens:-1, minEcart:4, unite:'min',
+      fmt: v => Math.round(v) + ' min',
+      mieux: (a,b) => 'Il y a trois semaines, tu lançais ton change ' + Math.round(a) + ' minutes après l\'heure. Cette semaine, ' + Math.round(b) + '. Tu ne le vois pas de l\'intérieur, mais tu as arrêté de négocier avec l\'horloge.',
+      pire: (a,b) => 'Tu repousses tes changes plus qu\'avant : ' + Math.round(b) + ' minutes de délai contre ' + Math.round(a) + ' il y a trois semaines.',
+      cle: 'La clé, c\'est de préparer le matériel AVANT l\'heure, pas au moment de le faire. Le délai ne vient presque jamais du change lui-même, il vient du fait d\'aller chercher les affaires. Sors-les au créneau précédent.' },
+
+    { id:'tauxSec', sens:-1, minEcart:0.15, unite:'%',
+      fmt: v => Math.round(v*100) + ' %',
+      mieux: (a,b) => 'Tes couches sèches aux checks sont passées de ' + Math.round(a*100) + ' % à ' + Math.round(b*100) + ' %. C\'est le signe le plus net qu\'il y a : tu te retiens beaucoup moins qu\'avant.',
+      pire: (a,b) => 'Tu me rends de plus en plus de couches sèches : ' + Math.round(b*100) + ' % contre ' + Math.round(a*100) + ' il y a trois semaines. Ton corps s\'est remis à contrôler.',
+      cle: 'Le lâcher-prise ne se décide pas, il s\'obtient en arrêtant de surveiller. Bois davantage, et surtout ne vérifie pas entre les checks — c\'est le fait de guetter qui te fait te retenir.' },
+
+    { id:'portH', sens:1, minEcart:0.8, unite:'h',
+      fmt: v => v.toFixed(1) + ' h',
+      mieux: (a,b) => 'Tu gardes tes couches plus longtemps : ' + b.toFixed(1) + ' h en moyenne contre ' + a.toFixed(1) + ' il y a trois semaines. Tu t\'en préoccupes moins, tout simplement.',
+      pire: (a,b) => 'Tes durées de port raccourcissent : ' + b.toFixed(1) + ' h contre ' + a.toFixed(1) + ' avant.',
+      cle: 'Si tu changes plus tôt qu\'avant, demande-toi si c\'est ta peau ou ton inconfort mental. Pour la peau, on garde. Pour le reste, laisse passer un créneau et observe ce qui se passe vraiment.' },
+
+    { id:'entorses', sens:-1, minEcart:0.6, unite:'/jour',
+      fmt: v => v.toFixed(1) + ' par jour',
+      mieux: (a,b) => 'Tes entorses sont tombées de ' + a.toFixed(1) + ' à ' + b.toFixed(1) + ' par jour. Le cadre te coûte moins d\'effort qu\'avant.',
+      pire: (a,b) => 'Tes entorses remontent : ' + b.toFixed(1) + ' par jour contre ' + a.toFixed(1) + '.',
+      cle: 'Quand les entorses reviennent en bloc, ce n\'est presque jamais la volonté qui lâche — c\'est le matériel ou l\'organisation. Vérifie ton stock et l\'emplacement de tes QR avant de te faire des reproches.' },
+
+    { id:'tauxPreuve', sens:1, minEcart:0.2, unite:'%',
+      fmt: v => Math.round(v*100) + ' %',
+      mieux: (a,b) => 'Tu scannes ' + Math.round(b*100) + ' % de tes changes, contre ' + Math.round(a*100) + ' avant. Le geste est devenu automatique.',
+      pire: (a,b) => 'Tu valides de plus en plus sans preuve : ' + Math.round(b*100) + ' % de scans contre ' + Math.round(a*100) + ' avant.',
+      cle: 'Un scan qu\'on saute, c\'est presque toujours un QR mal placé. Celui de ton tapis doit être visible SANS te relever. Déplace-le plutôt que de forcer l\'habitude.' },
+
+    { id:'biberons', sens:1, minEcart:0.7, unite:'/jour',
+      fmt: v => v.toFixed(1) + ' par jour',
+      mieux: (a,b) => 'Tu bois mieux : ' + b.toFixed(1) + ' biberons par jour contre ' + a.toFixed(1) + '.',
+      pire: (a,b) => 'Ton hydratation baisse : ' + b.toFixed(1) + ' biberons par jour contre ' + a.toFixed(1) + ' il y a trois semaines.',
+      cle: 'L\'hydratation entraîne tout le reste : moins tu bois, moins tu mouilles, plus tu te retiens sans le vouloir. Accroche le biberon aux repas plutôt qu\'aux créneaux — c\'est plus facile à tenir.' }
+  ];
+
+  // Compare la semaine écoulée à la même durée trois semaines plus tôt
+  async function observerTransformation() {
+    const recent = await mesuresTransfo(0, 7);
+    const ancien = await mesuresTransfo(21, 7);
+    if (recent.n < 3 || ancien.n < 3) return null;   // pas assez de matière
+
+    const progres = [], reculs = [];
+    INDIC.forEach(ind => {
+      const a = ancien[ind.id], b = recent[ind.id];
+      if (a === null || b === null) return;
+      const ecart = b - a;
+      if (Math.abs(ecart) < ind.minEcart) return;
+      const ameliore = (ind.sens === 1) ? (ecart > 0) : (ecart < 0);
+      (ameliore ? progres : reculs).push({ ind, a, b });
+    });
+    return { recent, ancien, progres, reculs };
+  }
+
+
+  /* ---- Les bascules, datées ----
+     Une transformation, ce sont quelques seuils franchis, pas une courbe
+     lisse. Ceux-là sont détectés tout seuls et inscrits une fois pour
+     toutes, avec leur date. Foxy peut ensuite y revenir : « ça fait un
+     mois jour pour jour que tu m'as dit ça. » */
+  const JALONS = {
+    premier_bienetre: 'la première fois que tu m\'as dit que tu t\'y sentais bien',
+    premiere_propre:  'ta première journée sans la moindre entorse',
+    semaine_propre:   'ta première semaine complète sans entorse',
+    port_long:        'la première fois que tu as gardé une couche plus de 10 h sans t\'en plaindre',
+    sans_sec:         'la première journée entière sans une seule couche sèche',
+    pilier_immediat:  'la première fois que tu as fait tes trois piliers à l\'heure, sans traîner',
+    tout_prouve:      'la première journée où tous tes changes ont été prouvés',
+    palier2:          'le jour où ton habituation est passée en automatisme',
+    palier3:          'le jour où c\'est devenu une seconde nature'
+  };
+
+  async function lireJalons() {
+    try { const r = await window.storage.get('transfo:jalons'); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
+    return {};
+  }
+  async function marquerJalon(id) {
+    if (!JALONS[id]) return false;
+    const j = await lireJalons();
+    if (j[id]) return false;                       // déjà franchi : on ne le rejoue pas
+    j[id] = Date.now();
+    try { await window.storage.set('transfo:jalons', JSON.stringify(j)); } catch(e) {}
+    return true;
+  }
+
+  // Balaie la journée d'hier à la recherche de seuils franchis
+  async function detecterJalons() {
+    const nouveaux = [];
+    const hier = new Date(); hier.setDate(hier.getDate()-1);
+    const k = hier.toISOString().slice(0,10);
+    let checks = [];
+    try { checks = await getChecks(k); } catch(e) {}
+    if (!checks.length) return nouveaux;
+
+    // journée sans entorse
+    let propre = false;
+    try {
+      const r = await window.storage.get('breach:'+k);
+      const b = (r && r.value) ? JSON.parse(r.value) : {};
+      propre = !Object.keys(b).some(x => b[x]);
+    } catch(e) {}
+    if (propre && await marquerJalon('premiere_propre')) nouveaux.push('premiere_propre');
+
+    // semaine complète sans entorse
+    if (propre) {
+      let sept = true;
+      for (let i = 1; i <= 7; i++) {
+        const d = new Date(); d.setDate(d.getDate()-i);
+        const kk = d.toISOString().slice(0,10);
+        try {
+          const r = await window.storage.get('breach:'+kk);
+          const b = (r && r.value) ? JSON.parse(r.value) : {};
+          if (Object.keys(b).some(x => b[x])) { sept = false; break; }
+        } catch(e) { sept = false; break; }
+      }
+      if (sept && await marquerJalon('semaine_propre')) nouveaux.push('semaine_propre');
+    }
+
+    // aucune couche sèche de la journée
+    const etats = checks.filter(c => /^etat_/.test(c.result||'') || ['sec','mouille','sature'].includes(c.result));
+    if (etats.length >= 3 && !etats.some(c => /sec$/.test(c.result))
+        && await marquerJalon('sans_sec')) nouveaux.push('sans_sec');
+
+    // tous les changes prouvés
+    const ch = checks.filter(c => /^change_fait/.test(c.result||''));
+    if (ch.length >= 2 && ch.every(c => c.result === 'change_fait')
+        && await marquerJalon('tout_prouve')) nouveaux.push('tout_prouve');
+
+    // trois piliers à l'heure
+    const aHeure = PILIERS_MIN.filter(p => ch.some(c => {
+      const t = new Date(c.t); const m = t.getHours()*60 + t.getMinutes();
+      return m >= p && m <= p + 15;
+    }));
+    if (aHeure.length === 3 && await marquerJalon('pilier_immediat')) nouveaux.push('pilier_immediat');
+
+    // port long sans plainte
+    const ts = ch.map(c => new Date(c.t).getTime()).sort((a,b)=>a-b);
+    for (let i = 1; i < ts.length; i++) {
+      if ((ts[i]-ts[i-1])/3600000 >= 10) {
+        if (await marquerJalon('port_long')) nouveaux.push('port_long');
+        break;
+      }
+    }
+    return nouveaux;
+  }
+
+  function ilYaCombien(t) {
+    const j = Math.floor((Date.now() - t) / 86400000);
+    if (j <= 0) return 'aujourd\'hui';
+    if (j === 1) return 'hier';
+    if (j < 7) return 'il y a ' + j + ' jours';
+    if (j < 14) return 'il y a une semaine';
+    if (j < 31) return 'il y a ' + Math.round(j/7) + ' semaines';
+    return 'il y a ' + Math.round(j/30) + ' mois';
+  }
+
+  /* ---- Ce que Foxy en dit ----
+     Une seule prise de parole par jour au maximum. Il constate d'abord
+     ce qui a changé en bien, parce que c'est ce qu'on ne voit jamais
+     soi-même. Puis il nomme une difficulté, une seule, avec sa clé. */
+  async function parlerTransformation(forcer) {
+    if (paused) return false;
+    // pas plus d'une fois par jour, sauf demande explicite
+    if (!forcer) {
+      try {
+        const r = await window.storage.get('transfo:dit');
+        if (r && r.value && JSON.parse(r.value) === todayStr()) return false;
+      } catch(e) {}
+    }
+
+    const nouveaux = await detecterJalons();
+    const obs = await observerTransformation();
+    if (!nouveaux.length && !obs) {
+      if (forcer) {
+        await imSay(broOn()
+          ? 'Trop tôt. Il me faut trois semaines de données pour te dire quoi que ce soit d\'honnête.'
+          : 'Je n\'ai pas encore assez de recul pour comparer — il me faut environ trois semaines de journées enregistrées. Reviens me demander. 🦊', 950, 'pensive');
+      }
+      return false;
+    }
+    try { await window.storage.set('transfo:dit', JSON.stringify(todayStr())); } catch(e) {}
+
+    // 1) les bascules franchies
+    for (const id of nouveaux) {
+      await imSay(broOn()
+        ? 'Nouveau seuil : ' + JALONS[id] + '. C\'était hier. Je le note.'
+        : '🌱 Quelque chose a basculé hier : <b>' + JALONS[id] + '</b>. Je le date, pour qu\'on puisse y revenir. 🦊', 1000, 'proud');
+    }
+
+    if (!obs) return true;
+
+    // 2) ce qui a changé en bien — le plus net d'abord
+    if (obs.progres.length) {
+      const p = obs.progres[0];
+      await imSay(p.ind.mieux(p.a, p.b), 1150, 'proud');
+      if (obs.progres.length > 1) {
+        const q = obs.progres[1];
+        await imSay('Et ce n\'est pas le seul. ' + q.ind.mieux(q.a, q.b), 1100, 'happy');
+      }
+    }
+
+    // 3) une difficulté, nommée, avec sa clé
+    if (obs.reculs.length) {
+      const r = obs.reculs[0];
+      await imSay(broOn()
+        ? r.ind.pire(r.a, r.b) + ' Je ne te le reproche pas, je te le dis.'
+        : r.ind.pire(r.a, r.b) + ' Ce n\'est pas un reproche — c\'est ce que je vois, et ça se corrige. 🦊', 1100, 'concern');
+      await imSay('<b>La clé :</b> ' + r.ind.cle, 1200, 'teach');
+    } else if (obs.progres.length) {
+      await imSay(broOn()
+        ? 'Rien ne s\'est dégradé sur ces trois semaines. Continue exactement comme ça.'
+        : 'Et rien ne s\'est dégradé par ailleurs. Franchement, c\'est du beau travail. 💛', 1000, 'moved');
+    }
+    return true;
+  }
+
+  // Rappel d'une bascule à sa date anniversaire
+  async function anniversaireJalon() {
+    const j = await lireJalons();
+    const ids = Object.keys(j);
+    if (!ids.length) return false;
+    for (const id of ids) {
+      const jours = Math.floor((Date.now() - j[id]) / 86400000);
+      if (jours === 30 || jours === 90) {
+        await imSay(broOn()
+          ? 'Ça fait ' + (jours === 30 ? 'un mois' : 'trois mois') + ' jour pour jour : ' + JALONS[id] + '. Tu as oublié, pas moi.'
+          : '🕯️ Ça fait ' + (jours === 30 ? 'un mois' : 'trois mois') + ' jour pour jour — ' + JALONS[id] + '. Tu l\'avais sûrement oublié. Moi je garde ces dates. 🦊💛', 1100, 'moved');
+        return true;
+      }
+    }
+    return false;
   }
 
   /* ============================================================
@@ -4495,6 +5350,7 @@
     { id:'b_pas_recouche',    n:'Pas de couche fraîche après un change', grav:'grave',   w:12 },
     { id:'b_incoherence',     n:'Déclaration contredite par un capteur',  grav:'grave',   w:12 },
     { id:'b_capteur_muet',    n:'Capteur silencieux sur une fenêtre',     grav:'moyenne', w:7 },
+    { id:'b_check',           n:'Check sauté (11h30, 13h30 ou 19h30)',    grav:'moyenne', w:7 },
     { id:'b_urgence',         n:'Serrure ouverte en urgence',            grav:'legere',  w:3 }
   ];
   const GRAV_LABEL = { grave:'Grave', moyenne:'Moyenne', legere:'Légère' };
@@ -5928,6 +6784,7 @@
     // pourquoi ce modèle, et jusqu'à quand : la question revient assez souvent
     // pour mériter sa place dans le point de situation, pas seulement à la demande.
     try { await expliquerCouche(); } catch(e) {}
+    try { await expliquerTenue(); } catch(e) {}
 
     // --- 6) Quoi faire concrètement ---
     if (cur) {
@@ -7753,6 +8610,8 @@
             await imSay(broOn()
               ? 'Bien. « ' + item.name + ' », c\'est noté. Tu es habillé comme il faut.'
               : 'Parfait, « ' + item.name + ' » ! Tu es tout beau. 🦊', 850, 'proud');
+            // ce qu'elle fait, et pour combien de temps — comme pour la couche
+            if (!paused) { try { await expliquerTenue(); } catch(e) {} }
             if (currentM) await imOfferHelp(currentM);
           } else {
             await corrigerTenue(item, att);
@@ -7832,6 +8691,7 @@
           await imSay(broOn()
             ? 'Voilà. « ' + it.name + ' ». C\'est mieux quand tu ne discutes pas.'
             : 'Voilà ! « ' + it.name + ' », c\'est exactement ça. Tu vois, c\'était pas si terrible. 🦊', 900, 'proud');
+          if (!paused) { try { await expliquerTenue(); } catch(e) {} }
           if (currentM) await imOfferHelp(currentM);
         } else {
           await corrigerTenue(it, att2, essai);
@@ -7846,9 +8706,17 @@
   async function marquerEntorse(id) {
     const d = todayStr();
     const b = await getBreaches(d);
+    const nouvelle = !b[id];
     b[id] = true;
     await saveBreaches(d, b);
     try { await renderBreaches(); } catch(e) {}
+    try { await renderRegles(); } catch(e) {}
+    // une entorse rattachée à son énoncé pèse autrement qu'une ligne
+    // dans un tableau : Foxy cite la règle, une fois, sans insister.
+    if (nouvelle && voiceMode === 'foxy' && !paused) {
+      const c = citerRegle(id);
+      if (c) { try { await imSay('📋 ' + c, 800, 'explain'); } catch(e) {} }
+    }
   }
 
   // ===== Feuille complète de QR à imprimer =====
@@ -10056,6 +10924,7 @@
     await renderMoment();
     await renderSupMode();
     await renderBreaches();
+    try { await renderRegles(); } catch(e) {}
     // preload today's entry if it exists
     try {
       const r = await window.storage.get('day:'+todayStr());
