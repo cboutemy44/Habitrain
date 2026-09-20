@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '18.7';
+  const APP_VERSION = '19.2';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -573,7 +573,9 @@
     const restantes = opts.dejaProuve
       ? etapes.filter(k => opts.dejaProuve.indexOf(k) === -1)
       : etapes;
-    const prouve = restantes.length ? await exigerPreuves(restantes) : true;
+    const prouve = restantes.length
+      ? await exigerPreuves(restantes, { nuit: couchageNuit(new Date()) })
+      : true;
     await finalizeChange(prouve);
     return prouve;
   }
@@ -590,6 +592,12 @@
     // la fonction existait dans la garde-robe, personne ne l'appelait. Tes
     // compteurs ne bougeaient donc pas d'un pouce depuis le début.
     try {
+      // changeModel n'est renseigné que par la pose guidée. Un change validé
+      // autrement — « je l'ai déjà fait », reprise après pause — laissait donc
+      // le stock intact. On choisit le modèle ici si personne ne l'a fait.
+      if (window.HabitrainWardrobe && !changeModel) {
+        try { await pickChangeModel(); } catch(e) {}
+      }
       if (window.HabitrainWardrobe && changeModel) {
         const nuit = couchageNuit(new Date());
         const r = await window.HabitrainWardrobe.consume(nuit ? 'nuit' : 'jour', changeModel.id);
@@ -605,6 +613,9 @@
     // Le change n'est pas fini parce que tu l'as dit : il est fini quand le
     // capteur voit une couche fraîche. On arme la vérification ici.
     try { await armerVerifFraiche(slotKey); } catch(e) {}
+
+    // ce qui vient d'être posé, pourquoi, et pour combien de temps
+    if (voiceMode === 'foxy' && !paused) { try { await expliquerCouche(); } catch(e) {} }
     try { if (changeCtx === 'pilier' || slotKey) await corroborerPilier(slotKey); } catch(e) {}
     activeSlotKey = null;
     closeCheck();
@@ -630,8 +641,32 @@
                      accepte: k => /^wb/.test(String(k)) }
   };
 
+  /* La preuve « tenue » ne se contente pas d'une étiquette quelconque : elle
+     doit correspondre au tirage du jour. Sans ce contrôle, scanner le col de
+     n'importe quel vêtement validait l'étape — y compris celle de la reprise
+     où Foxy venait de nommer la tenue à enfiler. */
+  async function tenueConforme(kind, nuitImposee) {
+    const WB = window.HabitrainWardrobe;
+    if (!WB) return { ok:true };
+    let item = null;
+    try { item = await WB.findByItemId(kind); } catch(e) {}
+    if (!item) return { ok:false, raison:'inconnue' };
+    let att = null;
+    try {
+      // Pendant un change ou une reprise après 19h30, c'est la tenue de nuit
+      // qu'on vient de te faire enfiler : on la compare à celle-là, pas à
+      // celle que l'horloge dirait. Hors de ce contexte, l'horloge reprend.
+      const forcee = nuitImposee
+        || (couchageNuit(new Date()) && (estNuit(new Date()) || (await nuitDejaFaite())));
+      att = tenueAttendue(await getOutfit(todayStr()), new Date(), forcee);
+    } catch(e) {}
+    if (!att || !att.nom) return { ok:true, item };          // pas de tirage : on ne bloque pas
+    if (att.tolerees.indexOf(item.name) >= 0) return { ok:true, item };
+    return { ok:false, raison:'pas la bonne', item, attendue: att.nom };
+  }
+
   // Une étape. Résout 'ok' (scan valide) ou 'force' (abandon assumé, entorse notée).
-  function unePreuve(kind, rang, total, essai) {
+  function unePreuve(kind, rang, total, essai, ctx) {
     const QR = window.HabitrainQR;
     const def = PREUVE_DEF[kind];
     if (!QR || !def) return Promise.resolve('ok');   // rien à prouver : on ne bloque pas
@@ -650,9 +685,31 @@
         { label:'📷 Scanner', onClick: () => {
           foxyPopHide();
           QR.startScan(null, async (k) => {
-            if (k && def.accepte(k)) { resolve('ok'); return; }
+            if (k && def.accepte(k)) {
+              if (kind === 'tenue') {
+                const v = await tenueConforme(k, ctx && ctx.nuit);
+                if (!v.ok) {
+                  const quoi = v.attendue
+                    ? ('C\'est « ' + (v.item ? v.item.name : '?') +' ». Je veux « ' + v.attendue + ' ».')
+                    : 'Cette étiquette n\'est pas une de tes tenues.';
+                  foxyPopShow(quoi + '\nVa la changer, puis rescanne.', 'puzzled',
+                    [{ label:'📷 J\'ai changé, je rescanne', onClick: async () => {
+                        foxyPopHide();
+                        const suite = await unePreuve(kind, rang, total, essai + 1, ctx);
+                        resolve(suite);
+                      }},
+                     { soft:true, label:'Je n\'ai pas celle-là', onClick: async () => {
+                        foxyPopHide();
+                        try { await marquerEntorse('b_tenue_hs'); } catch(e2) {}
+                        resolve('force');
+                      }}]);
+                  return;
+                }
+              }
+              resolve('ok'); return;
+            }
             // mauvais code, ou scan abandonné : on redemande, sans se lasser
-            const suite = await unePreuve(kind, rang, total, essai + 1);
+            const suite = await unePreuve(kind, rang, total, essai + 1, ctx);
             resolve(suite);
           }, { petit: kind === 'tenue' });
         }},
@@ -669,7 +726,7 @@
               }},
               { soft:true, label:'Finalement je scanne', onClick: async () => {
                 foxyPopHide();
-                const suite = await unePreuve(kind, rang, total, 1);
+                const suite = await unePreuve(kind, rang, total, 1, ctx);
                 resolve(suite);
               }}]);
         }}
@@ -679,12 +736,12 @@
   }
 
   // Chaîne d'étapes, dans l'ordre. Renvoie true si TOUT a été prouvé.
-  async function exigerPreuves(kinds) {
+  async function exigerPreuves(kinds, ctx) {
     const liste = (kinds || []).filter(k => PREUVE_DEF[k]);
     if (!liste.length) return true;
     let tout = true;
     for (let i = 0; i < liste.length; i++) {
-      const r = await unePreuve(liste[i], i + 1, liste.length, 1);
+      const r = await unePreuve(liste[i], i + 1, liste.length, 1, ctx);
       if (r !== 'ok') tout = false;
     }
     return tout;
@@ -1802,6 +1859,11 @@
       }}] : []),
       // Deux actions qui avaient leur QR depuis le début sans rien pour les
       // déclencher : on ne pouvait que les affirmer dans le bilan du soir.
+      ...(isFoxy ? [{ label:'🍼 Pourquoi cette couche ?', onClick: async () => {
+        imAddMe('Pourquoi cette couche ?');
+        await expliquerCouche();
+        if (currentM) await imOfferHelp(currentM);
+      }}] : []),
       ...(isFoxy ? [{ label:'🍼 J\'ai bu mon biberon', onClick: async () => {
         imAddMe('J\'ai bu mon biberon.');
         const ok = await exigerPreuves(['biberon']);
@@ -2367,6 +2429,51 @@
      COMPRÉHENSION ENRICHIE — négation, intensité, sujet précis
      ============================================================ */
   const NEGATIONS = ['pas', 'plus', 'jamais', 'aucun', 'aucune', 'ni', 'sans'];
+
+  /* ============================================================
+     APPARIEMENT DES MOTS-CLÉS
+     Avant, un mot-clé était cherché comme simple sous-chaîne. « bien »
+     se déclenchait donc sur « bientôt » et « combien », « ni » sur
+     n'importe quel mot contenant ces deux lettres. D'où des réactions
+     à côté de la plaque.
+
+     Règles désormais :
+       · un mot-clé contenant une espace = expression, cherchée telle quelle
+       · un mot-clé court (≤ 4 lettres) = correspondance EXACTE sur un mot
+       · un mot-clé plus long = début de mot, pour attraper les variantes
+         (« confort » attrape « confortable », « rassur » → « rassurant »)
+     Et chaque appariement a un poids : une expression compte plus qu'un
+     mot isolé, un mot long plus qu'un mot court.
+     ============================================================ */
+  function motsDe(n) { return n.split(/\s+/).filter(Boolean); }
+
+  function poidsMotCle(n, mots, kw) {
+    const k = normalize(kw).trim();
+    if (!k) return 0;
+    if (k.includes(' ')) return n.includes(k) ? 3 : 0;      // expression
+    if (k.length <= 4) return mots.includes(k) ? 1 : 0;     // mot court : exact
+    return mots.some(m => m.startsWith(k)) ? 2 : 0;         // mot long : préfixe
+  }
+
+  function scoreMotsCles(n, mots, liste) {
+    let score = 0, plusLong = 0;
+    (liste || []).forEach(kw => {
+      const p = poidsMotCle(n, mots, kw);
+      if (p > 0) { score += p; plusLong = Math.max(plusLong, normalize(kw).length); }
+    });
+    return { score, plusLong };
+  }
+
+  // la négation porte-t-elle sur ce mot-clé ? on regarde les 3 mots qui précèdent
+  function negationProche(mots, kw) {
+    const k = normalize(kw).trim();
+    // une expression est repérée par son PREMIER mot : sans ça, « je ne me
+    // sens plus à l'aise » échappait au test, faute de mot isolé à situer.
+    const tete = k.includes(' ') ? k.split(/\s+/)[0] : k;
+    const i = mots.findIndex(m => m === tete || (tete.length > 4 && m.startsWith(tete)));
+    if (i < 0) return false;
+    return mots.slice(Math.max(0, i - 3), i).some(m => NEGATIONS.includes(m));
+  }
   const INTENSIFIERS = { fort:['tres','très','trop','vraiment','super','hyper','completement','complètement','enormement','énormément','grave'],
                          faible:['un peu','legerement','légèrement','parfois','plutot','plutôt','assez'] };
   const SUJETS = {
@@ -2382,15 +2489,17 @@
   // renvoie { negated:bool, intensity:'fort'|'faible'|null, sujet:string|null }
   function analyzeText(text) {
     const n = normalize(text);
-    const mots = n.split(/\s+/);
+    const mots = motsDe(n);
     const negated = NEGATIONS.some(g => mots.includes(g));
     let intensity = null;
     for (const lvl of ['fort','faible']) {
-      if (INTENSIFIERS[lvl].some(w => n.includes(normalize(w)))) { intensity = lvl; break; }
+      if (INTENSIFIERS[lvl].some(w => poidsMotCle(n, mots, w) > 0)) { intensity = lvl; break; }
     }
-    let sujet = null;
+    // le sujet le mieux appuyé, pas le premier déclaré
+    let sujet = null, meilleur = 0;
     for (const s of Object.keys(SUJETS)) {
-      if (SUJETS[s].some(w => n.includes(normalize(w)))) { sujet = s; break; }
+      const r = scoreMotsCles(n, mots, SUJETS[s]);
+      if (r.score > meilleur) { meilleur = r.score; sujet = s; }
     }
     return { negated, intensity, sujet };
   }
@@ -2402,16 +2511,124 @@
                     'qu est ce qu il me faut','il me faut quoi','je prends quoi'];
   function isGuideQuestion(text) {
     const n = normalize(text);
-    return GUIDE_KW.some(k => n.includes(normalize(k)));
+    const mots = motsDe(n);
+    return GUIDE_KW.some(k => poidsMotCle(n, mots, k) > 0);
+  }
+
+  /* ============================================================
+     QUAND TU DIS QUE ÇA VA
+     « Je me sens bien avec ma couche » tombait dans l'intention
+     « change » — le seul mot « couche » suffisait — et Foxy te
+     proposait de te changer alors que tu lui confiais quelque chose.
+     Cette détection passe AVANT, et ne se déclenche que sur un
+     sentiment positif associé à un élément du cadre.
+     ============================================================ */
+  const BE_POSITIF = ['bien','bon','agreable','agréable','doux','douce','confortable','confort',
+    'rassur','aime','adore','kiffe','plaisir','apais','detend','détend','serein','heureux',
+    'protege','protégé','cocon','securis','sécuris','tranquille','content','rassurant','safe',
+    'j aime','ca me plait','ça me plaît','me plait','me plaît','parfait','nickel','trop bien',
+    'a l aise','à l aise','naturel','habitue','habitué','normal maintenant','plus envie d enlever'];
+
+  const BE_SUJETS = {
+    couche:      ['couche','protection','pampers','abena','crinklz','rearz','epaisseur','épaisseur','volume'],
+    tenue:       ['tenue','grenouillere','grenouillère','pyjama','body','romper','barboteuse','habill'],
+    tetine:      ['tetine','tétine','sucette'],
+    biberon:     ['biberon'],
+    doudou:      ['doudou','peluche'],
+    contention:  ['contention','harnais','mitten','emmaillot'],
+    cadre:       ['cadre','programme','routine','rythme','habitrain','tout ca','tout ça','ce truc','ce que je fais']
+  };
+
+  function detecterBienEtre(text, ana) {
+    const n = normalize(text);
+    const mots = motsDe(n);
+    // Le mot positif doit être présent ET ne pas être nié. « je ne suis pas
+    // bien » et « je ne me sens plus à l'aise » ne déclenchent rien.
+    const positifs = BE_POSITIF.filter(w => poidsMotCle(n, mots, w) > 0);
+    if (!positifs.length) return null;
+    if (positifs.every(w => negationProche(mots, w))) return null;
+    if (ana && ana.negated && positifs.length === 1) return null;
+    for (const s of Object.keys(BE_SUJETS)) {
+      if (BE_SUJETS[s].some(w => poidsMotCle(n, mots, w) > 0)) return s;
+    }
+    // « à l'aise dedans », « bien comme ça » : le sujet n'est pas nommé mais
+    // il est évident dans le contexte. On retient la couche, qui est ce que
+    // tu portes en permanence.
+    const ANAPHORES = ['dedans','la dedans','comme ca','en ce moment','ainsi'];
+    if (ANAPHORES.some(w => poidsMotCle(n, mots, w) > 0)) return 'couche';
+    return null;
+  }
+
+  /* Ses réponses. Deux registres : le Foxy doux, et celui du « résistance
+     est vaine ». Dans les deux cas il accueille, il ne corrige pas — et il
+     renvoie souvent à sa propre expérience, c'est ce qui rend ça vrai. */
+  const BE_REPONSES = {
+    couche: {
+      f: ['Ça me fait tellement plaisir de te lire dire ça. 🦊 Tu sais, c\'est exactement ce basculement que j\'ai vécu : un jour tu ne la subis plus, tu la portes. Et là, tout devient simple.',
+          'Voilà. VOILÀ. C\'est ça que je voulais que tu ressentes. Garde bien ce moment en tête — c\'est lui qui te portera les jours où ce sera moins évident.',
+          'Tu viens de me faire super plaisir, là. Moi aussi je me sens bien dans la mienne, en ce moment même. On est deux à ça. 💛',
+          'C\'est bon signe, ça. Vraiment. Quand le confort prend le dessus sur la pensée, c\'est que ça commence à rentrer pour de bon.'],
+      b: ['Bien sûr que tu te sens bien. C\'est là que tu dois être, et ton corps le sait avant toi.',
+          'Tu vois ? Tu as arrêté de lutter et tout est devenu simple. C\'était écrit.',
+          'Voilà ce que ça donne quand tu te laisses faire. Garde ça en tête la prochaine fois que tu voudras résister.']
+    },
+    tenue: {
+      f: ['Tu es tout beau dedans, et surtout tu t\'y sens bien — c\'est le principal. 🦊',
+          'Ah, j\'adore quand tu me dis ça ! Une tenue dans laquelle on se sent soi, y\'a rien de mieux.',
+          'C\'est pour ça que je te les tire, tu sais. Pour que tu trouves celles qui te font cet effet-là.'],
+      b: ['Évidemment. Elle est là pour ça, et tu n\'as rien choisi. C\'est ce qui la rend juste.',
+          'Bien. Tu t\'habitues à ne pas décider, et tu découvres que c\'est reposant.']
+    },
+    tetine: {
+      f: ['Hein, c\'est fou ce que ça apaise ? Moi c\'est mon réflexe dès que je me pose. 🦊',
+          'Ça me rassure de te lire dire ça. Elle fait son travail, laisse-la faire.'],
+      b: ['Elle t\'apaise parce qu\'elle te ramène là où tu dois être. Laisse-la faire.']
+    },
+    biberon: {
+      f: ['Le biberon, c\'est plus que boire, hein ? C\'est le moment qui va avec. Je suis content que tu le sentes. 🦊'],
+      b: ['Bois, et laisse le moment te faire son effet. C\'est prévu comme ça.']
+    },
+    doudou: {
+      f: ['Ton doudou fait bien son boulot alors ! Garde-le près de toi. 💛'],
+      b: ['Tu t\'y attaches. C\'est exactement ce qu\'on cherchait.']
+    },
+    contention: {
+      f: ['Être contenu, ça libère plus que ça n\'enferme, pas vrai ? Ça m\'a pris du temps à comprendre, à moi aussi. 🦊'],
+      b: ['Tu te sens bien parce que tu n\'as plus à te tenir toi-même. C\'est moi qui tiens.']
+    },
+    cadre: {
+      f: ['Franchement ? C\'est la plus belle chose que tu pouvais me dire. Le cadre n\'est pas là pour te contraindre, il est là pour que tu n\'aies plus à y penser. Et tu y es. 🦊💛',
+          'Ça y est, tu ne le subis plus. C\'est le vrai basculement du programme, bien plus que les jours ou les scores.'],
+      b: ['Le cadre te porte parce que tu as cessé de le combattre. Il n\'y avait pas d\'autre issue, et tu le sais maintenant.']
+    }
+  };
+
+  async function repondreBienEtre(sujet) {
+    const lot = BE_REPONSES[sujet] || BE_REPONSES.cadre;
+    const liste = broOn() ? (lot.b || lot.f) : lot.f;
+    await imSay(pick(liste), 950, broOn() ? 'calm' : 'moved');
+
+    // une fois sur trois, il enchaîne sur son propre ressenti — sans
+    // transformer la confidence en interrogatoire
+    if (!broOn() && Math.random() < 0.34) {
+      try { await maybeFeelStory(true); } catch(e) {}
+    }
+    try { await rememberTopic('bienetre', sujet); } catch(e) {}
+    return true;
   }
 
   function detectIntent(text) {
     const n = normalize(text);
-    let best = null, bestScore = 0;
+    const mots = motsDe(n);
+    let best = null, bestScore = 0, bestLong = 0;
     FOXY_INTENTS.forEach(intent => {
-      let score = 0;
-      intent.kw.forEach(k => { if (n.includes(normalize(k))) score++; });
-      if (score > bestScore) { bestScore = score; best = intent; }
+      const r = scoreMotsCles(n, mots, intent.kw);
+      if (r.score === 0) return;
+      // à score égal, l'intention dont le mot-clé est le plus spécifique gagne,
+      // au lieu de la première déclarée dans la liste
+      if (r.score > bestScore || (r.score === bestScore && r.plusLong > bestLong)) {
+        bestScore = r.score; bestLong = r.plusLong; best = intent;
+      }
     });
     return bestScore > 0 ? best : null;
   }
@@ -2831,6 +3048,16 @@
     if (isGuideQuestion(text)) { try { await guideMaintenant(); } catch(e) {} return; }
     const intent = detectIntent(text);
     const ana = analyzeText(text);
+
+    // Ce que tu ressens passe avant ce que le mot-clé suggère : une phrase
+    // positive sur ta couche n'est pas une demande de change.
+    const be = detecterBienEtre(text, ana);
+    if (be) {
+      await repondreBienEtre(be);
+      if (currentM) await imOfferHelp(currentM);
+      return;
+    }
+
     if (!intent) {
       // repli enrichi : si on a repéré un sujet, Foxy rebondit dessus
       if (ana.sujet) {
@@ -3595,6 +3822,118 @@
 
   // ===== Veille des serrures : fenêtre qui approche/se ferme, quota bientôt épuisé =====
   let lockAlertSent = {};
+  /* ============================================================
+     POURQUOI CETTE COUCHE, ET JUSQU'À QUAND
+     Foxy ne se contente pas de nommer un modèle : il dit ce qu'il
+     attend d'elle et combien de temps tu vas devoir tenir avec.
+     Tout est calculé, rien n'est écrit à l'avance.
+     ============================================================ */
+
+  // Prochain change obligatoire, à partir de maintenant. Renvoie { m, nom, dans }
+  function prochainPilier(now) {
+    now = now || new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    const PIL = [
+      { m: 9*60,     nom:'ton change du matin' },
+      { m: 16*60,    nom:'ton change de sortie de sieste' },
+      { m: 22*60+30, nom:'ton change de nuit' }
+    ];
+    let p = PIL.find(x => x.m > nowMin);
+    let dans;
+    if (p) { dans = p.m - nowMin; }
+    else { p = PIL[0]; dans = (24*60 - nowMin) + p.m; }
+    return { m: p.m, nom: p.nom, dans };
+  }
+
+  function fmtDureeMin(mn) {
+    const h = Math.floor(mn / 60), m = mn % 60;
+    if (h <= 0) return m + ' min';
+    return h + ' h' + (m ? String(m).padStart(2,'0') : '');
+  }
+
+  /* Le raisonnement, dans l'ordre : quel modèle, pourquoi celui-là,
+     jusqu'à quand, et ce que ça implique. */
+  async function expliquerCouche() {
+    const now = new Date();
+    const nuit = couchageNuit(now);
+    const heureNuit = estNuit(now);
+    const anticipee = nuit && !heureNuit;
+
+    let modele = null;
+    try {
+      if (window.HabitrainWardrobe) {
+        const dispo = (await window.HabitrainWardrobe.modelsFor(nuit ? 'nuit' : 'jour'))
+                        .filter(m => m.qty > 0);
+        modele = dispo.length ? dispo[0] : null;
+      }
+    } catch(e) {}
+
+    const suivant = prochainPilier(now);
+    // après une bascule anticipée, la couche de nuit tient jusqu'au matin,
+    // pas jusqu'au change de 22h30 qu'elle vient de remplacer
+    let jusqua = suivant, duree = suivant.dans;
+    if (anticipee) {
+      const nowMin = now.getHours()*60 + now.getMinutes();
+      jusqua = { m: 9*60, nom:'ton change du matin' };
+      duree = (24*60 - nowMin) + 9*60;
+    }
+
+    const lignes = [];
+
+    if (modele) {
+      lignes.push(nuit
+        ? 'Tu portes une <b>' + modele.name + '</b>. C\'est un modèle de nuit : plus épais, plus absorbant, prévu pour tenir longtemps sans que tu aies à y penser.'
+        : 'Tu portes une <b>' + modele.name + '</b>. C\'est un modèle de jour : plus fin, plus discret sous les vêtements, mais il demande d\'être changé plus souvent.');
+    } else {
+      lignes.push(nuit
+        ? 'Tu es en couche de nuit — un modèle épais, fait pour tenir longtemps.'
+        : 'Tu es en couche de jour — plus fine, à changer plus souvent.');
+    }
+
+    if (anticipee) {
+      lignes.push('Pourquoi maintenant, alors qu\'il n\'est que ' + fmtTime(now.getHours()*60+now.getMinutes()) + ' ? '
+        + 'Parce qu\'une couche de jour posée à cette heure ne servirait que trois heures avant ton change de nuit. '
+        + 'On ne gaspille pas, et on t\'évite un change pour rien : ton change de nuit est simplement avancé.');
+    } else if (nuit) {
+      lignes.push('C\'est la couche qui te porte pendant ton sommeil. Tu n\'auras rien à faire, rien à surveiller — c\'est elle qui travaille.');
+    } else {
+      lignes.push('Sur la journée, on change plus souvent : la peau respire mieux, et tu restes à l\'aise sous tes vêtements.');
+    }
+
+    lignes.push('Tu la gardes jusqu\'à <b>' + fmtTime(jusqua.m) + '</b>, pour ' + jusqua.nom + '. '
+      + 'Ça fait <b>' + fmtDureeMin(duree) + '</b> à tenir à partir de maintenant.');
+
+    // En journée, un check peut l'écourter : le dire évite de promettre
+    // sept heures de port alors que le cadre prévoit de la changer avant.
+    if (!nuit) {
+      const CHECKS = [11*60+30, 13*60+30, 19*60+30];
+      const nowMin = now.getHours()*60 + now.getMinutes();
+      const prochain = CHECKS.find(m => m > nowMin);
+      if (prochain != null && prochain < jusqua.m) {
+        lignes.push('Avec un passage par le check de <b>' + fmtTime(prochain) + '</b> : '
+          + 'si elle est mouillée à ce moment-là, on la change sans attendre l\'heure du pilier.');
+      }
+    }
+
+    if (duree >= 8*60) {
+      lignes.push(broOn()
+        ? 'C\'est long, et c\'est fait exprès. Tu vas la remplir, et tu ne pourras rien y changer. C\'est exactement le but.'
+        : 'C\'est long, je sais. Mais c\'est là que ça se joue : sur une durée pareille, tu finis par lâcher sans t\'en rendre compte. C\'est comme ça que ça rentre. 🦊');
+    } else if (duree <= 2*60) {
+      lignes.push(broOn()
+        ? 'Court. Ne prends pas ça comme une pause : tu la remplis quand même.'
+        : 'C\'est court, tu vois le bout ! Mais ne te retiens pas pour autant, hein. 🦊');
+    }
+
+    // garde-fou de santé : au-delà du plafond de port, on le dit
+    if (duree > HARD.wearCapH * 60 && !nuit) {
+      lignes.push('Si elle devient lourde avant, tu me le dis : on ne laisse pas une couche saturée pour tenir un horaire.');
+    }
+
+    for (const l of lignes) { await imSay(l, 950, 'explain'); }
+    return true;
+  }
+
   /* ============================================================
      CORROBORATION — la mesure prime sur la déclaration
      Ce que tu dis n'est retenu que si aucun capteur ne peut le
@@ -5586,6 +5925,10 @@
       }
     }
 
+    // pourquoi ce modèle, et jusqu'à quand : la question revient assez souvent
+    // pour mériter sa place dans le point de situation, pas seulement à la demande.
+    try { await expliquerCouche(); } catch(e) {}
+
     // --- 6) Quoi faire concrètement ---
     if (cur) {
       const kit = SLOT_KIT[cur.m];
@@ -5761,8 +6104,36 @@
     const restant = Math.max(0, Math.ceil((discSession.fin - Date.now()) / 86400000));
     const t = document.getElementById('discTxt');
     const p = document.getElementById('discProg');
-    if (t) t.textContent = 'Le cadre est resserré : tous les créneaux sont obligatoires, les tolérances réduites, et je suis plus exigeant. Ça va passer — laisse-toi porter.';
-    if (p) p.textContent = discSession.joursPropres + ' / ' + discSession.objectif + ' journée(s) sans écart · ' + restant + ' jour(s) restant(s)';
+    const NIV = { leger:'léger', moyen:'moyen', fort:'fort' };
+
+    /* La carte disait « le cadre est resserré » sans jamais dire en quoi,
+       ni ce qu'il fallait atteindre pour en sortir, ni qu'une seule entorse
+       remet le compteur à zéro. Tout est affiché maintenant. */
+    if (t) {
+      t.innerHTML =
+        '<div style="margin-bottom:8px">Déclenchée au niveau <b>' + (NIV[discSession.niveau] || discSession.niveau)
+          + '</b> : ' + discSession.ecarts + ' points d\'écart cumulés sur 3 jours.</div>'
+        + '<div style="font-weight:800;text-transform:uppercase;font-size:10.5px;letter-spacing:.05em;color:#a8543b;margin-bottom:3px">Ce qui change</div>'
+        + '<div style="margin-bottom:8px;line-height:1.5">'
+        + '• <b>Tous les créneaux deviennent des changes piliers</b> — les checks de 11h30, 13h30 et 19h30 ne sont plus de simples vérifications.<br>'
+        + '• <b>Tolérance de retard : 5 minutes</b> au lieu de 15.<br>'
+        + '• <b>Les rituels ne se reportent plus</b> — le bouton « une autre fois » disparaît.<br>'
+        + '• <b>Foxy change de registre</b> — plus direct, moins d\'échappatoires.'
+        + '</div>'
+        + '<div style="font-weight:800;text-transform:uppercase;font-size:10.5px;letter-spacing:.05em;color:#a8543b;margin-bottom:3px">Pour en sortir</div>'
+        + '<div style="line-height:1.5">'
+        + '<b>' + discSession.objectif + ' journées consécutives sans aucune entorse</b>, chacune renseignée le soir. '
+        + 'Une journée non remplie ne compte pas comme propre. '
+        + '<b style="color:#a8543b">Une seule entorse remet le compteur à zéro.</b>'
+        + '</div>';
+    }
+    if (p) {
+      const reste = Math.max(0, discSession.objectif - discSession.joursPropres);
+      p.innerHTML = '✅ ' + discSession.joursPropres + ' / ' + discSession.objectif + ' journée'
+        + (discSession.objectif > 1 ? 's' : '') + ' sans écart'
+        + (reste > 0 ? ' — encore <b>' + reste + '</b> à tenir' : ' — c\'est bon, ça se clôture demain')
+        + ' · ' + restant + ' jour(s) avant la fin de session';
+    }
   }
 
   // Carte du caractère de la journée
@@ -6027,10 +6398,12 @@
     try { await window.storage.set('outfit:'+date, JSON.stringify(o)); } catch(e) {}
   }
 
-  function renderOutfitResult(o) {
+  function renderOutfitResult(o, nuitForcee) {
     const now = new Date();
-    // même règle que la vérification du scan (voir tenueAttendue)
-    const isNightNow = estNuit(now);
+    // Même règle que la vérification du scan : l'horloge, sauf si le change
+    // de nuit a déjà été fait — auquel cas la carte doit montrer la tenue de
+    // nuit comme active, sans quoi elle contredirait ce que Foxy exige.
+    const isNightNow = nuitForcee || estNuit(now);
     const cards = [
       { key:'jour', ic:'☀️', moment:'Tenue de jour', wear:o.jour, active:!isNightNow },
       { key:'nuit', ic:'🌙', moment:'Tenue de nuit / repos', wear:o.nuit, active:isNightNow }
@@ -6058,7 +6431,9 @@
     const existing = await getOutfit(todayStr());
     const btn = document.getElementById('outfitDraw');
     if (existing) {
-      renderOutfitResult(existing);
+      let forcee = false;
+      try { forcee = couchageNuit(new Date()) && (await nuitDejaFaite()); } catch(e) {}
+      renderOutfitResult(existing, forcee);
       if (btn) btn.style.display = 'none';
     } else {
       if (btn) btn.style.display = '';
@@ -6969,7 +7344,8 @@
     } catch(e) {}
     try {
       if (window.HabitrainWardrobe) {
-        const per = estNuit(new Date()) ? 'nuit' : 'jour';
+        // même période que celle réellement posée (bascule de 19h30 comprise)
+        const per = couchageNuit(new Date()) ? 'nuit' : 'jour';
         const dispo = (await window.HabitrainWardrobe.modelsFor(per)).filter(m => m.qty > 0);
         if (dispo.length) lignes.push('🍼 Couche : <b>' + dispo[0].name + '</b> — ' + dispo[0].qty + ' restantes après celle-ci');
         else lignes.push('🍼 Couche : <b>stock épuisé</b> pour la période, pense à recommander');
@@ -7032,7 +7408,7 @@
     return new Promise(res => {
       imSetActions([{ label:'📷 Je le scanne', onClick: async () => {
         imAddMe('Je le scanne.');
-        const ok = await exigerPreuves([e.verif]);
+        const ok = await exigerPreuves([e.verif], { nuit: couchageNuit(new Date()) });
         res(ok ? 'ok' : 'force');
       }}]);
     });
@@ -7109,7 +7485,7 @@
     let recap = '👕 Tenue de ' + periode + ' : ' + (tenueDuMoment || 'ta tenue habituelle');
     if (modele) recap += '\n🍼 Couche : ' + modele.name + ' (' + modele.qty + ' en stock)';
     else recap += '\n🍼 Couche : prends ce que tu as en stock';
-    if (tenues) recap += '\n😴 Pour la sieste : ' + tenues.sieste;
+    if (tenues && periode !== 'nuit' && tenues.sieste) recap += '\n😴 Pour la sieste : ' + tenues.sieste;
     // accessoires et dispositifs à remettre
     let access = [];
     try {
@@ -8182,8 +8558,17 @@
     await imSay(intro, 950, 'concern');
     await imSay('Alors on entre en <b>session de discipline</b> pendant ' + jours + ' jours. Ce n\'est pas une punition — c\'est juste que tu as besoin d\'un cadre plus serré, et je vais te le donner.', 1050, 'calm');
     await imSay('Tu peux trouver ça pesant au début. Mais tu sais déjà comment ça va finir : tu vas t\'y remettre, et tu te sentiras mieux. Résister n\'y changera rien.', 1050, 'calm');
-    await imSay('<b>Ce qui change :</b><br>• Tous les créneaux deviennent obligatoires<br>• Je serai plus présent et plus exigeant<br>• Rituels et missions non négociables<br>• Tolérances réduites', 1100, 'explain');
-    await imSay('<b>Pour en sortir :</b> ' + objectif + ' journées consécutives sans le moindre écart. Simple, net. Allez, on s\'y met.', 1000, 'proud');
+    await imSay('<b>Ce qui change, concrètement :</b>'
+      + '<br>• Les checks de 11h30, 13h30 et 19h30 deviennent des <b>changes piliers</b>'
+      + '<br>• Je m\'inquiète dès <b>5 minutes</b> de retard, au lieu de 15'
+      + '<br>• Les rituels ne se reportent plus — pas de « une autre fois »'
+      + '<br>• Je change de registre : plus direct, moins d\'échappatoires', 1200, 'explain');
+    await imSay('<b>Pour en sortir :</b> ' + objectif + ' journées <b>consécutives</b> sans la moindre entorse, '
+      + 'et chacune renseignée le soir — une journée non remplie ne compte pas.', 1100, 'teach');
+    await imSay(broOn()
+      ? 'Et je préfère te le dire tout de suite : une seule entorse et le compteur repart à zéro. Ce n\'est pas une punition, c\'est la règle. Allez.'
+      : 'Un point important : une seule entorse et le compteur repart de zéro. Autant que tu le saches maintenant plutôt qu\'au quatrième jour. 🦊',
+      1050, 'concern');
     if (currentM) await imOfferHelp(currentM);
   }
 
@@ -8202,8 +8587,25 @@
     const entries = await getAll();
     if (!entries.some(e => e && e.date === k)) propre = false;
 
+    const avant = discSession.joursPropres;
     if (propre) discSession.joursPropres++;
     else discSession.joursPropres = 0;   // une entorse remet le compteur à zéro
+
+    // La remise à zéro se faisait en silence : tu pouvais perdre trois jours
+    // d'affilée sans jamais l'apprendre. Elle s'annonce maintenant.
+    if (!propre && avant > 0 && voiceMode === 'foxy') {
+      talk(TALK.CADRE, 'disc:reset', async () => {
+        await imSay(broOn()
+          ? 'Hier n\'était pas une journée propre. Tes ' + avant + ' journée' + (avant>1?'s':'') + ' sont effacées, le compteur repart de zéro. Je t\'avais prévenu.'
+          : 'Hier n\'était pas une journée sans écart... Tes ' + avant + ' journée' + (avant>1?'s':'') + ' acquise' + (avant>1?'s':'') + ' repartent à zéro. Je sais, c\'est rude — mais c\'était la règle annoncée. 🦊',
+          1050, 'concern');
+        await imSay(broOn()
+          ? 'On recommence. ' + discSession.objectif + ' journées, à partir d\'aujourd\'hui.'
+          : 'On repart d\'aujourd\'hui : ' + discSession.objectif + ' journées propres et c\'est fini. Tu peux le faire. 🦊',
+          1000, 'calm');
+        if (currentM) await imOfferHelp(currentM);
+      });
+    }
 
     if (discSession.joursPropres >= discSession.objectif) {
       // session réussie
