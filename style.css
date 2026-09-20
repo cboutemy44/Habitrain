@@ -586,6 +586,14 @@
   }
   .im-actions button:hover { border-color:#8f6fc0; background:#F7F1FB; }
   .im-actions button.soft { background:#F1EAF8; }
+  /* intertitre de catégorie dans la liste d'actions */
+  .im-actions .imSep {
+    font-size:11px; font-weight:800; letter-spacing:.09em; text-transform:uppercase;
+    color:#9a86b5; padding:10px 2px 1px; margin-top:2px;
+    border-top:1px solid #ece0f4;
+  }
+  .im-actions .imSep:first-child { border-top:none; margin-top:0; padding-top:2px; }
+  body.foxy .im-actions .imSep { color:#b98a5e; border-top-color:#f0dcc6; }
   .im-safety {
     margin:0 16px 14px; font-size:11.5px; font-weight:700; color:#8a6a30;
     background:#FBF3E0; border:1px solid #ecd9a8; border-radius:10px; padding:9px 11px; line-height:1.4;

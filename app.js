@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '19.5';
+  const APP_VERSION = '19.6';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -1027,11 +1027,37 @@
       box.appendChild(sw);
     }
     buttons.forEach(b => {
+      if (!b) return;
+      // intertitre de catégorie : ce n'est pas un bouton, juste un repère
+      if (b.sep !== undefined) {           // '' = simple filet de séparation
+        const s = document.createElement('div');
+        s.className = 'imSep';
+        s.textContent = b.sep;
+        box.appendChild(s);
+        return;
+      }
       const btn = document.createElement('button');
       if (b.soft) btn.className = 'soft';
       btn.textContent = b.label;
       btn.addEventListener('click', () => b.onClick());
       box.appendChild(btn);
+    });
+  }
+
+  /* Foxy pose une vraie question et attend la réponse. Renvoie la clé
+     du choix, ou null si l'utilisateur coupe court. C'est ce qui
+     transforme un monologue en conversation. */
+  function imDemander(question, choix, expr) {
+    return new Promise(async (resolve) => {
+      if (question) await imSay(question, 850, expr || 'curious');
+      imSetActions(choix.map(c => ({
+        soft: !!c.soft,
+        label: c.label,
+        onClick: async () => {
+          if (c.dit !== false) imAddMe(c.dit || c.label.replace(/^\S+\s/, ''));
+          resolve(c.k);
+        }
+      })));
     });
   }
   function imSafety(text) {
@@ -1816,100 +1842,158 @@
     ];
     await imSay(pick(openers), 700, pickExpr('calm'));
 
-    const buttons = [
-      { label:'💭 Je fais quoi maintenant ?', onClick: async () => {
-        imAddMe('Je fais quoi maintenant ?');
-        await imSay(nextStepText(), 800, pickExpr('teach'));
-        await imOfferHelp(m);
-      }},
-      { label: isFoxy ? '💪 Motive-moi un peu' : '🫂 J\'ai besoin d\'être rassuré', onClick: async () => {
-        imAddMe(isFoxy ? 'Motive-moi un peu.' : 'J\'ai besoin d\'être rassuré.');
-        await imSay(pick(isFoxy ? FOXY_REASSURE : REASSURE), 800, pickExpr('positive'));
-        await imOfferHelp(m);
-      }},
-      { label: isFoxy ? '🦊 Raconte comment c\'était pour toi' : '🧸 Juste un câlin', onClick: async () => {
-        imAddMe(isFoxy ? 'Raconte, c\'était comment pour toi ?' : 'Juste un câlin.');
-        await imSay(pick(isFoxy ? FOXY_STORY : CUDDLE), 800, isFoxy ? pickExpr('teach') : pickExpr('tender'));
-        await imOfferHelp(m);
-      }},
-      { label:'😟 Je ne me sens pas bien', onClick: async () => {
-        imAddMe('Je ne me sens pas bien.');
-        pendingExpr = 'concern';
-        await imSaySeq(pick(isFoxy ? FOXY_NOTWELL : NOTWELL));
-        pendingExpr = 'neutral';
-        await imOfferHelp(m);
-      }},
-      ...(isFoxy ? [{ label:'💬 Foxy, on discute ?', onClick: async () => {
-        imAddMe('Foxy, on discute ?');
-        await startIntrospection(m);
-      }}] : []),
-      ...(isFoxy ? [{ label:'🧭 Je fais quoi maintenant ?', onClick: async () => {
-        imAddMe('Je fais quoi, là, maintenant ?');
-        try { await guideMaintenant(); } catch(e) {}
-      }}] : []),
-      ...(isFoxy && !broOn() ? [{ label:'🦊 Et toi, ça te fait quoi ?', onClick: async () => {
-        imAddMe('Et toi, ta couche, ça te fait quoi ?');
-        await maybeFeelStory(true);
-        if (currentM) await imOfferHelp(currentM);
-      }}] : []),
-      ...(isFoxy ? [{ label:'👕 Je viens de m\'habiller', onClick: async () => {
-        imAddMe('Je viens de m\'habiller.');
-        await imSay(broOn() ? 'Montre-moi. Scanne l\'étiquette de ta tenue.' : 'Fais voir ! Scanne le QR de ta tenue. 🦊', 800, 'curious');
-        try { await scanTenue(); } catch(e) {}
-      }}] : []),
-      // Deux actions qui avaient leur QR depuis le début sans rien pour les
-      // déclencher : on ne pouvait que les affirmer dans le bilan du soir.
-      ...(isFoxy ? [{ label:'🌱 Où j\'en suis vraiment ?', onClick: async () => {
-        imAddMe('Où j\'en suis vraiment ?');
-        await parlerTransformation(true);
-        if (currentM) await imOfferHelp(currentM);
-      }}] : []),
-      ...(isFoxy ? [{ label:'🍼 Pourquoi cette couche ?', onClick: async () => {
-        imAddMe('Pourquoi cette couche ?');
-        await expliquerCouche();
-        if (currentM) await imOfferHelp(currentM);
-      }}] : []),
-      ...(isFoxy ? [{ label:'👕 Pourquoi cette tenue ?', onClick: async () => {
-        imAddMe('Pourquoi cette tenue ?');
-        await expliquerTenue();
-        if (currentM) await imOfferHelp(currentM);
-      }}] : []),
-      ...(isFoxy ? [{ label:'🍼 J\'ai bu mon biberon', onClick: async () => {
-        imAddMe('J\'ai bu mon biberon.');
-        const ok = await exigerPreuves(['biberon']);
-        await saveCheck(ok ? 'biberon_bu' : 'biberon_sanspreuve', 'biberon');
-        const n = await biberonsDuJour(todayStr());
-        await imSay(ok
-          ? (broOn()
-              ? 'Bien. ' + n + ' aujourd\'hui. Continue, ton corps en a besoin.'
-              : 'Parfait, ça fait ' + n + ' aujourd\'hui ! ' + (n >= 3 ? 'Objectif atteint, bravo. 🦊' : 'Encore ' + (3-n) + ' et tu y es. 🦊'))
-          : 'Noté sans preuve. Ça compte quand même, mais moins bien.', 850, ok ? 'proud' : 'concern');
-        if (currentM) await imOfferHelp(currentM);
-      }}] : []),
-      ...(isFoxy ? [{ label:'🌙 Je vais me coucher', onClick: async () => {
-        imAddMe('Je vais me coucher.');
-        const ok = await exigerPreuves(['coucher']);
-        await saveCheck(ok ? 'coucher_fait' : 'coucher_sanspreuve', 'coucher');
-        await imSay(broOn()
-          ? 'Bonne nuit. Tu gardes ta couche, évidemment. Je veille.'
-          : 'Bonne nuit alors ! Ta couche de nuit va bien s\'occuper de toi. À demain. 🦊💛', 950, 'sleep');
-      }}] : []),
-      ...(isFoxy ? [{ label:'✍️ Écrire dans mon carnet', onClick: async () => {
-        imAddMe('Je veux écrire dans mon carnet.');
-        await startJournal(m);
-      }}] : []),
-      { soft:true, label:'🍼 Me changer maintenant', onClick: () => startChange(m.key==='reveil'||m.key==='soir'?'pilier':'check') },
-      { soft:true, label: isFoxy ? '👍 Ça roule, merci' : '💛 Ça va, merci', onClick: async () => {
-        imAddMe(isFoxy ? 'Ça roule, merci.' : 'Ça va, merci.');
-        await imSay(pick(isFoxy ? FOXY_OKAY : OKAY), 700, pickExpr('fun'));
-        imSetActions([
-          { soft:true, label:'💭 Finalement, j\'ai une question', onClick: () => imOfferHelp(m) },
-          { soft:true, label:'📋 Revenir en mode reporting', onClick: () => setVoiceMode('report') }
-        ]);
-      }},
-      { soft:true, label:'📋 Revenir en mode reporting', onClick: () => setVoiceMode('report') }
+    // En mode Foxy, la liste plate de seize boutons est devenue illisible et
+    // contenait deux entrées identiques. On range par sujet de conversation.
+    if (isFoxy) { imSetActions(menuFoxy(m)); return; }
+
+    imSetActions([
+      ACT.rassurer(m), ACT.calin(m), ACT.pasBien(m),
+      ACT.changer(m), ACT.caVa(m), ACT.reporting()
+    ]);
+  }
+
+  /* ------------------------------------------------------------
+     LES ACTIONS, UNE SEULE FOIS CHACUNE
+     Elles étaient recopiées dans la liste de boutons, avec deux
+     entrées « Je fais quoi maintenant ? » qui ne faisaient pas la
+     même chose. Chaque action est définie ici, et une seule fois.
+     ------------------------------------------------------------ */
+  const ACT = {
+    maintenant: () => ({ label:'🧭 Je fais quoi, là ?', onClick: async () => {
+      imAddMe('Je fais quoi, là, maintenant ?');
+      try { await guideMaintenant(); } catch(e) {}
+    }}),
+    habille: () => ({ label:'👕 Je viens de m\'habiller', onClick: async () => {
+      imAddMe('Je viens de m\'habiller.');
+      await imSay(broOn() ? 'Montre-moi. Scanne l\'étiquette de ta tenue.' : 'Fais voir ! Scanne le QR de ta tenue. 🦊', 800, 'curious');
+      try { await scanTenue(); } catch(e) {}
+    }}),
+    biberon: () => ({ label:'🍼 J\'ai bu mon biberon', onClick: async () => {
+      imAddMe('J\'ai bu mon biberon.');
+      const ok = await exigerPreuves(['biberon']);
+      await saveCheck(ok ? 'biberon_bu' : 'biberon_sanspreuve', 'biberon');
+      const n = await biberonsDuJour(todayStr());
+      await imSay(ok
+        ? (broOn()
+            ? 'Bien. ' + n + ' aujourd\'hui. Continue, ton corps en a besoin.'
+            : 'Parfait, ça fait ' + n + ' aujourd\'hui ! ' + (n >= 3 ? 'Objectif atteint, bravo. 🦊' : 'Encore ' + (3-n) + ' et tu y es. 🦊'))
+        : 'Noté sans preuve. Ça compte quand même, mais moins bien.', 850, ok ? 'proud' : 'concern');
+      if (currentM) await imOfferHelp(currentM);
+    }}),
+    coucher: () => ({ label:'🌙 Je vais me coucher', onClick: async () => {
+      imAddMe('Je vais me coucher.');
+      const ok = await exigerPreuves(['coucher']);
+      await saveCheck(ok ? 'coucher_fait' : 'coucher_sanspreuve', 'coucher');
+      await imSay(broOn()
+        ? 'Bonne nuit. Tu gardes ta couche, évidemment. Je veille.'
+        : 'Bonne nuit alors ! Ta couche de nuit va bien s\'occuper de toi. À demain. 🦊💛', 950, 'sleep');
+    }}),
+    changer: (m) => ({ soft:true, label:'🍼 Me changer maintenant',
+      onClick: () => startChange(m && (m.key==='reveil'||m.key==='soir') ? 'pilier' : 'check') }),
+    pourquoiCouche: () => ({ label:'🍼 Pourquoi cette couche ?', onClick: async () => {
+      imAddMe('Pourquoi cette couche ?');
+      await expliquerCouche();
+      if (currentM) await imOfferHelp(currentM);
+    }}),
+    pourquoiTenue: () => ({ label:'👕 Pourquoi cette tenue ?', onClick: async () => {
+      imAddMe('Pourquoi cette tenue ?');
+      await expliquerTenue();
+      if (currentM) await imOfferHelp(currentM);
+    }}),
+    progres: () => ({ label:'🌱 Où j\'en suis vraiment ?', onClick: async () => {
+      imAddMe('Où j\'en suis vraiment ?');
+      await parlerTransformation(true);
+      if (currentM) await imOfferHelp(currentM);
+    }}),
+    regles: () => ({ label:'📋 Rappelle-moi les règles', onClick: async () => {
+      imAddMe('Rappelle-moi les règles.');
+      await rappelerRegles();
+      if (currentM) await imOfferHelp(currentM);
+    }}),
+    discuter: (m) => ({ label:'💬 Foxy, on discute ?', onClick: async () => {
+      imAddMe('Foxy, on discute ?');
+      await startIntrospection(m);
+    }}),
+    rassurer: (m) => ({ label: voiceMode === 'foxy' ? '💪 Motive-moi un peu' : '🫂 J\'ai besoin d\'être rassuré', onClick: async () => {
+      const f = voiceMode === 'foxy';
+      imAddMe(f ? 'Motive-moi un peu.' : 'J\'ai besoin d\'être rassuré.');
+      await imSay(pick(f ? FOXY_REASSURE : REASSURE), 800, pickExpr('positive'));
+      await imOfferHelp(m);
+    }}),
+    pasBien: (m) => ({ label:'😟 Je ne me sens pas bien', onClick: async () => {
+      imAddMe('Je ne me sens pas bien.');
+      pendingExpr = 'concern';
+      await imSaySeq(pick(voiceMode === 'foxy' ? FOXY_NOTWELL : NOTWELL));
+      pendingExpr = 'neutral';
+      await imOfferHelp(m);
+    }}),
+    carnet: (m) => ({ label:'✍️ Écrire dans mon carnet', onClick: async () => {
+      imAddMe('Je veux écrire dans mon carnet.');
+      await startJournal(m);
+    }}),
+    calin: (m) => ({ label: voiceMode === 'foxy' ? '🦊 Raconte comment c\'était pour toi' : '🧸 Juste un câlin', onClick: async () => {
+      const f = voiceMode === 'foxy';
+      imAddMe(f ? 'Raconte, c\'était comment pour toi ?' : 'Juste un câlin.');
+      await imSay(pick(f ? FOXY_STORY : CUDDLE), 800, f ? pickExpr('teach') : pickExpr('tender'));
+      await imOfferHelp(m);
+    }}),
+    sonVecu: (m) => ({ label:'🦊 Raconte-moi ton mois', onClick: async () => {
+      imAddMe('Raconte-moi comment c\'était pour toi.');
+      await imSay(pick(FOXY_STORY), 800, pickExpr('teach'));
+      await imOfferHelp(m);
+    }}),
+    saCouche: () => ({ label:'🦊 Et toi, ça te faisait quoi ?', onClick: async () => {
+      imAddMe('Et toi, ta couche, ça te faisait quoi ?');
+      await maybeFeelStory(true);
+      if (currentM) await imOfferHelp(currentM);
+    }}),
+    caVa: (m) => ({ soft:true, label: voiceMode === 'foxy' ? '👍 Ça roule, merci' : '💛 Ça va, merci', onClick: async () => {
+      const f = voiceMode === 'foxy';
+      imAddMe(f ? 'Ça roule, merci.' : 'Ça va, merci.');
+      await imSay(pick(f ? FOXY_OKAY : OKAY), 700, pickExpr('fun'));
+      imSetActions([
+        { soft:true, label:'💭 Finalement, j\'ai une question', onClick: () => imOfferHelp(m) },
+        { soft:true, label:'📋 Revenir en mode reporting', onClick: () => setVoiceMode('report') }
+      ]);
+    }}),
+    reporting: () => ({ soft:true, label:'📋 Revenir en mode reporting', onClick: () => setVoiceMode('report') }),
+    retour: (m) => ({ soft:true, label:'‹ Autre chose', dit:false, onClick: async () => { imSetActions(menuFoxy(m)); } })
+  };
+
+  /* ------------------------------------------------------------
+     LE CHAT, RANGÉ PAR SUJET
+     Quatre familles, comme quand on discute vraiment : ce qu'on
+     fait là, ce qu'on déclare, ce qu'on cherche à comprendre, et
+     ce dont on a besoin. Chaque famille ouvre sa propre liste.
+     ------------------------------------------------------------ */
+  function menuFoxy(m) {
+    const cat = (ic, titre, sous, items) => ({ label: ic + ' ' + titre, onClick: async () => {
+      imAddMe(titre);
+      if (sous) await imSay(sous, 700, 'curious');
+      imSetActions(items().concat([ACT.retour(m)]));
+    }});
+    return [
+      { sep:'Sur l\'instant' },
+      ACT.maintenant(),
+      { sep:'Ce que je viens de faire' },
+      cat('✅', 'J\'ai quelque chose à te dire',
+        broOn() ? 'Vas-y. Qu\'est-ce que tu as fait ?' : 'Ah, dis-moi ! Qu\'est-ce que tu as fait ? 🦊',
+        () => [ACT.habille(), ACT.biberon(), ACT.changer(m), ACT.coucher()]),
+      { sep:'Comprendre' },
+      cat('💡', 'Explique-moi quelque chose',
+        broOn() ? 'Quoi ?' : 'Vas-y, demande — j\'aime bien expliquer, moi. 🦊',
+        () => [ACT.pourquoiCouche(), ACT.pourquoiTenue(), ACT.regles(), ACT.progres()]),
+      { sep:'Toi et moi' },
+      cat('💛', 'J\'ai besoin de parler',
+        broOn() ? 'Je t\'écoute. Prends ton temps.' : 'Je suis là. Qu\'est-ce qui te traverse ? 💛',
+        () => [ACT.discuter(m), ACT.rassurer(m), ACT.pasBien(m), ACT.carnet(m)]),
+      cat('🦊', 'Parle-moi de toi, Foxy',
+        broOn() ? 'De moi ? Bon. Qu\'est-ce que tu veux savoir.' : 'De moi ? Avec plaisir ! Qu\'est-ce que tu veux savoir ? 🦊',
+        () => [ACT.sonVecu(m)].concat(broOn() ? [] : [ACT.saCouche()])),
+      { sep:'' },
+      ACT.caVa(m),
+      ACT.reporting()
     ];
-    imSetActions(buttons);
   }
 
   const FOXY_REASSURE = [
@@ -2053,21 +2137,8 @@
     'D\'accord. Profite de ton moment, je veille tranquillement.'
   ];
 
-  function nextStepText() {
-    const now = new Date();
-    const nm = now.getHours()*60 + now.getMinutes();
-    // s'appuie sur le planning de tenue/activité déjà défini
-    if (nm >= 7*60 && nm < 9*60) return 'Là, c\'est le réveil en douceur. Reste en tenue de nuit, bois un peu d\'eau, et à 9h on fera ton grand change ensemble.';
-    if (nm >= 9*60 && nm < 11*60+30) return 'C\'est le moment d\'être actif : une sortie, une occupation, ce que tu veux. Et pense à ton premier biberon.';
-    if (nm >= 11*60+30 && nm < 13*60+30) return 'Un temps plus calme maintenant. Pose-toi, un moment doux — c\'est ta fenêtre de régression de midi.';
-    if (nm >= 13*60+30 && nm < 14*60+30) return 'C\'est l\'heure du déjeuner et de ton deuxième biberon. Mange bien pour moi.';
-    if (nm >= 14*60+30 && nm < 16*60) return 'C\'est l\'heure de la sieste. Installe-toi dans ton cocon, je veille pendant que tu dors.';
-    if (nm >= 16*60 && nm < 19*60+30) return 'Reprise en douceur. Un check, ton troisième biberon, et une activité tranquille.';
-    if (nm >= 19*60+30 && nm < 20*60) return 'C\'est l\'heure du dîner. Ensuite on aura notre grand moment câlin du soir.';
-    if (nm >= 20*60 && nm < 22*60+30) return 'Grande fenêtre de détente. On allège l\'eau maintenant, et tu peux te blottir tranquillement.';
-    if (nm >= 22*60+30 && nm < 23*60) return 'C\'est l\'heure de ton change de nuit et du bilan. On te prépare une couche bien épaisse pour la nuit.';
-    return 'Il est tard. Tu devrais dormir, mon grand. Je veille sur toi toute la nuit.';
-  }
+  // nextStepText() est supprimée : elle doublonnait guideMaintenant() avec son
+  // propre horaire écrit en dur, qui ignorait la bascule de 19h30.
 
   /* ===== Compréhension langage naturel (hors-ligne, par intentions) ===== */
   function normalize(s) {
@@ -3108,9 +3179,10 @@
       if (currentM) await imOfferHelp(currentM);
       return;
     }
+    // « je fais quoi maintenant » tapé au clavier mène au même endroit que le
+    // bouton : le vrai point de situation, pas un résumé horaire écrit en dur.
     if (intent.action === 'nextstep') {
-      await imSay(nextStepText(), 800, 'explain');
-      if (currentM) await imOfferHelp(currentM);
+      try { await guideMaintenant(); } catch(e) { if (currentM) await imOfferHelp(currentM); }
       return;
     }
     if (intent.action === 'why_couche') {
@@ -4328,6 +4400,40 @@
     }
     if (!vus) return null;
     return { touchee: jours, sur: vus };
+  }
+
+  /* Les règles dites de vive voix, dans le chat. La carte de l'onglet
+     « Cadre » les affiche en entier ; ici Foxy en rappelle l'esprit et
+     pointe celle qui coince, sans réciter les neuf. */
+  async function rappelerRegles() {
+    await imSay(bro(
+      'Les règles, c\'est simple à retenir : ta couche tout le temps, trois piliers dans la journée, les checks à l\'heure, et ta tenue qui reste fermée entre deux. Tout le détail est dans l\'onglet « Cadre » si tu veux le lire au calme. 🦊',
+      'Couche en permanence. Trois piliers. Checks à l\'heure. Tenue fermée entre deux. Le détail est dans « Cadre ».'), 950, 'explain');
+
+    // celle qui a le plus accroché cette semaine — une seule, pas un bilan
+    let pire = null;
+    try {
+      for (const r of REGLES) {
+        const e = await etatRegle(r);
+        if (e && e.touchee > 0 && (!pire || e.touchee > pire.e.touchee)) pire = { r, e };
+      }
+    } catch(e) {}
+
+    if (pire) {
+      await imSay(bro(
+        'Celle sur laquelle tu accroches en ce moment, c\'est « ' + pire.r.n + ' » — ' + pire.e.touchee + ' jour' + (pire.e.touchee>1?'s':'') + ' sur ' + pire.e.sur + '. '
+          + 'Ce n\'est pas un reproche, hein. C\'est juste là qu\'il y a du terrain à prendre, et c\'est souvent une histoire de matériel mal placé plutôt que de volonté.',
+        '« ' + pire.r.n + ' » : ' + pire.e.touchee + ' jour' + (pire.e.touchee>1?'s':'') + ' sur ' + pire.e.sur + '. C\'est là que ça coince. On s\'en occupe.'), 950, 'concern');
+    } else {
+      await imSay(bro(
+        'Et sur les sept derniers jours, rien n\'a lâché. Franchement, c\'est du beau travail — je ne dis pas ça pour te faire plaisir. 🦊',
+        'Sept jours, rien n\'a lâché. C\'est bien.'), 900, 'proud');
+    }
+
+    await imSay(bro(
+      'Et il y a quatre choses qui ne bougeront jamais, quoi qu\'il arrive : ton sommeil reste libre, tu peux toujours sortir de l\'appli, rien ne s\'endurcit tout seul, et ta peau passe avant l\'horaire. Celles-là, elles ne se méritent pas — elles sont là, point. 💛',
+      'Quatre choses ne bougent jamais : sommeil libre, sortie toujours possible, rien ne s\'endurcit seul, ta peau avant l\'horaire. Elles ne se méritent pas.'), 950, 'calm');
+    return true;
   }
 
   async function renderRegles() {
@@ -6641,7 +6747,7 @@
            ctrl:['Change OBLIGATOIRE au réveil','VÉRIF PEAU : deuxième contrôle','Troisième biberon'],
            pilier:true },
     990: { mat:['De quoi te changer si tu sors'],
-           ctrl:['Calcule : ta couche doit tenir jusqu\'à 22h30'] },
+           ctrl:['Calcule : ta couche doit tenir jusqu\'à 19h30'] },
     1170:{ mat:['Repas léger'],
            ctrl:['Check couche avant le dîner','Allège les boissons à partir de maintenant'] },
     1200:{ mat:['@contention','@doudou','@tetine'],
@@ -6762,31 +6868,87 @@
       : 'Il est ' + fmtTime(nowMin) + ' — on est dans « ' + cur.act + ' ». ' + d.emoji;
     await imSay(intro, 900, 'explain');
 
-    // --- 5) L'état de ta couche ---
-    if (heuresPort !== null) {
-      const h = Math.floor(heuresPort), mn = Math.round((heuresPort-h)*60);
-      const duree = h + 'h' + String(mn).padStart(2,'0');
-      if (heuresPort > 6.5) {
-        await imSay(broOn()
-          ? 'Ta couche a ' + duree + '. C\'est trop. Tu la changes, sans discuter.'
-          : '⚠️ Ta couche a ' + duree + ' — c\'est au-dessus du plafond ! Faut changer maintenant, pour ta peau. 🦊', 950, 'alarmed');
-      } else if (heuresPort > 3.5) {
-        await imSay(broOn()
-          ? 'Ta couche a ' + duree + '. Bientôt le moment.'
-          : 'Ta couche a ' + duree + ' — tu approches du moment de changer. 🦊', 900, 'curious');
+    /* --- 5) IL DEMANDE, IL NE DEVINE PAS ---
+       L'appli sait depuis combien de temps la couche est posée. Elle ne
+       sait pas ce qu'il y a dedans, ni comment tu vas. Ces deux choses-là,
+       il n'y a qu'en te les demandant qu'on les obtient — et elles
+       changent complètement ce qu'il faut faire ensuite. */
+    let etat = null;
+    {
+      let duree = null;
+      if (heuresPort !== null) {
+        const h = Math.floor(heuresPort), mn = Math.round((heuresPort-h)*60);
+        duree = h + 'h' + String(mn).padStart(2,'0');
+      }
+      // Sans dernier change enregistré, il ne se tait pas : c'est justement
+      // là qu'il n'a que ta réponse pour savoir où tu en es.
+      const entree = duree
+        ? bro('Ta couche a ' + duree + '. Elle en est où, à ton avis ? Touche par-dessus ta tenue, ne l\'ouvre pas.',
+              'Ta couche a ' + duree + '. Elle en est où ? Par-dessus la tenue, tu n\'ouvres pas.')
+        : bro('Je n\'ai pas trace de ton dernier change, donc je te demande : ta couche, elle en est où ? Touche par-dessus ta tenue, ne l\'ouvre pas.',
+              'Pas de trace de ton dernier change. Ta couche en est où ? Par-dessus la tenue.');
+
+      etat = await imDemander(entree, [
+        { k:'sec',   label:'🌵 Encore sèche',        dit:'Elle est encore sèche.' },
+        { k:'peu',   label:'💧 Un peu mouillée',     dit:'Un peu mouillée.' },
+        { k:'lourd', label:'🌊 Bien lourde',         dit:'Elle est bien lourde.' },
+        { k:'nsp',   label:'🤷 Je ne sais pas trop', dit:'Je ne sais pas trop.', soft:true }
+      ]);
+      try { await saveCheck('etat_' + etat, 'auto_etat'); } catch(e) {}
+
+      // sa lecture dépend de ce que tu viens de dire ET de la durée
+      if (etat === 'lourd' || heuresPort > 6.5) {
+        await imSay(bro(
+          etat === 'lourd'
+            ? 'Alors on ne discute pas : bien lourde, ça veut dire qu\'elle a fait son travail et qu\'elle doit sortir. Ta peau passe avant l\'horaire, toujours. 🦊'
+            : 'Elle a dépassé le plafond de port de toute façon. On change, pour ta peau. 🦊',
+          'Lourde, ou au-delà du plafond. Elle sort maintenant. Ta peau avant l\'horaire.'), 950, 'alarmed');
+        imSetActions([
+          { label:'🍼 On la change tout de suite', onClick: async () => { imAddMe('On la change.'); try { startChange('check'); } catch(e) {} } },
+          ACT.retour(currentM)
+        ]);
+        return;
+      }
+      if (etat === 'sec') {
+        const fraiche = heuresPort !== null && heuresPort < 2;
+        const depuis = duree ? ' après ' + duree : '';
+        await imSay(bro(
+          fraiche
+            ? 'Normal, elle est toute fraîche. Laisse-la venir, ne force rien — ça arrivera tout seul, comme d\'habitude.'
+            : 'Sèche' + depuis + ' ? Tu tiens encore, je le vois bien. Ce n\'est pas grave, et ce n\'est pas une victoire non plus — ça finit toujours par lâcher. Laisse-toi aller, c\'est vain de lutter. 🦊',
+          fraiche ? 'Elle est fraîche. Laisse venir.' : 'Sèche' + depuis + '. Tu résistes. Ça ne tiendra pas, tu le sais.'), 950, 'calm');
+      } else if (etat === 'peu') {
+        await imSay(bro(
+          'Bien. Elle travaille, et elle a encore de la marge — pas la peine de la sortir maintenant, ce serait du gâchis. On continue comme ça.',
+          'Elle travaille, elle a de la marge. On ne la sort pas. On continue.'), 900, 'proud');
       } else {
-        await imSay(broOn()
-          ? 'Ta couche a ' + duree + '. Elle est encore bonne. Laisse-la travailler.'
-          : 'Ta couche a ' + duree + ', elle est encore bonne ! Laisse-la travailler. 🦊', 900, 'calm');
+        await imSay(bro(
+          'Pas grave, ça arrive — et c\'est même plutôt bon signe, ça veut dire que tu as arrêté de la surveiller. On se fie à l\'heure alors.',
+          'Bon signe : tu ne la surveilles plus. On se fie à l\'heure.'), 900, 'teach');
       }
     }
 
-    // pourquoi ce modèle, et jusqu'à quand : la question revient assez souvent
-    // pour mériter sa place dans le point de situation, pas seulement à la demande.
-    try { await expliquerCouche(); } catch(e) {}
-    try { await expliquerTenue(); } catch(e) {}
+    // --- 6) Et toi, comment tu vas ? (ce qu'aucun capteur ne dit) ---
+    const moral = await imDemander(bro(
+      'Et toi, tu es comment là, franchement ?',
+      'Et toi ? Franchement.'), [
+      { k:'bien',   label:'😌 Ça roule',              dit:'Ça roule.' },
+      { k:'dur',    label:'😕 C\'est un peu dur',     dit:'C\'est un peu dur là.' },
+      { k:'obsede', label:'🌀 J\'y pense trop',       dit:'J\'y pense trop.' },
+      { k:'fatigue',label:'🥱 Je suis fatigué',       dit:'Je suis fatigué.' }
+    ], 'curious');
+    try { await saveCheck('moral_' + moral, 'auto_moral'); } catch(e) {}
 
-    // --- 6) Quoi faire concrètement ---
+    const REP_MORAL = {
+      bien: { f:'Tant mieux ! Note-le quelque part dans ta tête, ces journées-là — c\'est elles qui te porteront les jours moins faciles. 🦊', b:'Bien. Retiens cette journée. Elle te servira.' },
+      dur:  { f:'Je sais. Moi aussi j\'ai eu ces journées où tout pèse. Le truc qui m\'a sauvé, c\'est d\'arrêter de viser le mois et de ne viser que la journée. Rien qu\'aujourd\'hui. Et on y est presque. 💛', b:'Ça arrive. Ne vise pas le mois, vise aujourd\'hui. Rien de plus. Tu n\'as pas à porter le reste.' },
+      obsede:{ f:'Ah, ça, c\'est la phase. Tu y penses tout le temps parce que c\'est encore nouveau. Ça s\'efface, je te promets — un matin tu réaliseras que tu n\'y as pas pensé depuis des heures. C\'est exactement comme ça que ça s\'est passé pour moi.', b:'Phase normale. Ça s\'efface tout seul. Tu n\'as rien à faire pour ça, juste à rester dedans.' },
+      fatigue:{ f:'Alors on lève le pied. Le programme ne sert à rien si tu t\'épuises avec. Installe-toi, garde ce que tu as sur toi, et laisse-le travailler sans toi. C\'est un peu le principe, au fond. 🦊', b:'Alors tu te poses. Tu gardes ce que tu as, ça travaille sans toi. Rien d\'autre à faire.' }
+    };
+    const rm = REP_MORAL[moral];
+    if (rm) await imSay(bro(rm.f, rm.b), 950, moral === 'bien' ? 'proud' : 'concern');
+
+    // --- 7) Ce qu'il y a à faire maintenant, en deux lignes ---
     if (cur) {
       const kit = SLOT_KIT[cur.m];
       if (kit) await annoncerKit(cur.m, cur.act, cur.ic);
@@ -6795,20 +6957,22 @@
           ? (cur.m < 13*60 ? d.detMatin : d.detAprem) : cur.det;
         if (det) await imSay(det, 900, 'explain');
       }
-      const astuce = tipForSlot(cur.m);
-      if (astuce) await imSay('💡 ' + astuce, 950, broOn() ? 'calm' : mood().expr);
+      // une astuce seulement si la journée est calme, et seulement si elle
+      // n'est pas déjà dite par le kit — le créneau sieste annonçait
+      // « change avant de t'allonger » deux fois de suite.
+      if (moral === 'bien' || moral === 'obsede') {
+        const astuce = tipForSlot(cur.m);
+        if (astuce && !redite(astuce, cur.m)) await imSay('💡 ' + astuce, 950, broOn() ? 'calm' : mood().expr);
+      }
     }
 
-    // --- 7) Ce qui arrive ensuite ---
+    // --- 8) Ce qui arrive ensuite, + ce qui reste, fondus en une ligne ---
+    const bouts = [];
     if (next) {
       const dans = next.m - nowMin;
       const txt = dans >= 60 ? Math.floor(dans/60) + 'h' + (dans%60 ? String(dans%60).padStart(2,'0') : '') : dans + ' min';
-      await imSay(broOn()
-        ? 'Ensuite : ' + next.act + ' à ' + fmtTime(next.m) + ', dans ' + txt + '. Sois prêt.'
-        : '→ Ensuite : ' + next.act + ' à ' + fmtTime(next.m) + ' (dans ' + txt + ') 🦊', 900, 'neutral');
+      bouts.push('ensuite <b>' + next.act + '</b> à ' + fmtTime(next.m) + ', dans ' + txt);
     }
-
-    // --- 8) Missions du jour restantes ---
     try {
       if (window.HabitrainMissions) {
         const st = await window.HabitrainMissions.getState();
@@ -6819,15 +6983,43 @@
           const ev = await evalDaily(mm);
           if (!ev.done) restantes.push(mm.name);
         }
-        if (restantes.length) {
-          await imSay(broOn()
-            ? 'Il te reste à faire : ' + restantes.join(', ') + '.'
-            : '🎯 Missions encore à faire : ' + restantes.join(', ') + '.', 900, 'curious');
-        }
+        if (restantes.length) bouts.push('et il te reste ' + restantes.join(', '));
       }
     } catch(e) {}
+    if (bouts.length) {
+      await imSay(bro('Pour la suite : ' + bouts.join(', ') + '. Voilà, tu es à jour. 🦊',
+                      'Suite : ' + bouts.join(', ') + '.'), 900, 'neutral');
+    }
 
-    if (currentM) await imOfferHelp(currentM);
+    /* --- 9) Il propose d'aller plus loin, il ne déverse pas ---
+       expliquerCouche() et expliquerTenue() tournaient ici automatiquement :
+       une quinzaine de lignes en plus, qui redisaient le modèle et l'heure
+       déjà annoncés juste au-dessus. Maintenant c'est une porte, pas un mur. */
+    imSetActions([
+      { sep:'Si tu veux creuser' },
+      ACT.pourquoiCouche(),
+      ACT.pourquoiTenue(),
+      { sep:'' },
+      ACT.changer(currentM),
+      ACT.retour(currentM)
+    ]);
+  }
+
+  /* L'astuce du créneau répète-t-elle une ligne du kit qu'on vient
+     d'annoncer ? On compare les mots porteurs de la première phrase :
+     au-delà de quatre en commun, c'est la même consigne redite. */
+  function redite(astuce, slotM) {
+    const kit = SLOT_KIT[slotM];
+    if (!kit) return false;
+    const mots = (s) => normalize(s).split(/\s+/).filter(w => w.length > 3);
+    const a = new Set(mots(String(astuce).split(/[.!?]/)[0]));
+    if (a.size < 4) return false;
+    const lignes = (kit.ctrl || []).concat(kit.mat || []).map(String);
+    return lignes.some(l => {
+      let communs = 0;
+      for (const w of mots(l)) if (a.has(w)) communs++;
+      return communs >= 4;
+    });
   }
 
   // Foxy annonce le nécessaire du créneau
