@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '19.6';
+  const APP_VERSION = '20.0';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -218,14 +218,105 @@
     { id:'blue2',  sheet:'foxy-blue2.png',  name:'pyjama bleu' }
   ];
   let foxyOutfit = FOXY_OUTFITS[0];
+
+  /* ============================================================
+     LA JOURNÉE DE FOXY
+     Foxy a fini son programme : il est habitué, et il vit ses journées
+     en couche, comme toi, sur le même rythme — changes à 9h et 16h,
+     bascule en tenue de nuit à 19h30, nuit jusqu'à 9h. Sa tenue était
+     tirée au hasard une fois par jour, sans lien avec l'heure : il
+     pouvait être en pyjama à 11h. Maintenant elle suit la période.
+     Tout est calculé depuis la date et l'heure (graine fixe) : sa
+     journée reste la même d'une ouverture à l'autre.
+     ============================================================ */
+  function graineFoxy(txt) {
+    let h = 2166136261;
+    for (let i = 0; i < txt.length; i++) { h ^= txt.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return ((h >>> 0) % 10000) / 10000;
+  }
+  function foxyJournee(now) {
+    now = now || new Date();
+    const m = now.getHours()*60 + now.getMinutes();
+    const date = now.toISOString().slice(0,10);
+    let nuit = false, sieste = false;
+    try { nuit = couchageNuit(now); sieste = !nuit && m >= SIESTE[0] && m < SIESTE[1]; } catch(e) {}
+    const periode = nuit ? 'nuit' : (sieste ? 'sieste' : 'jour');
+    // ce qu'il a de disponible en images, rangé par période
+    const TENUES = { nuit: ['blue2','paw'], sieste: ['paw','blue'], jour: ['blue','paw','diaper'] };
+    const tire = (d, per) => { const c = TENUES[per]; return c[Math.floor(graineFoxy(d + per) * c.length)]; };
+    // la nuit commencée hier soir garde la tenue d'hier soir jusqu'à 9h
+    let dateNuit = date;
+    if (periode === 'nuit' && m < 9*60) { const h = new Date(now); h.setDate(h.getDate() - 1); dateNuit = h.toISOString().slice(0,10); }
+    let tenue;
+    if (periode === 'nuit') {
+      tenue = tire(dateNuit, 'nuit');
+      // il change vraiment d'habits le soir : pas la même pièce que la journée
+      if (tenue === tire(dateNuit, 'jour')) tenue = TENUES.nuit.find(x => x !== tenue) || tenue;
+    } else tenue = tire(date, periode);
+
+    // son dernier change : le dernier pilier passé (9h, 16h, 19h30 la veille ou aujourd'hui)
+    const PIL = [9*60, 16*60, 19*60 + 30];
+    let depuis;
+    const passes = PIL.filter(p => p <= m);
+    if (passes.length) depuis = m - passes[passes.length - 1];
+    else depuis = (24*60 - (19*60 + 30)) + m;            // depuis 19h30 la veille
+    // habitué : ça part régulièrement, et il ne le remarque presque plus
+    let rythme = 95 + Math.floor(graineFoxy(date + 'r') * 40);     // une fois toutes les 1h35 à 2h15
+    if (periode === 'nuit') rythme = Math.round(rythme * 1.7);         // la nuit, ça vient moins souvent
+    const mictions = Math.floor(depuis / rythme);
+    const etat = mictions === 0 ? 'sec' : (mictions >= 3 ? 'lourde' : 'mouille');
+    const remarquees = mictions ? Math.min(mictions, Math.floor(graineFoxy(date + 'n' + mictions) * 2)) : 0; // 0 ou 1, rarement plus
+    return { periode, tenue, depuis, mictions, etat, remarquees };
+  }
+
   async function loadFoxyOutfit() {
     const date = todayStr();
+    // un choix fait à la main (menu de débogage) prime pour la journée
     try {
-      const r = await window.storage.get('foxyfit:'+date);
+      const r = await window.storage.get('foxyfit:force:'+date);
       if (r && r.value) { const id = JSON.parse(r.value); const f = FOXY_OUTFITS.find(o=>o.id===id); if (f) { foxyOutfit = f; return; } }
     } catch(e) {}
-    foxyOutfit = FOXY_OUTFITS[Math.floor(Math.random()*FOXY_OUTFITS.length)];
-    try { await window.storage.set('foxyfit:'+date, JSON.stringify(foxyOutfit.id)); } catch(e) {}
+    const id = foxyJournee().tenue;
+    foxyOutfit = FOXY_OUTFITS.find(o => o.id === id) || FOXY_OUTFITS[0];
+  }
+
+  // « Et toi, tu en es où ? » : sa tenue, sa couche, ce qu'il fait
+  async function foxyRaconteSonMoment() {
+    const j = foxyJournee();
+    const d = foxyDecrit(j);
+    await imSay(d.tenue, 800, 'happy');
+    await imSay(d.couche, 950, j.etat === 'sec' ? 'calm' : 'proud');
+    let act = null;
+    try {
+      const m = new Date().getHours()*60 + new Date().getMinutes();
+      let cur = null; for (const sl of SCHEDULE) { if (sl.m <= m) cur = sl; }
+      act = cur && cur.act;
+    } catch(e) {}
+    const QUOI = {
+      nuit:   bro('Et je suis tranquille, prêt pour la nuit. On a le même rythme, toi et moi — on bascule ensemble à 19h30.', 'Je suis en tenue de nuit, comme toi. Même rythme.'),
+      sieste: bro('Et c\'est la sieste : je suis allongé sur le côté, doudou dans les bras. Je me laisse aller.', 'C\'est la sieste. Je me laisse aller.'),
+      jour:   bro('Et là, je suis ' + (act ? 'dans mon « ' + act + ' », comme toi' : 'dans ma journée') + '. Tu vois, on fait la même chose, au même moment. Je ne suis pas en avance sur toi pour te regarder faire — je suis à côté. 🦊', act ? 'Là, je suis dans mon « ' + act + ' ». Comme toi.' : 'Je suis dans ma journée, comme toi.')
+    };
+    await imSay(QUOI[j.periode], 900, 'happy');
+  }
+
+  // Ce qu'il dit de lui-même, au présent
+  function foxyDecrit(j) {
+    j = j || foxyJournee();
+    const nom = (FOXY_OUTFITS.find(o => o.id === j.tenue) || {}).name || 'ma tenue';
+    const h = Math.floor(j.depuis / 60), mn = j.depuis % 60;
+    const duree = h ? h + 'h' + (mn ? String(mn).padStart(2,'0') : '') : mn + ' min';
+    const tenue = j.tenue === 'diaper'
+      ? 'Moi, là, je suis juste en couche — à la maison, il fait bon, je n\'ai pas besoin de plus.'
+      : 'Moi, là, je suis en ' + nom + '.';
+    const fois = ['zéro','une','deux','trois','quatre','cinq','six','sept','huit'][j.mictions] || String(j.mictions);
+    const qualif = j.etat === 'lourde' ? 'bien lourde' : 'mouillée';
+    let couche;
+    if (j.etat === 'sec') couche = 'Ma couche a ' + duree + ', elle est encore toute fraîche.';
+    else if (j.remarquees === 0) couche = 'Ma couche a ' + duree + ' et elle est ' + qualif + ' — ' + fois + ' fois déjà, et je ne l\'ai senti partir aucune fois. Je m\'en rends compte parce que tu me poses la question. 🦊';
+    else if (j.mictions === 1) couche = 'Ma couche a ' + duree + ' et elle est mouillée — une fois. Celle-là je l\'ai sentie partir : j\'étais assis, tranquille, j\'ai juste laissé faire.';
+    else couche = 'Ma couche a ' + duree + ' et elle est ' + qualif + ' — ' + fois + ' fois, et je n\'en ai senti partir qu\'une. Le reste est venu tout seul, pendant que je faisais autre chose.';
+    return { tenue, couche, duree };
   }
   function afterOutfitSet() { try { refreshHeadFoxy(); } catch(e) {} }
 
@@ -616,6 +707,7 @@
 
     // ce qui vient d'être posé, pourquoi, et pour combien de temps
     if (voiceMode === 'foxy' && !paused) { try { await expliquerCouche(); } catch(e) {} }
+    try { await proposerRessentirApresChange(); } catch(e) {}
     try { if (changeCtx === 'pilier' || slotKey) await corroborerPilier(slotKey); } catch(e) {}
     activeSlotKey = null;
     closeCheck();
@@ -1452,9 +1544,11 @@
       // point déjà fait → Foxy demande simplement l'état de la couche (rien de spécial)
       if (voiceMode === 'foxy') {
         await imSay('On a déjà fait notre point tout à l\'heure ! ' + foxyAfter(m), 800, pickExpr('positive'));
-        await imSay('Dis-moi juste, ta couche elle en est où là, maintenant ?', 800, 'pensive');
-        buildDiaperStateReplies(m);
-        runQuestBeat(m);
+        // On attend ta réponse AVANT de lancer la suite : runQuestBeat tournait
+        // en parallèle et remplaçait les boutons d'état avant que tu puisses taper.
+        await buildDiaperStateReplies(m);
+        await runQuestBeat(m);
+        if (!imActions().querySelector('button')) imSetActions(menuFoxy(m));
         return;
       }
       await imSay(foxyOrCare(m, 'q'), 700, pickExpr('think'));
@@ -1468,27 +1562,23 @@
   }
 
   // Réponses rapides sur l'état de la couche (quand rien de spécial à faire)
-  function buildDiaperStateReplies(m) {
-    const acts = imActions(); acts.innerHTML = '';
-    const opts = [
-      { label:'💧 Bien mouillée', cls:'g', result:'etat_mouille',
-        rep:'Bien mouillée, nickel ! Tu te laisses aller comme il faut, c\'est ça le progrès. 👏' },
-      { label:'☀️ Encore sèche', cls:'a', result:'etat_sec',
-        rep:'Encore sèche ? Laisse-toi aller quand ça vient, hein. Pas de pression, ça viendra en douceur.' },
-      { label:'🌊 Saturée', cls:'c', result:'etat_sature',
-        rep:'Saturée ? Faut changer bientôt alors ! Dis-moi quand tu veux qu\'on s\'en occupe ensemble.' }
-    ];
-    opts.forEach(o => {
-      const b = document.createElement('button'); b.className = o.cls; b.textContent = o.label;
-      b.addEventListener('click', async () => {
-        imAddMe(o.label);
-        await saveCheck(o.result, 'chat_'+m.key);
-        await imSay(o.rep, 800, o.result==='etat_mouille'?'happy':(o.result==='etat_sature'?'surprised':'pensive'));
-        try { await renderSince(); } catch(e){}
-        await imOfferHelp(m);
-      });
-      acts.appendChild(b);
-    });
+  // Renvoie une promesse : l'appelant attend ta réponse avant d'enchaîner.
+  async function buildDiaperStateReplies(m) {
+    const etat = await demanderEtatCouche(bro(
+      'Dis-moi juste, ta couche, elle en est où là, maintenant ?',
+      'Ta couche, là, maintenant ?'));
+    if (!etat) {
+      await imSay(bro('Pas grave — c\'est même plutôt bon signe, tu ne la surveilles plus. 🦊', 'Tu ne la surveilles plus. Bien.'), 750, 'teach');
+      return;
+    }
+    const { rc } = await declarerEtatCouche(etat, 'chat_' + m.key);
+    const REP = {
+      mouille: bro('Mouillée, nickel ! Tu te laisses aller comme il faut, c\'est ça le progrès. 👏', 'Mouillée. C\'est ce qu\'on attend.'),
+      sec:     bro('Encore sèche ? Laisse-toi aller quand ça vient, hein. Pas de pression, ça viendra en douceur.', 'Sèche. Ça viendra. Ne retiens pas.'),
+      sature:  bro('Bien lourde ? Alors on change bientôt — ta peau avant l\'horaire. Dis-moi quand, on s\'en occupe ensemble.', 'Lourde. On change bientôt.')
+    };
+    if (rc.verdict !== 'contredit') await imSay(REP[etat], 800, etat === 'mouille' ? 'happy' : (etat === 'sature' ? 'surprised' : 'pensive'));
+    await direRecoupement(rc, etat);
   }
 
   // Beat narratif : débloque un chapitre si palier franchi, propose le rituel du jour
@@ -1863,6 +1953,26 @@
       imAddMe('Je fais quoi, là, maintenant ?');
       try { await guideMaintenant(); } catch(e) {}
     }}),
+    mouille: () => ({ label:'💧 J\'ai mouillé ma couche', onClick: async () => {
+      imAddMe('J\'ai mouillé ma couche.');
+      try { await declarerMiction(); } catch(e) { if (currentM) await imOfferHelp(currentM); }
+    }}),
+    etatCouche: () => ({ label:'🩲 Dire où en est ma couche', onClick: async () => {
+      imAddMe('Je te dis où en est ma couche.');
+      const etat = await demanderEtatCouche();
+      if (etat) {
+        const { rc } = await declarerEtatCouche(etat, 'parole');
+        await confirmerEtat(etat, rc);
+        if (etat === 'sature' && rc.verdict !== 'contredit') {
+          imSetActions([
+            { label:'🍼 On la change', onClick: async () => { imAddMe('On la change.'); try { startChange('check'); } catch(e) {} } },
+            ACT.retour(currentM)
+          ]);
+          return;
+        }
+      }
+      if (currentM) await imOfferHelp(currentM);
+    }}),
     habille: () => ({ label:'👕 Je viens de m\'habiller', onClick: async () => {
       imAddMe('Je viens de m\'habiller.');
       await imSay(broOn() ? 'Montre-moi. Scanne l\'étiquette de ta tenue.' : 'Fais voir ! Scanne le QR de ta tenue. 🦊', 800, 'curious');
@@ -1942,8 +2052,13 @@
       await imSay(pick(FOXY_STORY), 800, pickExpr('teach'));
       await imOfferHelp(m);
     }}),
-    saCouche: () => ({ label:'🦊 Et toi, ça te faisait quoi ?', onClick: async () => {
-      imAddMe('Et toi, ta couche, ça te faisait quoi ?');
+    foxyMaintenant: () => ({ label:'🦊 Et toi, tu en es où, là ?', onClick: async () => {
+      imAddMe('Et toi, tu en es où, là ?');
+      await foxyRaconteSonMoment();
+      if (currentM) await imOfferHelp(currentM);
+    }}),
+    saCouche: () => ({ label:'🦊 Et toi, ta couche, ça te fait quoi ?', onClick: async () => {
+      imAddMe('Et toi, ta couche, ça te fait quoi ?');
       await maybeFeelStory(true);
       if (currentM) await imOfferHelp(currentM);
     }}),
@@ -1975,10 +2090,15 @@
     return [
       { sep:'Sur l\'instant' },
       ACT.maintenant(),
+      ACT.mouille(),
       { sep:'Ce que je viens de faire' },
       cat('✅', 'J\'ai quelque chose à te dire',
         broOn() ? 'Vas-y. Qu\'est-ce que tu as fait ?' : 'Ah, dis-moi ! Qu\'est-ce que tu as fait ? 🦊',
-        () => [ACT.habille(), ACT.biberon(), ACT.changer(m), ACT.coucher()]),
+        () => [ACT.etatCouche(), ACT.habille(), ACT.biberon(), ACT.changer(m), ACT.coucher()]),
+      { sep:'Vivre dedans' },
+      cat('🧸', 'Comment je me comporte ?',
+        broOn() ? 'Sur quoi ?' : 'Bonne question — c\'est souvent là que tout se joue. Sur quoi ? 🦊',
+        () => menuComportement()),
       { sep:'Comprendre' },
       cat('💡', 'Explique-moi quelque chose',
         broOn() ? 'Quoi ?' : 'Vas-y, demande — j\'aime bien expliquer, moi. 🦊',
@@ -1989,7 +2109,7 @@
         () => [ACT.discuter(m), ACT.rassurer(m), ACT.pasBien(m), ACT.carnet(m)]),
       cat('🦊', 'Parle-moi de toi, Foxy',
         broOn() ? 'De moi ? Bon. Qu\'est-ce que tu veux savoir.' : 'De moi ? Avec plaisir ! Qu\'est-ce que tu veux savoir ? 🦊',
-        () => [ACT.sonVecu(m)].concat(broOn() ? [] : [ACT.saCouche()])),
+        () => [ACT.foxyMaintenant(), ACT.sonVecu(m)].concat(broOn() ? [] : [ACT.saCouche()])),
       { sep:'' },
       ACT.caVa(m),
       ACT.reporting()
@@ -2202,6 +2322,17 @@
       ]},
     { id:'histoire', kw:['histoire','raconte','voyage','ton mois','aventure','souvenir','vecu','vécu'],
       expr:'teach', rep:[], action:'story'},
+    // « J'ai mouillé ma couche » tombait sur l'intention « change » (mouillé +
+    // couche = 6 points). Les expressions ci-dessous pèsent 3 chacune et
+    // l'emportent ; à égalité, la plus longue gagne.
+    { id:'miction_decl', kw:['j\'ai mouillé','j ai mouille','ai mouillé ma couche','mouillé ma couche','je me suis mouillé','je suis mouillé','suis mouillé','j\'ai fait pipi','fait pipi','ai fait dans ma couche','ça vient de partir','c\'est parti','je viens de mouiller','viens de mouiller','pipi'],
+      expr:'curious', rep:[], action:'declare_miction'},
+    { id:'etat_decl', kw:['couche est sèche','couche est seche','couche est mouillée','couche est mouillee','couche est lourde','couche est pleine','couche est saturée','couche est saturee','elle est sèche','elle est seche','elle est lourde','elle est pleine','encore sèche','encore seche','bien lourde'],
+      expr:'curious', rep:[], action:'declare_etat'},
+    { id:'foxy_etat', kw:['ta couche est mouillée','ta couche est mouillee','ta couche est sèche','ta couche est seche','ta couche est lourde','et toi ta couche','ta couche a toi','ta couche à toi','tu portes quoi','tu es en quoi','t es en quoi','tu es mouille','tu es mouillé','t es mouille','et toi tu en es ou','et toi tu en es où','tu en es ou','tu en es où','ta couche est','comment est ta couche'],
+      expr:'happy', rep:[], action:'foxy_etat'},
+    { id:'comportement', kw:['comment marcher','comment je marche','comment dois-je marcher','comment je dois marcher','quelle posture','posture','démarche','demarche','comment m\'asseoir','comment je m\'assois','comment m\'assoir','comment me comporter','comment je me comporte','comment je dois me comporter','comment me tenir','comment boire','comment boire mon biberon','comment je bois mon biberon','comment dormir','comment me coucher','quand ça vient','quand ca vient','comment lâcher','comment lacher','mes mains','comment m\'occuper','comment ressentir','ressentir ma couche','sentir ma couche','les sensations','ma tétine','ma tetine','mon doudou','à quatre pattes','a quatre pattes','quatre pattes','ramper','comment jouer'],
+      expr:'teach', rep:[], action:'comportement'},
     // Le « pourquoi » se tape aussi bien qu'il se clique. Deux intentions
     // distinctes : la couche et la tenue n'ont pas les mêmes raisons.
     { id:'pourquoi_couche', kw:['pourquoi cette couche','pourquoi ce modele','pourquoi ce modèle','pourquoi cette proteection','pourquoi je porte ca','pourquoi je porte ça','jusqu\'a quand la couche','jusqu\'à quand la couche','pourquoi couche de nuit','pourquoi une couche de nuit','pourquoi cette protection'],
@@ -3185,6 +3316,48 @@
       try { await guideMaintenant(); } catch(e) { if (currentM) await imOfferHelp(currentM); }
       return;
     }
+    if (intent.action === 'declare_miction') {
+      try { await declarerMiction(); } catch(e) { if (currentM) await imOfferHelp(currentM); }
+      return;
+    }
+    if (intent.action === 'declare_etat') {
+      // l'état est dans la phrase : on ne te le redemande pas
+      const n = normalize(text);
+      const etat = /\b(lourd|plein|satur)/.test(n) ? 'sature' : (/\bsec/.test(n) ? 'sec' : (/mouill/.test(n) ? 'mouille' : null));
+      if (!etat) { await ACT.etatCouche().onClick(); return; }
+      const { rc } = await declarerEtatCouche(etat, 'parole');
+      await confirmerEtat(etat, rc);
+      if (etat === 'sature' && rc.verdict !== 'contredit') {
+        imSetActions([
+          { label:'🍼 On la change', onClick: async () => { imAddMe('On la change.'); try { startChange('check'); } catch(e) {} } },
+          ACT.retour(currentM)
+        ]);
+        return;
+      }
+      if (currentM) await imOfferHelp(currentM);
+      return;
+    }
+    if (intent.action === 'foxy_etat') {
+      await foxyRaconteSonMoment();
+      if (currentM) await imOfferHelp(currentM);
+      return;
+    }
+    if (intent.action === 'comportement') {
+      // le sujet est souvent dans la phrase ; sinon on propose la liste
+      const n = normalize(text);
+      const sujet = /march|demarch|pas\b/.test(n) ? 'marcher'
+        : /assoi|assied|asseoir|assis/.test(n) ? 'asseoir'
+        : /vient|lach|pipi/.test(n) ? 'lacher'
+        : /boire|biberon/.test(n) ? 'biberon'
+        : /dormir|couch|sieste/.test(n) ? 'dormir'
+        : /ressent|sentir|sensation/.test(n) ? 'ressentir'
+        : /tetine|sucette|doudou/.test(n) ? 'tetine'
+        : /quatre pattes|4 pattes|ramper|occup|jouer|jeu|mains/.test(n) ? 'quatrepattes' : null;
+      if (sujet) { await conseilComportement(sujet); return; }
+      await imSay(bro('Sur quoi ? Choisis, je t\'explique. 🦊', 'Sur quoi ?'), 700, 'curious');
+      imSetActions(menuComportement().concat([ACT.retour(currentM)]));
+      return;
+    }
     if (intent.action === 'why_couche') {
       await expliquerCouche();
       if (currentM) await imOfferHelp(currentM);
@@ -3714,6 +3887,212 @@
     return latest; // 'sec' | 'mouille' | 'sature' | null
   }
 
+  /* ============================================================
+     DÉCLARER L'ÉTAT DE SA COUCHE — une seule porte d'entrée
+     Trois endroits déclaraient l'état chacun à sa façon, et le
+     dialogue de « Je fais quoi, là ? » écrivait des valeurs
+     (etat_peu, etat_lourd, etat_nsp) que la carte « Ta couche du
+     moment » ne savait pas lire : ta déclaration disparaissait.
+     Tout passe maintenant par ici, avec trois valeurs et pas une
+     de plus.
+
+     Quand le capteur couche a mesuré dans les 20 dernières minutes,
+     ta parole est recoupée avec lui. S'ils se contredisent, c'est
+     la mesure qui reste : ta déclaration est gardée comme trace,
+     mais elle ne remplace pas ce que le capteur a vu.
+     ============================================================ */
+  const ETAT_RESULT = { sec:'etat_sec', mouille:'etat_mouille', sature:'etat_sature' };
+  const ETAT_RANG   = { sec:0, mouille:1, sature:2 };
+
+  async function recouperCapteur(etat) {
+    const m = await etatMesure(20);
+    if (!m || ETAT_RANG[m.etat] === undefined) return { verdict:'seul' };
+    // sec d'un côté, mouillé de l'autre : c'est une contradiction. Entre
+    // mouillée et saturée, le capteur ne tranche pas finement — on te croit.
+    if ((ETAT_RANG[m.etat] === 0) !== (ETAT_RANG[etat] === 0)) return { verdict:'contredit', etat:m.etat, t:m.t };
+    return { verdict:'accord', etat:m.etat, t:m.t };
+  }
+
+  async function declarerEtatCouche(etat, source) {
+    if (!ETAT_RESULT[etat]) return { ok:false, rc:{ verdict:'seul' } };
+    const rc = await recouperCapteur(etat);
+    await saveCheck(rc.verdict === 'contredit' ? 'decl_contredite' : ETAT_RESULT[etat], source || 'parole');
+    try { await renderSince(); } catch(e) {}
+    return { ok:true, rc };
+  }
+
+  /* Réparation unique des données écrites par la 19.6 : ses réponses
+     étaient enregistrées sous des noms illisibles, et le moral était
+     mélangé aux vérifs. On traduit ce qui peut l'être, on range le
+     moral à part, on retire le « je ne sais pas » qui faussait le taux
+     de couches sèches. Une seule fois, sur les dix derniers jours. */
+  async function reparerEtats196() {
+    try { const f = await window.storage.get('migr:etats196'); if (f && f.value) return 0; } catch(e) {}
+    const TRAD = { etat_peu:'etat_mouille', etat_lourd:'etat_sature' };
+    let touches = 0;
+    for (let i = 0; i < 10; i++) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const k = d.toISOString().slice(0,10);
+      let list;
+      try { list = await getChecks(k); } catch(e) { continue; }
+      if (!list || !list.length) continue;
+      const morals = [];
+      const propre = [];
+      list.forEach(c => {
+        const r = c.result || '';
+        if (/^moral_/.test(r)) { morals.push({ t:c.t, v:r.slice(6) }); touches++; return; }
+        if (r === 'etat_nsp' || r === 'etat_null') { touches++; return; }
+        if (TRAD[r]) { propre.push(Object.assign({}, c, { result: TRAD[r], type: 'parole' })); touches++; return; }
+        if (c.type === 'auto_etat') { propre.push(Object.assign({}, c, { type: 'parole' })); touches++; return; }
+        propre.push(c);
+      });
+      if (propre.length !== list.length || touches) {
+        try { await window.storage.set('check:' + k, JSON.stringify(propre)); } catch(e) {}
+      }
+      if (morals.length) {
+        try {
+          const r = await window.storage.get('moral:' + k);
+          const ex = (r && r.value) ? JSON.parse(r.value) : [];
+          await window.storage.set('moral:' + k, JSON.stringify(ex.concat(morals)));
+        } catch(e) {}
+      }
+    }
+    try { await window.storage.set('migr:etats196', JSON.stringify(Date.now())); } catch(e) {}
+    if (touches) { try { await renderCheckStat(); await renderSince(); } catch(e) {} }
+    return touches;
+  }
+
+  // Accusé de réception + recoupement, dans le bon ordre : s'il y a
+  // contradiction, Foxy ne dit pas « noté » juste avant de dire l'inverse.
+  async function confirmerEtat(etat, rc) {
+    if (!rc || rc.verdict !== 'contredit') {
+      await imSay(bro(
+        { sec:'Noté, encore sèche. Laisse venir, ne retiens rien. 🦊', mouille:'Noté, mouillée. Elle travaille, on la garde.', sature:'Noté, bien lourde. On la change — ta peau d\'abord.' }[etat],
+        { sec:'Sèche. Noté.', mouille:'Mouillée. Noté.', sature:'Lourde. On change.' }[etat]), 800, etat === 'sature' ? 'concern' : 'calm');
+    }
+    await direRecoupement(rc, etat);
+  }
+
+  // Ce que Foxy dit du recoupement — rien quand ta parole est seule à parler.
+  async function direRecoupement(rc, etatDit) {
+    if (!rc || rc.verdict === 'seul') return;
+    const h = fmtTime(new Date(rc.t).getHours()*60 + new Date(rc.t).getMinutes());
+    if (rc.verdict === 'accord') {
+      await imSay(bro('Et ton capteur est d\'accord avec toi, il l\'a vu aussi. 🦊', 'Le capteur confirme.'), 700, 'proud');
+      return;
+    }
+    if (ETAT_RANG[etatDit] > 0) {
+      await imSay(bro(
+        'Hmm… ton capteur, lui, la voyait encore sèche à ' + h + '. Je garde ce qu\'il a mesuré. Si ça vient juste d\'arriver, il le verra dans quelques minutes — redis-le-moi à ce moment-là, sans souci.',
+        'Le capteur la voyait sèche à ' + h + '. Je garde la mesure. S\'il le voit dans quelques minutes, on en reparle.'), 950, 'puzzled');
+    } else {
+      await imSay(bro(
+        'Ah, ton capteur n\'est pas d\'accord : il a vu du mouillé à ' + h + '. Je garde la mesure, tu sais bien que c\'est elle qui compte. 🦊',
+        'Le capteur a vu du mouillé à ' + h + '. Elle n\'est pas sèche. Je garde la mesure.'), 950, 'puzzled');
+    }
+  }
+
+  /* Question « elle en est où ? » réutilisable. Renvoie 'sec' | 'mouille'
+     | 'sature' | null (null = tu ne sais pas : rien n'est enregistré). */
+  async function demanderEtatCouche(question) {
+    const k = await imDemander(question || bro(
+      'Ta couche, elle en est où ? Touche par-dessus ta tenue, ne l\'ouvre pas.',
+      'Ta couche en est où ? Par-dessus la tenue.'), [
+      { k:'sec',     label:'🌵 Encore sèche',        dit:'Elle est encore sèche.' },
+      { k:'mouille', label:'💧 Mouillée',            dit:'Elle est mouillée.' },
+      { k:'sature',  label:'🌊 Bien lourde',         dit:'Elle est bien lourde.' },
+      { k:null,      label:'🤷 Je ne sais pas trop', dit:'Je ne sais pas trop.', soft:true }
+    ], 'curious');
+    return k;
+  }
+
+  /* ============================================================
+     « J'AI MOUILLÉ MA COUCHE »
+     La déclaration qui manquait. Utile partout, indispensable quand
+     le capteur n'est pas là : sans elle, la journée n'avait aucune
+     trace de ce qui était allé dans ta couche.
+
+     Foxy demande aussi COMMENT c'est venu. C'est l'information la
+     plus parlante du programme : poussé, laissé venir, parti tout
+     seul, ou remarqué seulement après coup — c'est exactement le
+     chemin du réflexe qui se défait.
+     ============================================================ */
+  async function mictionsDuJour(d) {
+    try { const r = await window.storage.get('miction:' + (d || todayStr())); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
+    return [];
+  }
+
+  async function declarerMiction() {
+    const venue = await imDemander(bro(
+      'Ah ! 🦊 Et c\'est venu comment ? Dis-moi franchement, il n\'y a pas de mauvaise réponse.',
+      'C\'est venu comment ? Franchement.'), [
+      { k:'apres',  label:'😳 Je l\'ai remarqué après coup', dit:'Je ne l\'ai remarqué qu\'après coup.' },
+      { k:'seul',   label:'🌊 C\'est parti tout seul',       dit:'C\'est parti tout seul.' },
+      { k:'lache',  label:'😌 J\'ai laissé venir',           dit:'J\'ai laissé venir.' },
+      { k:'pousse', label:'✊ J\'ai dû pousser un peu',      dit:'J\'ai dû pousser un peu.' }
+    ], 'curious');
+
+    const REP = {
+      apres:  { f:'Ça… c\'est exactement là qu\'on va. Tu ne l\'as pas décidé, tu ne l\'as même pas senti partir — ton corps a fait sans te demander. Le jour où ça m\'est arrivé la première fois, je suis resté bête cinq bonnes minutes. 🦊💛',
+                b:'Tu ne l\'as même pas senti. Ton corps n\'attend plus ta permission. C\'est là qu\'on voulait arriver.', e:'proud' },
+      seul:   { f:'Parti tout seul, sans que tu le décides. Ce n\'est pas toi qui cèdes, c\'est le réflexe qui se relâche. C\'est une vraie étape, tu sais — elle ne revient pas en arrière.',
+                b:'Parti sans ta décision. Le réflexe lâche. Il ne reviendra pas comme avant.', e:'proud' },
+      lache:  { f:'Laisser venir, c\'est déjà beaucoup. Tu n\'as pas retenu, tu n\'as pas couru — tu as juste arrêté de lutter. C\'est toujours comme ça que ça commence.',
+                b:'Tu as arrêté de retenir. C\'est tout ce qu\'on te demande.', e:'happy' },
+      pousse: { f:'Pas grave du tout, hein. Au début presque tout le monde doit aider un peu, le verrou est encore bien fermé. Ce qui compte, c\'est que ce soit allé dans ta couche. La prochaine fois, essaie juste d\'attendre que ça vienne un peu plus tout seul. 🦊',
+                b:'Tu as aidé. Ça viendra sans. La prochaine fois, n\'aide pas : attends.', e:'calm' }
+    };
+    const r = REP[venue];
+    if (r) await imSay(bro(r.f, r.b), 1000, r.e);
+
+    // et maintenant, elle tient encore ?
+    const etat = await imDemander(bro(
+      'Et là, elle en est où ? Touche par-dessus ta tenue.',
+      'Elle en est où, là ? Par-dessus la tenue.'), [
+      { k:'mouille', label:'💧 Elle a encore de la marge', dit:'Elle a encore de la marge.' },
+      { k:'sature',  label:'🌊 Elle est bien lourde',      dit:'Elle est bien lourde.' }
+    ], 'curious');
+
+    const { rc } = await declarerEtatCouche(etat, 'parole');
+    const liste = await mictionsDuJour();
+    liste.push({ t: new Date().toISOString(), venue, etat, src: 'parole', contredit: rc.verdict === 'contredit' });
+    try { await window.storage.set('miction:' + todayStr(), JSON.stringify(liste)); } catch(e) {}
+    await direRecoupement(rc, etat);
+
+    // une bascule qui se date sur le moment, pas le lendemain
+    if (venue === 'apres' && rc.verdict !== 'contredit') {
+      try {
+        if (await marquerJalon('premier_apres')) {
+          await imSay(bro(
+            '🌱 Et je le date : c\'est la toute première fois que tu me dis ça. Aujourd\'hui, ' + fmtTime(new Date().getHours()*60 + new Date().getMinutes()) + '. On y reviendra, toi et moi.',
+            'Première fois. Je le date. On y reviendra.'), 1000, 'moved');
+        }
+      } catch(e) {}
+    }
+
+    const n = liste.filter(x => !x.contredit).length;
+    if (n > 1) {
+      await imSay(bro(
+        'Ça fait ' + n + ' fois aujourd\'hui que tu me le dis. Je compte, moi. 🦊',
+        n + ' aujourd\'hui. Je compte.'), 800, 'neutral');
+    }
+
+    if (etat === 'sature') {
+      await imSay(bro(
+        'Bien lourde, alors on ne la garde pas pour tenir un horaire — ta peau passe avant. On la change ? 🦊',
+        'Lourde. Elle sort. Ta peau avant l\'horaire.'), 950, 'concern');
+      imSetActions([
+        { label:'🍼 On la change', onClick: async () => { imAddMe('On la change.'); try { startChange('check'); } catch(e) {} } },
+        ACT.retour(currentM)
+      ]);
+      return;
+    }
+    await imSay(bro(
+      'Alors on la garde, elle a encore de quoi faire. Tu n\'as rien d\'autre à faire que la laisser travailler. 💛',
+      'Tu la gardes. Elle a de la marge.'), 850, 'calm');
+    if (currentM) await imOfferHelp(currentM);
+  }
+
   async function renderDiaperState(lastChange) {
     const latest = await currentDiaperState(lastChange);
     if (!latest) return '<span class="lbl" style="font-size:11.5px;font-weight:700;color:var(--muted)">Statut inconnu — fais un check</span>';
@@ -4223,6 +4602,25 @@
     }
   };
 
+  /* Comment Foxy vit chaque type de vêtement, AUJOURD'HUI. Il les a tous
+     portés, il les porte encore : ce n'est pas un souvenir, c'est sa vie. */
+  const FOXY_VECU = {
+    gren_dos:    { f:'Moi, la fermeture dans le dos, je ne cherche même plus le curseur. Au début je tâtonnais derrière moi, maintenant je ne me pose plus la question : elle est fermée, et ma journée se passe dedans. C\'est tout.',
+                   b:'Moi, je ne cherche même plus le curseur. Elle est fermée. Ma journée se passe dedans.' },
+    gren_devant: { f:'Moi, en fermeture devant, je pourrais l\'ouvrir cent fois par jour. Je ne le fais jamais. Pas parce que je me retiens — parce que je n\'y pense plus du tout. C\'est ça, être habitué : l\'envie n\'est plus là.',
+                   b:'Moi, je pourrais l\'ouvrir cent fois. Je ne le fais jamais. L\'envie n\'est plus là.' },
+    keeper:      { f:'C\'est ma préférée pour la nuit. Je me glisse dedans, je la ferme, et je dors d\'une traite — le matin, je découvre ma couche lourde sans avoir rien senti de la nuit. 🦊',
+                   b:'Ma préférée pour la nuit. Le matin, ma couche est lourde et je n\'ai rien senti.' },
+    gren:        { f:'Une grenouillère, pour moi aujourd\'hui, ce ne sont plus des habits spéciaux : ce sont mes habits. Je fais tout dedans — mes jeux, ma sieste, même le ménage.',
+                   b:'Pour moi, ce sont juste mes habits. Je fais tout dedans.' },
+    romper:      { f:'Mon romper, je le mets les jours où je bouge beaucoup. Les pressions, je ne les entends même plus claquer, et ma couche reste bien en place toute la journée.',
+                   b:'Mon romper, les jours où je bouge. Les pressions, je ne les entends plus.' },
+    body:        { f:'Le body, je le mets sous mes vêtements quand je sors. Personne ne voit rien, et moi je sens ma couche à chaque pas. Au début ça me stressait ; aujourd\'hui, c\'est juste ma façon de m\'habiller le matin.',
+                   b:'Sous mes vêtements quand je sors. Personne ne voit rien. Moi je la sens à chaque pas.' },
+    cache:       { f:'Moi, je le mets surtout pour le bruit, quand je ne suis pas seul à la maison.', b:'Pour le bruit, quand je ne suis pas seul.' },
+    autre:       { f:'', b:'' }
+  };
+
   // Ce que le moment de la journée demande à la tenue
   function attenteMoment(nuit, m) {
     if (nuit) {
@@ -4280,6 +4678,9 @@
     lignes.push(bro('Ta tenue du moment, c\'est <b>' + nom + '</b> — ', 'Ta tenue : <b>' + nom + '</b> — ') + dit(t.quoi));
     lignes.push(dit(t.role));
     if (dit(t.plus)) lignes.push(dit(t.plus));
+    // son vécu d'aujourd'hui avec ce type de vêtement
+    const vecu = FOXY_VECU[typeTenue(nom)];
+    if (vecu && dit(vecu)) lignes.push(dit(vecu));
     lignes.push(attenteMoment(nuit, m));
 
     // jusqu'à quand : la tenue suit la même horloge que la couche
@@ -4311,6 +4712,519 @@
   }
 
 
+
+  /* ============================================================
+     COMMENT ME COMPORTER
+     Le programme disait quoi porter et quand, jamais comment vivre
+     dedans. Ce volet comble ça : marcher, s'asseoir, laisser venir,
+     boire, dormir, s'occuper.
+
+     Le fil rouge est toujours le même : NE PAS COMPENSER. Tout ce que
+     tu fais pour masquer ou corriger la couche (serrer les jambes,
+     marcher droit, la remonter, t'asseoir de biais) coûte de
+     l'attention — et cette attention, c'est du contrôle. La laisser
+     décider de ta posture, c'est la sentir sans effort, tout le temps.
+     L'inverse est vrai aussi : on n'exagère rien. Jouer un rôle, c'est
+     encore de la maîtrise, et tes articulations n'aiment pas ça.
+
+     Chaque conseil s'adapte à ce qui est vrai maintenant : couche de
+     jour ou de nuit, sèche ou mouillée, et la tenue que tu portes.
+     ============================================================ */
+
+  async function contexteCorps() {
+    const now = new Date();
+    const ctx = { nuit: couchageNuit(now), etat: null, type: 'autre', pieds: false, m: now.getHours()*60 + now.getMinutes() };
+    try { ctx.etat = await currentDiaperState(await lastChangeTime(2)); } catch(e) {}
+    try {
+      const o = await getOutfit(todayStr());
+      const att = o ? tenueAttendue(o, now, ctx.nuit) : null;
+      if (att && att.nom) {
+        ctx.type = typeTenue(att.nom);
+        // les grenouillères couvrent les pieds : semelles glissantes
+        ctx.pieds = ['gren_dos','gren_devant','keeper','gren'].includes(ctx.type);
+      }
+    } catch(e) {}
+    return ctx;
+  }
+
+  // Chaque sujet : ce que Foxy dit (selon le contexte) et, pour certains,
+  // une question pour que tu essaies tout de suite et lui dises ce que ça fait.
+  const COMPORTEMENT = {
+    marcher: {
+      label: '🚶 Comment marcher',
+      dire: (c) => [
+        bro('Le plus important : ne corrige pas ta démarche. Avec une couche entre les cuisses, tes jambes s\'écartent un peu et ton pas raccourcit — c\'est juste mécanique. Le réflexe de tout le monde, c\'est de compenser : serrer, marcher droit, faire comme si de rien n\'était. Ne le fais pas. 🦊',
+            'Tu ne corriges pas ta démarche. La couche écarte tes jambes, ton pas raccourcit. Tu laisses faire. Tu ne compenses pas.'),
+        bro('Pourquoi ? Parce que compenser, ça demande de l\'attention, en continu. Et cette attention-là, c\'est du contrôle : tu passes ta journée à cacher la couche à toi-même. Si tu la laisses décider de ton pas, tu la sens à chaque foulée, sans effort. C\'est le rappel le moins cher qui existe.',
+            'Compenser, c\'est la cacher à toi-même. Laisse-la décider de ton pas : tu la sentiras à chaque foulée, sans effort.'),
+        c.nuit
+          ? bro('Avec ta couche de nuit, l\'écart est plus grand, et ça te donne une démarche un peu dandinante. C\'est normal — c\'est elle, pas toi. Laisse-la.',
+                'Couche de nuit : ça dandine. C\'est elle. Laisse.')
+          : bro('Avec ta couche de jour, c\'est discret : un pas un tout petit peu plus large, c\'est tout. Remarque-le, simplement.',
+                'Couche de jour : le pas s\'élargit à peine. Remarque-le.'),
+        (c.etat === 'mouille' || c.etat === 'sature')
+          ? bro('Et comme elle est mouillée, elle pèse et elle descend un peu. Ne la remonte pas en marchant — ce petit geste de la main, c\'est un geste de contrôle : vérifier, rectifier, cacher. Laisse-la où elle est.',
+                'Elle est mouillée, elle descend. Tu ne la remontes pas. Ta main reste loin.')
+          : '',
+        c.pieds
+          ? bro('Par contre, en grenouillère à pieds : attention au carrelage et aux escaliers, les semelles glissent. Main sur la rampe, toujours. Ça, ce n\'est pas négociable.',
+                'Grenouillère à pieds : ça glisse. Main sur la rampe dans les escaliers.')
+          : '',
+        bro('Et n\'exagère pas pour autant. Pas de dandinement forcé pendant des heures : tes hanches et tes genoux ne sont pas faits pour ça, et jouer un rôle, c\'est encore une façon de tout maîtriser. On laisse faire, on ne joue pas.',
+            'N\'exagère rien. Jouer un rôle, c\'est encore contrôler, et tes hanches paieront. Tu laisses faire, c\'est tout.'),
+        bro('Dehors, c\'est pareil en plus discret : tu ne joues rien et tu ne caches rien de plus que ce que tes habits cachent déjà. Personne ne regarde ta démarche autant que tu le crois.',
+            'Dehors, rien à jouer, rien à cacher de plus. Personne ne regarde.')
+      ],
+      question: {
+        q: () => bro('Essaie, là : fais une dizaine de pas dans la pièce sans rien corriger. Qu\'est-ce que tu remarques ?', 'Dix pas. Sans corriger. Qu\'est-ce que tu remarques ?'),
+        choix: [
+          { k:'sens', label:'✨ Je la sens à chaque pas', rep: () => bro('C\'est exactement ça. Chaque pas est un petit rappel qui ne te coûte rien. Au bout de quelques jours, tu ne le remarqueras même plus — et c\'est là que ça sera entré. 🦊', 'Voilà. Un rappel à chaque pas, gratuit. Bientôt tu ne le remarqueras plus.') },
+          { k:'compense', label:'😬 Je me surprends à compenser', rep: () => bro('Normal, c\'est un réflexe de plusieurs années. Ne te corrige pas en force, sinon tu remplaces un contrôle par un autre. Remarque-le, relâche, et continue. À force de le remarquer, tu arrêteras de le faire.', 'Normal. Tu ne forces pas : tu remarques, tu relâches, tu continues.') },
+          { k:'gene', label:'😣 Ça frotte ou ça gêne', rep: () => bro('Ça, ce n\'est pas de l\'immersion, c\'est un réglage. Barrières bien sorties aux cuisses, adhésifs du bas un peu plus serrés que ceux du haut. Et si ça frotte vraiment, on refait le change : ta peau d\'abord, toujours.', 'Réglage : barrières sorties, adhésifs du bas plus serrés. Si ça frotte vraiment, on change. Ta peau d\'abord.'), change: true },
+          { k:'rien', label:'🤷 Rien de spécial', rep: () => bro('Ça viendra. Garde juste en tête de ne pas compenser, et observe-toi dans la journée. Tu verras.', 'Ça viendra. Ne compense pas. Observe.') }
+        ]
+      }
+    },
+
+    asseoir: {
+      label: '🪑 Comment m\'asseoir',
+      dire: (c) => [
+        bro('Assieds-toi franchement, d\'un coup, sans te soulever d\'un côté pour l\'épargner. Le crissement, la pression, la chaleur qui se répand quand elle est mouillée — c\'est tout ça qui l\'ancre. S\'asseoir de biais pour ne pas la sentir, c\'est l\'éviter.',
+            'Tu t\'assieds franchement. Pas de biais. Le bruit, la pression, la chaleur — tu les prends.'),
+        bro('Quand tu peux, préfère le sol au canapé : en tailleur, ou les jambes écartées devant toi. Deux raisons. D\'abord la couche travaille mieux à plat : sur une chaise, cuisses serrées, le matelas se plie et le liquide file vers les bords — c\'est comme ça qu\'on fuit assis. Ensuite, au sol, tu vois tout d\'en bas. Les deux vont ensemble. 🦊',
+            'Le sol plutôt que le canapé. À plat, la couche absorbe ; pliée sur une chaise, elle fuit. Et d\'en bas, tu te sens à ta taille.'),
+        c.nuit
+          ? bro('Avec ta couche de nuit, les jambes serrées, de toute façon, tu n\'y arriveras pas vraiment. Ne lutte pas contre ça.', 'Couche de nuit : jambes serrées, impossible. Ne lutte pas.')
+          : '',
+        bro('Pour te relever, pas d\'élan brusque : passe par quatre pattes, ou appuie-toi sur un meuble. Avec une couche épaisse, ton centre de gravité bouge un peu et l\'équilibre change. Mieux vaut le savoir que le découvrir.',
+            'Pour te relever : quatre pattes ou un appui. Ton équilibre change avec l\'épaisseur.')
+      ],
+      question: {
+        q: () => bro('Et toi, tu t\'assieds où, le plus souvent, pendant la journée ?', 'Tu t\'assieds où, d\'habitude ?'),
+        choix: [
+          { k:'chaise', label:'🪑 Sur une chaise, au bureau', rep: () => bro('Alors au moins, pense aux genoux écartés sous le bureau — c\'est là que la couche se plie le plus. Et à chaque pause, cinq minutes au sol, même juste pour boire. 🦊', 'Genoux écartés sous le bureau. Et à chaque pause, cinq minutes au sol.') },
+          { k:'canape', label:'🛋️ Sur le canapé', rep: () => bro('Le canapé, ça va, si tu t\'y enfonces vraiment au lieu de t\'asseoir au bord. Mieux encore : glisse-toi au sol, dos contre le canapé. Tu verras la différence.', 'Enfonce-toi, pas au bord. Mieux : au sol, dos contre le canapé.') },
+          { k:'sol', label:'🧸 Déjà au sol', rep: () => bro('Parfait, tu as pris le bon pli. Garde-le. 💛', 'Bien. Garde ça.') }
+        ]
+      }
+    },
+
+    lacher: {
+      label: '💧 Quand ça vient',
+      dire: (c) => [
+        bro('Celui-là, c\'est le plus important de tous. Quand tu sens que ça vient : ne t\'arrête pas. Ne te fige pas, ne te penche pas en avant, ne serre pas les cuisses, ne te mets pas « en position ». Continue exactement ce que tu étais en train de faire.',
+            'Quand ça vient : tu ne t\'arrêtes pas. Pas de pause, pas de position. Tu continues ce que tu faisais.'),
+        bro('Parce que s\'arrêter, se mettre debout immobile, attendre — c\'est le rituel des toilettes, sans les toilettes. Ton corps apprend « je m\'arrête, et ensuite je relâche », et il continue de te demander la permission. Ce qu\'on veut, c\'est que ça parte pendant que tu marches, que tu parles, que tu joues. C\'est ça qui sépare le relâchement de la décision. Moi, c\'est le jour où j\'ai réussi ça que tout a basculé. 🦊',
+            'T\'arrêter, c\'est le rituel des toilettes. Ton corps continue de demander ta permission. Ça doit partir pendant que tu bouges. C\'est ça qui défait le réflexe.'),
+        bro('Si tu es assis, reste assis. Si tu es debout, reste debout. Et si ça ne vient pas, ne pousse pas : expire lentement, longuement, comme un grand soupir, et relâche le ventre. Le relâchement suit l\'expiration, pas l\'effort.',
+            'Assis, tu restes assis. Debout, tu restes debout. Ça ne vient pas ? Tu ne pousses pas. Tu expires, longtemps. Ça suit.'),
+        bro('Et après : pas de main pour vérifier. Tu sais qu\'elle travaille. Tu me le dis avec le bouton 💧, et c\'est tout.',
+            'Après : pas de main. Tu me le dis avec 💧. C\'est tout.')
+      ],
+      question: {
+        q: () => bro('La dernière fois, qu\'est-ce que tu as fait au moment où ça venait ?', 'La dernière fois, tu as fait quoi au moment où ça venait ?'),
+        choix: [
+          { k:'stop', label:'🧍 Je me suis arrêté', rep: () => bro('C\'est ce que presque tout le monde fait, moi le premier. La prochaine fois, fais juste un pas de plus. Juste un. Puis deux. C\'est comme ça que ça se défait, un pas à la fois.', 'La prochaine fois : un pas de plus. Puis deux.') },
+          { k:'continue', label:'🚶 J\'ai continué ce que je faisais', rep: () => bro('Alors tu as déjà fait le plus dur. Sérieusement. Continue comme ça, et un jour tu ne sauras même plus quand c\'est parti. 💛', 'Tu as fait le plus dur. Continue.') },
+          { k:'rien', label:'😳 Je n\'ai rien remarqué sur le coup', rep: () => bro('Alors il n\'y a rien à corriger : c\'est exactement là où on voulait arriver. 🦊', 'Rien à corriger. C\'est l\'objectif.') }
+        ]
+      }
+    },
+
+    biberon: {
+      label: '🍼 Comment boire mon biberon',
+      dire: (c) => [
+        bro('Calé contre un coussin, à moitié allongé, pas assis droit à table. Tiens-le à deux mains, et tète — ne dévisse pas la tétine pour aller plus vite.',
+            'À moitié allongé, contre un coussin. Deux mains. Tu tètes. Tu ne dévisses pas.'),
+        bro('Parce que le biberon qu\'on tète prend du temps, et c\'est justement ce temps qui compte : dix minutes pendant lesquelles tu ne fais rien d\'autre. Boire vite, droit, en regardant ton téléphone, c\'est boire comme un adulte pressé. Ça hydrate, mais ça ne fait rien d\'autre.',
+            'Téter prend du temps. C\'est le but. Boire vite, droit, écran à la main, ça hydrate et c\'est tout.'),
+        bro('Une seule limite : pas complètement à plat sur le dos. Tête et épaules relevées, sinon tu risques de mal avaler. À moitié allongé, c\'est la bonne position.',
+            'Pas à plat sur le dos : tête relevée, sinon tu avales de travers.')
+      ]
+    },
+
+    dormir: {
+      label: '😴 Comment me coucher',
+      dire: (c) => [
+        bro('Sur le dos ou sur le côté, jambes libres. ' + (c.nuit ? 'Surtout pas sur le ventre avec ta couche de nuit : tu écrases le matelas, et c\'est par l\'avant qu\'elle fuit. Sur le côté, c\'est la position où elle tient le mieux.' : 'Évite le ventre : tu écrases le matelas, et ça fuit par l\'avant.'),
+            'Sur le dos ou le côté. Pas sur le ventre : ça fuit par l\'avant.'),
+        bro('Le doudou dans les bras, pas posé à côté. Des mains occupées, ce sont des mains qui ne vont pas vérifier — c\'est tout bête et ça marche.',
+            'Doudou dans les bras. Des mains occupées ne vont pas vérifier.'),
+        bro('Et rappelle-toi : ton sommeil reste libre, toujours. Rien d\'attaché, rien de verrouillé pour dormir, jamais. Ça, ce n\'est pas moi qui le décide, c\'est une des quatre choses qui ne bougent pas. 💛',
+            'Sommeil libre. Rien d\'attaché, rien de verrouillé. Jamais.')
+      ]
+    },
+
+    ressentir: {
+      label: '🌡️ Ressentir ma couche',
+      dire: (c) => [
+        bro('Ressentir, ce n\'est pas surveiller. Surveiller, c\'est aller chercher : la main qui vérifie, la tête qui se demande « est-ce qu\'elle est mouillée ? ». Ressentir, c\'est laisser arriver ce qui vient tout seul, et ne rien en faire. 🦊',
+            'Ressentir, ce n\'est pas surveiller. Tu ne vas rien chercher. Tu laisses arriver ce qui vient, et tu n\'en fais rien.'),
+        bro('Et c\'est ça qui fait lâcher prise. Pas de penser moins à ta couche — d\'arrêter de la contrôler. Quand tu accueilles ce que tu sens au lieu de le vérifier, ton corps comprend qu\'il n\'y a rien à surveiller. Et un corps qui n\'a rien à surveiller, il relâche.',
+            'Accueillir au lieu de vérifier : ton corps comprend qu\'il n\'y a rien à surveiller. Alors il relâche.'),
+        (c.etat === 'mouille' || c.etat === 'sature')
+          ? bro('Là, elle est mouillée. Sens la chaleur, et comme elle tiédit doucement. Le poids, un peu plus bas qu\'avant. Le gel, plus souple, qui a épousé ta forme. Tu n\'as rien à faire de tout ça : tu le remarques, et tu reviens à ce que tu faisais.',
+                'Elle est mouillée. La chaleur qui tiédit. Le poids plus bas. Le gel qui a pris ta forme. Tu remarques. Tu reviens à ce que tu faisais.')
+          : bro('Là, elle est ' + (c.nuit ? 'épaisse et ' : '') + 'sèche. Sens le volume entre tes cuisses, la taille qui te tient, le petit bruit quand tu t\'assieds ou que tu te tournes. Trois respirations, juste ça. Pas plus.',
+                'Elle est sèche. Le volume entre tes cuisses. La taille qui te tient. Le bruit quand tu bouges. Trois respirations.'),
+        bro('Et le moment où ça part, c\'est celui qui compte le plus : reste avec. La chaleur qui se répand, d\'où elle part, jusqu\'où elle va. Ça dure quelques secondes. C\'est exactement ce moment-là que ton corps doit apprendre à trouver normal — et il ne l\'apprend que si tu ne le fuis pas.',
+            'Quand ça part, tu restes avec : la chaleur, d\'où elle part, jusqu\'où elle va. C\'est ce moment que ton corps doit trouver normal.'),
+        bro('Une limite, une seule : si une sensation devient désagréable — ça tire, ça pique, ça chauffe trop — ce n\'est plus de l\'immersion, c\'est ta peau qui te parle. Là, on change. 💛',
+            'Si ça tire, pique ou chauffe : c\'est ta peau. On change.')
+      ],
+      question: {
+        q: () => bro('Essaie maintenant : ferme les yeux, trois respirations lentes. Qu\'est-ce qui arrive en premier ?', 'Yeux fermés. Trois respirations. Qu\'est-ce qui vient en premier ?'),
+        choix: [
+          { k:'chaleur', label:'🌡️ La chaleur', rep: () => bro('C\'est souvent celle-là qui arrive la première, oui. C\'est aussi celle qui détend le plus. Retiens où tu l\'as sentie — tu la retrouveras plus vite la prochaine fois. 🦊', 'La chaleur. C\'est elle qui détend le plus. Retiens où.') },
+          { k:'volume', label:'🪶 L\'épaisseur, le volume', rep: () => bro('C\'est le plus constant : il est là même quand tu n\'y penses pas. Tu viens juste d\'apprendre à le remarquer volontairement. Bientôt, ça se fera tout seul.', 'Le volume, toujours là. Tu apprends à le remarquer. Bientôt ce sera automatique.') },
+          { k:'bruit', label:'🔊 Le bruit quand je bouge', rep: () => bro('Ah, le petit crissement ! C\'est celui qui me faisait le plus d\'effet au début, moi. Ne cherche pas à l\'étouffer : c\'est un rappel gratuit, à chaque mouvement.', 'Le crissement. Tu ne l\'étouffes pas. C\'est un rappel à chaque mouvement.') },
+          { k:'flou', label:'🤔 Rien de très net', rep: () => bro('C\'est normal, ça s\'apprend. Tu n\'as pas l\'habitude d\'écouter cette partie-là de toi. Refais-le deux ou trois fois dans la journée, sans forcer — ça va se préciser.', 'Ça s\'apprend. Deux ou trois fois dans la journée. Sans forcer.') }
+        ]
+      }
+    },
+
+    tetine: {
+      label: '😌 Ma tétine et mon doudou',
+      dire: (c) => [
+        bro('La tétine, c\'est l\'outil de régression le plus simple qui existe. Elle occupe ta bouche, elle ralentit ta respiration, et elle coupe la parole. Tu ne peux pas téter tranquillement et réfléchir en même temps à ta journée d\'adulte — essaie, tu verras. 🦊',
+            'La tétine occupe ta bouche, ralentit ton souffle, coupe ta parole. Tu ne peux pas téter et penser à ta journée d\'adulte en même temps.'),
+        bro('Et ce n\'est pas qu\'une image : téter, c\'est un réflexe très ancien qui fait baisser la tension. Un corps détendu relâche plus facilement. C\'est pour ça qu\'elle va si bien avec tes fenêtres de régression, et avec les moments où on veut que ça vienne tout seul.',
+            'Téter fait baisser la tension. Un corps détendu relâche. C\'est pour ça qu\'elle va avec tes fenêtres de régression.'),
+        bro('Tète doucement, sans la mordiller, et laisse-la bouger toute seule au rythme de ta respiration. Si tu l\'enlèves pour parler, remets-la tout de suite après — c\'est ce petit geste répété, cent fois, qui finit par l\'installer.',
+            'Tu tètes doucement, tu ne mordilles pas. Tu l\'enlèves pour parler, tu la remets aussitôt. Cent fois.'),
+        bro('Le doudou, garde-le avec toi, pas rangé sur une étagère. Dans les bras quand tu es assis, sous le bras quand tu te déplaces. Il sert à deux choses : occuper tes mains pour qu\'elles n\'aillent pas vérifier, et te donner un repère — tant qu\'il est là, tu es dans ton espace. Moi, je range toujours le mien à gauche. Sinon je dors mal. 💛',
+            'Le doudou avec toi, jamais rangé. Il occupe tes mains et il marque ton espace. Tant qu\'il est là, tu y es.'),
+        bro('Et pour dormir : une tétine sans rien qui l\'attache à toi, ni au cou ni au pyjama. Libre de tomber, toujours. Ça fait partie des quatre choses qui ne bougent jamais.',
+            'Pour dormir : rien qui l\'attache. Libre de tomber. Toujours.')
+      ],
+      question: {
+        q: () => bro('Et là, maintenant, ta tétine, elle est où ?', 'Ta tétine, là, maintenant ?'),
+        choix: [
+          { k:'bouche', label:'😌 En bouche', rep: () => bro('Parfait. Garde-la, et laisse ta respiration ralentir toute seule. Tu vois ? Déjà un peu plus loin de tout. 🦊', 'Bien. Garde-la.') },
+          { k:'portee', label:'👌 À portée de main', rep: () => bro('Alors mets-la. Juste pour les dix prochaines minutes, pas plus — et tu me diras si tu as eu envie de l\'enlever.', 'Mets-la. Dix minutes.') },
+          { k:'rangee', label:'📦 Rangée ailleurs', rep: () => bro('Va la chercher. Oui, maintenant. Ça fait partie du geste : une tétine qu\'on doit aller chercher, on ne la prend jamais. Une tétine qui traîne à côté de toi, si.', 'Va la chercher. Une tétine rangée, on ne la prend jamais.') },
+          { k:'aucune', label:'🤷 Je n\'en ai pas sous la main', rep: () => bro('Alors le conseil qui m\'a le plus servi : une tétine par pièce où tu passes du temps. Moi j\'en garde même une de secours sous l\'oreiller. Tant qu\'il faut la chercher, elle ne fait pas partie de ta journée.', 'Une tétine par pièce. Tant qu\'il faut la chercher, elle n\'existe pas.') }
+        ]
+      }
+    },
+
+    quatrepattes: {
+      label: '🧸 À quatre pattes et jouer',
+      dire: (c) => [
+        bro('Pendant tes fenêtres de régression, chez toi, déplace-toi à quatre pattes. Pas pour faire joli : parce que ça change tout le reste. À quatre pattes, ta couche est à plat, elle frotte à chaque mouvement, tu la sens sans avoir à y penser. Et tu ne peux plus te lever d\'un bond pour « régler un truc vite fait » — tu restes à ta place. 🦊',
+            'En fenêtre de régression, chez toi : à quatre pattes. La couche à plat, sentie à chaque mouvement. Et tu ne te lèves plus d\'un bond pour régler un truc.'),
+        bro('C\'est la hauteur qui fait tout. D\'en bas, les meubles sont grands, les choses sont loin, il faut aller les chercher. Ton corps se met à l\'échelle de ce que tu portes, et ta tête suit toute seule.',
+            'D\'en bas, tout est grand et loin. Ton corps se met à l\'échelle. Ta tête suit.'),
+        bro('Protège tes genoux : un tapis épais, un plaid plié, ou des genouillères si ton sol est dur. Et dès que ça tire dans les genoux ou les poignets, tu t\'assieds. On ne se fait pas mal pour l\'immersion.',
+            'Tapis épais ou genouillères. Genoux ou poignets qui tirent : tu t\'assieds.'),
+        bro('Et joue vraiment. Des cubes, un puzzle facile, un coloriage, un dessin animé. Des choses simples, qui ne demandent aucune compétence d\'adulte — c\'est leur simplicité qui fait taire la partie de toi qui organise, qui planifie, qui juge.',
+            'Joue vraiment. Simple. Rien qui demande une compétence d\'adulte. C\'est ça qui fait taire la partie de toi qui organise.'),
+        bro('Tes mains, surtout. C\'est elles qui te trahissent : elles vont vérifier, tirer, ajuster, sans te demander. Donne-leur un jouet, un crayon, ton doudou. Et pas d\'écran d\'adulte à côté : un seul coup d\'œil à tes messages et tu es ressorti.',
+            'Occupe tes mains. Pas d\'écran d\'adulte : un coup d\'œil à tes messages et tu es ressorti.'),
+        bro('Le temps, laisse-le filer. Pas de minuteur, pas d\'heure à surveiller — c\'est moi qui te rappellerai quand c\'est fini. 💛',
+            'Pas de minuteur. C\'est moi qui te rappelle quand c\'est fini.')
+      ],
+      question: {
+        q: () => bro('Dis-moi, qu\'est-ce qui te détend le plus, toi, quand tu joues ?', 'Qu\'est-ce qui te détend le plus ?'),
+        choix: [
+          { k:'construire', label:'🧱 Construire, les puzzles', rep: () => bro('Noté. Je te le proposerai à tes prochaines fenêtres. Garde tes cubes ou ton puzzle au sol, pas dans un placard : ce qui est rangé ne sert jamais. 🦊', 'Noté. Laisse-les au sol, pas rangés.') },
+          { k:'colorier', label:'🖍️ Colorier, dessiner', rep: () => bro('Noté ! Je te le proposerai. Colorie sans chercher à bien faire — dépasser, c\'est permis. C\'est même un peu le principe.', 'Noté. Tu dépasses si tu veux. Tu ne cherches pas à bien faire.') },
+          { k:'dessinanime', label:'📺 Les dessins animés', rep: () => bro('Noté. Allongé au sol devant, tétine en bouche, doudou dans les bras : c\'est ma combinaison préférée, à moi aussi. Juste une chose : sur la télé, pas sur ton téléphone — sinon tes notifications te récupèrent.', 'Noté. Sur la télé, pas ton téléphone.') },
+          { k:'doudou', label:'🧸 Rien, juste le doudou', rep: () => bro('C\'est peut-être le plus régressif de tout, en fait : ne rien faire du tout. Noté. Je te proposerai simplement de te poser. 💛', 'Ne rien faire. Noté.') }
+        ]
+      }
+    }
+  };
+
+  /* Foxy ne fait pas que conseiller : il le vit, là, en même temps que toi.
+     Une ligne par sujet, construite depuis son état réel du moment. */
+  const MOI_COMPORTEMENT = {
+    marcher: (j) => j.etat === 'sec'
+      ? { f:'Regarde-moi, là : je viens d\'être changé, elle est encore épaisse et toute raide — je marche les jambes un peu écartées, et je ne corrige rien. Ça ne me demande aucun effort, c\'est juste ma démarche.', b:'Moi, là : couche fraîche, jambes écartées. Je ne corrige rien.' }
+      : { f:'Regarde-moi, là : ma couche est ' + (j.etat === 'lourde' ? 'bien lourde' : 'mouillée') + ', elle est descendue un peu, je dandine — et je n\'y pense même plus. Tu vois, ça ne demande rien. 🦊', b:'Moi, là : couche ' + (j.etat === 'lourde' ? 'lourde' : 'mouillée') + ', je dandine. Je n\'y pense plus.' },
+    asseoir: (j) => ({ f:'Moi, je m\'assieds par terre presque tout le temps. Le canapé, je n\'y pense même plus — c\'est venu tout seul, au bout de quelques semaines.', b:'Moi, par terre. Le canapé, je n\'y pense plus.' }),
+    lacher: (j) => j.mictions
+      ? { f:'Chez moi, aujourd\'hui, c\'est parti ' + (['','une','deux','trois','quatre','cinq'][j.mictions] || j.mictions) + ' fois depuis mon dernier change, et je ne l\'ai ' + (j.remarquees ? 'senti partir qu\'une fois' : 'senti partir aucune fois') + '. Je ne m\'arrête plus, je ne pousse plus — je ne m\'en occupe plus du tout. C\'est vers là qu\'on va, toi et moi.', b:'Moi, aujourd\'hui : ' + j.mictions + ' fois, ' + (j.remarquees ? 'une seule' : 'aucune') + ' sentie. Je ne m\'en occupe plus.' }
+      : { f:'Moi, je viens d\'être changé, alors rien pour l\'instant. Mais ça viendra pendant que je joue, et je ne le remarquerai sans doute pas. C\'est ça, être habitué.', b:'Moi, couche fraîche. Ça viendra pendant que je joue. Je ne le remarquerai pas.' },
+    ressentir: (j) => j.etat === 'sec'
+      ? { f:'Moi, là, maintenant : elle est fraîche, je sens son épaisseur quand je bouge sur mon coussin. Je l\'ai remarqué parce qu\'on en parle — tout à l\'heure, je n\'y pensais pas du tout.', b:'Moi : fraîche, épaisse. Je le remarque parce qu\'on en parle.' }
+      : { f:'Moi, là, maintenant : elle est tiède, un peu lourde, le gel a pris ma forme. Je le sens parce que tu m\'en parles — sinon, je l\'avais complètement oubliée. C\'est ça qu\'on cherche : la sentir quand on veut, l\'oublier le reste du temps.', b:'Moi : tiède, lourde. Je l\'avais oubliée. Tu la sens quand tu veux, tu l\'oublies le reste du temps.' },
+    tetine: (j) => ({ f:'J\'ai la mienne en bouche, là, pendant qu\'on parle. Enfin — je l\'ai enlevée pour te répondre. Tu vois ? Je la remets. 🦊', b:'La mienne est en bouche. Enlevée pour te répondre. Remise.' }),
+    quatrepattes: (j) => ({ f:'De mon côté, à la maison, je suis au sol presque toute la journée. Mes cubes sont sous la table basse, jamais rangés, et je me déplace à quatre pattes sans même y penser.', b:'Moi, au sol toute la journée. À quatre pattes sans y penser.' }),
+    biberon: (j) => ({ f:'Le mien, je le bois toujours en trois fois, calé contre mon gros coussin. Jamais d\'un coup. C\'est mon petit rituel.', b:'Le mien, en trois fois, contre mon coussin.' }),
+    dormir: (j) => ({ f:'Moi, sur le côté, doudou à gauche, tétine libre. Toujours. Et le matin, ma couche est lourde et je n\'ai rien senti de la nuit.', b:'Moi : sur le côté, doudou à gauche. Le matin, lourde, rien senti.' })
+  };
+
+  async function conseilComportement(sujet) {
+    const s = COMPORTEMENT[sujet];
+    if (!s) return false;
+    const c = await contexteCorps();
+    for (const l of s.dire(c)) { if (l) await imSay(l, 950, 'teach'); }
+    // et lui, là, maintenant
+    try {
+      const moi = MOI_COMPORTEMENT[sujet] && MOI_COMPORTEMENT[sujet](foxyJournee());
+      if (moi) await imSay(bro(moi.f, moi.b), 950, 'happy');
+    } catch(e) {}
+
+    // il te fait essayer, et il écoute ce que ça donne
+    if (s.question) {
+      const k = await imDemander(s.question.q(), s.question.choix.map(x => ({ k:x.k, label:x.label })), 'curious');
+      const ch = s.question.choix.find(x => x.k === k);
+      if (ch) {
+        await imSay(ch.rep(), 950, k === 'gene' || k === 'stop' ? 'calm' : 'proud');
+        await noterPratique({ sujet, k });
+        // ce qui te détend le plus : Foxy s'en sert pour ses invitations
+        if (sujet === 'quatrepattes') await ecrireStock('reg:pref', k);
+        if (ch.change) {
+          imSetActions([ ACT.changer(currentM), ACT.retour(currentM) ]);
+          return true;
+        }
+      }
+    }
+    imSetActions(menuComportement().concat([ACT.retour(currentM)]));
+    return true;
+  }
+
+  const ORDRE_COMPORTEMENT = ['ressentir','lacher','tetine','quatrepattes','marcher','asseoir','biberon','dormir'];
+  function menuComportement() {
+    return ORDRE_COMPORTEMENT.filter(id => COMPORTEMENT[id]).map(id => ({
+      label: COMPORTEMENT[id].label,
+      onClick: async () => { imAddMe(COMPORTEMENT[id].label.replace(/^\S+\s/, '')); await conseilComportement(id); }
+    }));
+  }
+
+  // Le sujet qui colle le mieux à ce que tu es en train de vivre
+  function sujetDuMoment(etat, cur) {
+    const m = new Date().getHours()*60 + new Date().getMinutes();
+    if (m >= SIESTE[0] && m < SIESTE[1]) return 'dormir';
+    if (m >= 22*60 || m < 7*60) return 'dormir';
+    if (etat === 'sec') return 'lacher';
+    if (cur && /biberon/i.test(cur.act || '')) return 'biberon';
+    if (cur && /régression|calme|détente/i.test(cur.act || '')) return 'quatrepattes';
+    return 'marcher';
+  }
+
+  /* ============================================================
+     FENÊTRES DE RÉGRESSION — Foxy propose, puis revient demander
+     Les deux fenêtres existaient dans le planning (12h–13h, 20h–22h)
+     mais rien ne s'y passait, sauf la contention en mode intensif.
+     Foxy y propose maintenant une vraie scène — tétine, doudou, au sol,
+     l'activité qui te détend — avec UNE consigne sur laquelle se
+     concentrer, qui tourne d'une fenêtre à l'autre. Une vingtaine de
+     minutes plus tard, il revient demander comment ça s'est passé ;
+     si ça n'a pas marché, il demande ce qui t'a retenu.
+     Il propose : refuser n'est jamais une entorse.
+     ============================================================ */
+  const FENETRES_REG = [ { id:'midi', de:12*60, a:13*60, nom:'de midi' }, { id:'soir', de:20*60, a:22*60, nom:'du soir' } ];
+  const FOCUS_REG = ['tetine', 'ressentir', 'quatrepattes'];
+
+  function fenetreRegression(now) {
+    const d = now || new Date();
+    const m = d.getHours()*60 + d.getMinutes();
+    return FENETRES_REG.find(f => m >= f.de && m < f.a) || null;
+  }
+  async function lireStock(k, def) {
+    try { const r = await window.storage.get(k); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
+    return def;
+  }
+  async function ecrireStock(k, v) { try { await window.storage.set(k, JSON.stringify(v)); } catch(e) {} }
+
+  async function noterPratique(entree) {
+    const cle = 'posture:' + todayStr();
+    const l = await lireStock(cle, []);
+    l.push(Object.assign({ t: new Date().toISOString() }, entree));
+    await ecrireStock(cle, l);
+  }
+
+  // La consigne tourne : jour de l'année + fenêtre, pour ne pas toujours
+  // retomber sur la même.
+  function focusDuJour(fenetre) {
+    const d = new Date();
+    const jour = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000);
+    return FOCUS_REG[(jour * 2 + (fenetre.id === 'soir' ? 1 : 0)) % FOCUS_REG.length];
+  }
+
+  const ACTIVITE_PREF = {
+    construire:  { f:'tes cubes ou ton puzzle, par terre', b:'tes cubes, par terre' },
+    colorier:    { f:'ton coloriage, sans chercher à bien faire', b:'ton coloriage' },
+    dessinanime: { f:'un dessin animé sur la télé, allongé devant', b:'un dessin animé, allongé devant' },
+    doudou:      { f:'rien du tout — juste te poser avec ton doudou', b:'rien. Toi et ton doudou' }
+  };
+  const CONSIGNE_REG = {
+    tetine:       { f:'Et ta seule consigne, pour cette fois : tu ne retires pas ta tétine. Si tu l\'enlèves, tu la remets tout de suite. C\'est tout.',
+                    b:'Consigne : ta tétine ne quitte pas ta bouche. Enlevée, remise aussitôt.' },
+    ressentir:    { f:'Et ta seule consigne, pour cette fois : sentir ta couche. Pas la vérifier — la sentir. La chaleur, le volume, le bruit. Et rien d\'autre.',
+                    b:'Consigne : tu sens ta couche. Tu ne la vérifies pas.' },
+    quatrepattes: { f:'Et ta seule consigne, pour cette fois : tu ne te relèves pas. Tout ce dont tu as besoin, tu y vas à quatre pattes. Genoux protégés, hein.',
+                    b:'Consigne : tu ne te relèves pas. À quatre pattes pour tout. Genoux protégés.' }
+  };
+
+  async function inviterRegression(fenetre) {
+    const focus = focusDuJour(fenetre);
+    const pref = await lireStock('reg:pref', null);
+    const act = pref && ACTIVITE_PREF[pref];
+    await imSay(bro(
+      'Hé. C\'est ta fenêtre de régression ' + fenetre.nom + '. 🦊',
+      'Fenêtre de régression ' + fenetre.nom + '.'), 800, 'happy');
+    await imSay(bro(
+      'Je te propose : tétine en bouche, doudou avec toi, et tu descends au sol. ' + (act ? 'Et ' + act.f + '.' : 'Et tu fais quelque chose de simple, qui ne demande rien à ta tête d\'adulte.'),
+      'Tétine. Doudou. Au sol. ' + (act ? act.b.charAt(0).toUpperCase() + act.b.slice(1) + '.' : 'Quelque chose de simple.')), 950, 'teach');
+    await imSay(bro(CONSIGNE_REG[focus].f, CONSIGNE_REG[focus].b), 950, 'calm');
+    await imSay(bro(
+      'Et moi, je m\'y mets en même temps que toi, de mon côté : tétine, doudou, au sol. On y va ensemble. 🦊',
+      'Moi aussi, de mon côté. On y va ensemble.'), 800, 'happy');
+    const k = await imDemander(null, [
+      { k:'go',  label:'🧸 J\'y vais', dit:'J\'y vais.' },
+      { k:'non', label:'Pas maintenant', dit:'Pas maintenant.', soft:true }
+    ]);
+    if (k === 'go') {
+      await ecrireStock('reg:pending', { t: Date.now(), fenetre: fenetre.id, focus, date: todayStr() });
+      await imSay(bro(
+        'Vas-y. Je te laisse tranquille, et je reviens te demander dans une vingtaine de minutes comment ça se passe. Profite. 💛',
+        'Vas-y. Je reviens dans vingt minutes.'), 850, 'happy');
+    } else {
+      await noterPratique({ sujet:'regression', k:'refus', focus, fenetre: fenetre.id });
+      const fin = fmtTime(fenetre.a);
+      await imSay(bro(
+        'D\'accord, pas de souci. La fenêtre reste ouverte jusqu\'à ' + fin + ' : si tu changes d\'avis, tu me dis. 🦊',
+        'D\'accord. Ouvert jusqu\'à ' + fin + '.'), 800, 'calm');
+    }
+    if (currentM) await imOfferHelp(currentM);
+  }
+
+  async function suiviRegression(p) {
+    await ecrireStock('reg:pending', null);
+    const k = await imDemander(bro(
+      'Alors, ce moment de régression ? Dis-moi franchement.',
+      'Alors, ta régression ?'), [
+      { k:'decroche', label:'😌 J\'ai vraiment décroché',             dit:'J\'ai vraiment décroché.' },
+      { k:'mouille',  label:'💧 J\'ai mouillé pendant',                dit:'J\'ai mouillé pendant.' },
+      { k:'bien',     label:'🙂 Agréable, mais j\'ai pensé à autre chose', dit:'C\'était agréable, mais j\'ai pensé à autre chose.' },
+      { k:'dur',      label:'😕 Je n\'y suis pas arrivé',              dit:'Je n\'y suis pas arrivé.' }
+    ], 'curious');
+
+    let raison = null;
+    if (k === 'decroche') {
+      await imSay(bro(
+        'Ça, c\'est ce qu\'on cherche. Tu n\'as pas « fait » une régression, tu y étais. Retiens ce que ça fait — la prochaine fois, ton corps saura y retourner plus vite. 🦊💛',
+        'Tu y étais. Ton corps saura y retourner plus vite.'), 1000, 'proud');
+      try {
+        if (await marquerJalon('premiere_regression')) {
+          await imSay(bro('🌱 Et c\'est la première fois que tu me le dis. Je le date.', 'Première fois. Daté.'), 900, 'moved');
+        }
+      } catch(e) {}
+    } else if (k === 'mouille') {
+      await imSay(bro(
+        'Pendant ta régression ! C\'est exactement le moment où ça vient le plus facilement : tête ailleurs, corps détendu, tétine en bouche. Raconte-moi comment. 🦊',
+        'Pendant. C\'est le moment où ça vient le plus facilement. Raconte.'), 950, 'proud');
+    } else if (k === 'bien') {
+      await imSay(bro(
+        'C\'est déjà bien, tu sais. Les pensées qui reviennent, c\'est normal — ne les chasse pas, laisse-les passer et reviens à ta consigne. Chaque fois que tu y reviens, c\'est un pas.',
+        'Les pensées reviennent. Tu les laisses passer. Tu reviens à la consigne.'), 950, 'calm');
+    } else if (k === 'dur') {
+      raison = await imDemander(bro(
+        'Ce n\'est pas grave du tout. Mais dis-moi ce qui t\'a retenu, que je t\'aide mieux la prochaine fois ?',
+        'Qu\'est-ce qui t\'a retenu ?'), [
+        { k:'tel',     label:'📱 Mon téléphone, mes messages', dit:'Mon téléphone.' },
+        { k:'tete',    label:'🌀 Ma tête tournait trop',       dit:'Ma tête tournait trop.' },
+        { k:'ridicule',label:'😳 Je me sentais ridicule',      dit:'Je me sentais ridicule.' },
+        { k:'temps',   label:'⏱️ Pas vraiment le temps',        dit:'Je n\'avais pas vraiment le temps.' }
+      ], 'concern');
+      const CLE = {
+        tel:      { f:'Le téléphone, c\'est le piège numéro un. La prochaine fois, avant de descendre au sol, mets-le dans une autre pièce — pas retourné sur la table, dans une autre pièce. Je m\'occupe de te rappeler l\'heure.', b:'Ton téléphone dans une autre pièce. Pas retourné : ailleurs.' },
+        tete:     { f:'Quand la tête tourne, n\'essaie pas de la vider : occupe tes mains à la place. Un coloriage, des cubes — quelque chose qui demande juste assez d\'attention pour que les pensées n\'aient plus de place. Et la tétine, surtout : elle ralentit tout.', b:'Tu ne vides pas ta tête. Tu occupes tes mains. Et la tétine.' },
+        ridicule: { f:'Je connais. Moi aussi, les premières fois, je me regardais faire de l\'extérieur. Ce regard-là, c\'est toi qui juges toi — personne d\'autre n\'est là. Il s\'use, je te promets. Commence par une consigne seulement, la plus discrète : la tétine. Le reste viendra. 💛', b:'Personne ne te regarde. C\'est toi qui te juges. Ça s\'use. Commence par la tétine seule.' },
+        temps:    { f:'Alors on vise petit : dix minutes, pas une heure. Dix minutes vraiment dedans valent mieux qu\'une heure à moitié. La prochaine fenêtre, juste dix minutes.', b:'Dix minutes vraiment dedans. Pas une heure à moitié.' }
+      };
+      const c = CLE[raison];
+      if (c) await imSay(bro(c.f, c.b), 1000, 'teach');
+    }
+    // et lui, comment ça s'est passé de son côté — pas quand ça n'a pas
+    // marché pour toi : ça sonnerait comme de la vantardise
+    if (k !== 'dur') try {
+      const SES = [
+        { f:'Moi, de mon côté, j\'ai décroché au bout de cinq minutes. Je n\'ai même pas vu le temps passer.', b:'Moi, décroché en cinq minutes.' },
+        { f:'Moi, j\'étais si bien que j\'ai failli m\'endormir, doudou dans les bras. 🦊', b:'Moi, j\'ai failli m\'endormir.' },
+        { f:'Moi, je me suis rendu compte en me relevant que ma couche avait travaillé pendant ce temps-là. Rien senti.', b:'Moi, ma couche a travaillé. Rien senti.' }
+      ];
+      const x = SES[Math.floor(graineFoxy(todayStr() + p.fenetre) * SES.length)];
+      await imSay(bro(x.f, x.b), 850, 'happy');
+    } catch(e) {}
+    await noterPratique({ sujet:'regression', k, raison, focus: p.focus, fenetre: p.fenetre });
+    if (k === 'mouille') { try { await declarerMiction(); } catch(e) {} return; }
+    if (currentM) await imOfferHelp(currentM);
+  }
+
+  // Appelée chaque minute : une invitation par fenêtre, puis le suivi.
+  async function verifierRegression() {
+    if (paused || voiceMode !== 'foxy') return;
+    const now = new Date();
+
+    // 1) le suivi d'une régression lancée, 20 min à 3 h après
+    const p = await lireStock('reg:pending', null);
+    if (p && p.t) {
+      const ecoule = Date.now() - p.t;
+      if (ecoule > 3*3600000) { await ecrireStock('reg:pending', null); }
+      else if (ecoule >= 20*60000) {
+        talk(TALK.GUIDE, 'reg:suivi', () => suiviRegression(p));
+        return;
+      }
+    }
+
+    // 2) l'invitation, une fois par fenêtre et par jour
+    const f = fenetreRegression(now);
+    if (!f) return;
+    // pas dans les dix dernières minutes : trop tard pour s'y mettre
+    if (now.getHours()*60 + now.getMinutes() > f.a - 10) return;
+    const cle = 'reg:invite:' + todayStr();
+    const faites = await lireStock(cle, {});
+    if (faites[f.id]) return;
+    faites[f.id] = true;
+    await ecrireStock(cle, faites);
+    talk(TALK.GUIDE, 'reg:invite:' + f.id, () => inviterRegression(f));
+  }
+
+  /* Foxy change de tenue quand la période change, comme toi. À 19h30,
+     il le dit une fois : « je passe en tenue de nuit, moi aussi ». */
+  async function suivreTenueFoxy() {
+    const avant = foxyOutfit.id;
+    await loadFoxyOutfit();
+    if (foxyOutfit.id === avant) return;
+    try { refreshHeadFoxy(); } catch(e) {}
+    if (paused || voiceMode !== 'foxy') return;
+    if (foxyJournee().periode !== 'nuit') return;
+    const cle = 'foxy:bascule:' + todayStr();
+    if (await lireStock(cle, false)) return;
+    await ecrireStock(cle, true);
+    const nom = foxyOutfit.name;
+    talk(TALK.AMBIANCE, 'foxy:bascule', async () => {
+      await imSay(bro(
+        'Il est 19h30 : je passe en ' + nom + ', moi aussi. Couche de nuit, tenue de nuit — on bascule ensemble. 🦊',
+        '19h30. Je passe en ' + nom + '. On bascule ensemble.'), 850, 'happy');
+      if (currentM) await imOfferHelp(currentM);
+    });
+  }
+
+  // Après un change, une fois par jour : le meilleur moment pour sentir sa
+  // couche, c'est quand elle est toute fraîche.
+  async function proposerRessentirApresChange() {
+    if (paused || voiceMode !== 'foxy') return;
+    if (fenetreRegression()) return;                   // la fenêtre s'en charge
+    const cle = 'reg:apreschange:' + todayStr();
+    if (await lireStock(cle, false)) return;
+    await ecrireStock(cle, true);
+    talk(TALK.AMBIANCE, 'reg:apreschange', async () => {
+      const k = await imDemander(bro(
+        'Elle est toute fraîche, là. C\'est le meilleur moment pour la sentir — trente secondes, tu veux essayer ? 🦊',
+        'Elle est fraîche. Trente secondes pour la sentir.'), [
+        { k:'oui', label:'🌡️ Oui, on essaie', dit:'Oui, on essaie.' },
+        { k:'non', label:'Plus tard', dit:'Plus tard.', soft:true }
+      ], 'curious');
+      if (k === 'oui') { await conseilComportement('ressentir'); return; }
+      await imSay(bro('D\'accord. Elle ne va nulle part, de toute façon. 🦊', 'D\'accord.'), 600, 'calm');
+      if (currentM) await imOfferHelp(currentM);
+    });
+  }
 
   /* ============================================================
      LES RÈGLES DU PROGRAMME
@@ -4588,14 +5502,45 @@
   // Mesures sur une fenêtre de jours : [ilya + duree ; ilya] jours en arrière
   async function mesuresTransfo(ilya, duree) {
     const out = { n:0, retard:null, tauxSec:null, portH:null,
-                  entorses:null, tauxPreuve:null, biberons:null };
+                  entorses:null, tauxPreuve:null, biberons:null,
+                  spont:null, apres:null, moralDur:null, decroche:null };
     let nbJours = 0;
     let retards = [], etats = { sec:0, total:0 }, ports = [];
     let entorses = 0, preuves = { ok:0, total:0 }, bibs = [];
+    // déclaratif : ce que tu dis de tes mictions et de ton moral
+    const venues = { spont:0, apres:0, total:0 }, moraux = { dur:0, total:0 };
+    const regs = { decroche:0, total:0 };
 
     for (let i = ilya; i < ilya + duree; i++) {
       const d = new Date(); d.setDate(d.getDate() - i);
       const k = d.toISOString().slice(0,10);
+
+      // Ces deux journaux vivent à part des checks : on les lit même les
+      // jours sans check, sinon une journée « parlée » serait invisible.
+      try {
+        const r = await window.storage.get('miction:' + k);
+        const l = (r && r.value) ? JSON.parse(r.value) : [];
+        l.filter(x => !x.contredit && x.venue).forEach(x => {   // une déclaration contredite par le capteur ne compte pas
+          venues.total++;
+          if (x.venue === 'apres' || x.venue === 'seul') venues.spont++;
+          if (x.venue === 'apres') venues.apres++;
+        });
+      } catch(e) {}
+      try {
+        const r = await window.storage.get('posture:' + k);
+        const l = (r && r.value) ? JSON.parse(r.value) : [];
+        // on ne compte que les régressions réellement faites (pas les refus)
+        l.filter(x => x.sujet === 'regression' && x.k && x.k !== 'refus').forEach(x => {
+          regs.total++;
+          if (x.k === 'decroche' || x.k === 'mouille') regs.decroche++;
+        });
+      } catch(e) {}
+      try {
+        const r = await window.storage.get('moral:' + k);
+        const l = (r && r.value) ? JSON.parse(r.value) : [];
+        l.forEach(x => { moraux.total++; if (x.v === 'dur' || x.v === 'fatigue') moraux.dur++; });
+      } catch(e) {}
+
       let checks = [];
       try { checks = await getChecks(k); } catch(e) {}
       if (!checks.length) continue;
@@ -4654,6 +5599,11 @@
     out.entorses = nbJours ? entorses / nbJours : null;
     out.tauxPreuve = preuves.total >= 3 ? preuves.ok / preuves.total : null;
     out.biberons = moy(bibs);
+    // en dessous de 3 réponses sur la semaine, un pourcentage ne veut rien dire
+    out.spont    = venues.total >= 3 ? venues.spont / venues.total : null;
+    out.apres    = venues.total >= 3 ? venues.apres / venues.total : null;
+    out.moralDur = moraux.total >= 3 ? moraux.dur / moraux.total : null;
+    out.decroche = regs.total >= 3 ? regs.decroche / regs.total : null;
     return out;
   }
 
@@ -4695,7 +5645,28 @@
       fmt: v => v.toFixed(1) + ' par jour',
       mieux: (a,b) => 'Tu bois mieux : ' + b.toFixed(1) + ' biberons par jour contre ' + a.toFixed(1) + '.',
       pire: (a,b) => 'Ton hydratation baisse : ' + b.toFixed(1) + ' biberons par jour contre ' + a.toFixed(1) + ' il y a trois semaines.',
-      cle: 'L\'hydratation entraîne tout le reste : moins tu bois, moins tu mouilles, plus tu te retiens sans le vouloir. Accroche le biberon aux repas plutôt qu\'aux créneaux — c\'est plus facile à tenir.' }
+      cle: 'L\'hydratation entraîne tout le reste : moins tu bois, moins tu mouilles, plus tu te retiens sans le vouloir. Accroche le biberon aux repas plutôt qu\'aux créneaux — c\'est plus facile à tenir.' },
+
+    /* Les deux suivants reposent sur ce que tu me DÉCLARES — Foxy le dit
+       en les citant. Une déclaration contredite par le capteur est exclue. */
+    { id:'spont', sens:1, minEcart:0.15, unite:'%',
+      fmt: v => Math.round(v*100) + ' %',
+      mieux: (a,b,r) => 'D\'après ce que tu me dis, ' + Math.round(b*100) + ' % de ce qui va dans ta couche part maintenant tout seul, contre ' + Math.round(a*100) + ' % il y a trois semaines.'
+        + (r && r.apres ? ' Et dans ' + Math.round(r.apres*100) + ' % des cas, tu ne t\'en rends compte qu\'après coup. Ça, c\'est le réflexe qui se défait pour de vrai.' : ' Tu n\'as plus besoin de décider — c\'est exactement le chemin.'),
+      pire: (a,b) => 'D\'après ce que tu me dis, tu dois de nouveau aider plus souvent : ' + Math.round(b*100) + ' % de spontané contre ' + Math.round(a*100) + ' % il y a trois semaines.',
+      cle: 'Quand ça ne part plus tout seul, c\'est presque toujours qu\'on s\'est remis à guetter. La prochaine fois que tu sens que ça vient, ne t\'arrête pas et ne pousse pas : continue ce que tu fais, et expire lentement, comme un long soupir. Le relâchement suit l\'expiration, pas l\'effort. Et regarde le volet « Comment me comporter », c\'est expliqué en détail.' },
+
+    { id:'decroche', sens:1, minEcart:0.2, unite:'%',
+      fmt: v => Math.round(v*100) + ' %',
+      mieux: (a,b) => 'Pendant tes régressions, tu décroches vraiment ' + Math.round(b*100) + ' % des fois, contre ' + Math.round(a*100) + ' % il y a trois semaines. Tu n\'as plus besoin de t\'y mettre : tu y glisses.',
+      pire: (a,b) => 'Tu décroches moins souvent pendant tes régressions : ' + Math.round(b*100) + ' % contre ' + Math.round(a*100) + ' % il y a trois semaines.',
+      cle: 'Quand la régression ne prend plus, c\'est presque toujours qu\'un bout d\'adulte est resté allumé — le téléphone à côté, une tâche en tête. Vise plus petit : une seule consigne, dix minutes, téléphone dans une autre pièce. Et reprends ta tétine, c\'est elle qui fait descendre le plus vite.' },
+
+    { id:'moralDur', sens:-1, minEcart:0.2, unite:'%',
+      fmt: v => Math.round(v*100) + ' %',
+      mieux: (a,b) => 'Tu me dis beaucoup moins souvent que c\'est dur : ' + Math.round(b*100) + ' % des fois où je t\'ai demandé, contre ' + Math.round(a*100) + ' % il y a trois semaines. Le cadre te pèse moins — il est en train de devenir le tien.',
+      pire: (a,b) => 'Tu me dis plus souvent que c\'est dur ou que tu es fatigué : ' + Math.round(b*100) + ' % des fois contre ' + Math.round(a*100) + ' % il y a trois semaines. Je l\'entends.',
+      cle: 'Quand ça pèse plus souvent, ce n\'est pas un échec : c\'est un signal. Allège d\'abord ce qui te coûte sans rien t\'apporter — un créneau trop serré, une contention que tu subis, un réveil trop tôt. Tu peux mettre le programme en pause, c\'est prévu pour ça, et ça ne se rattrape pas en forçant. Et si ça déborde du programme, parles-en à quelqu\'un de confiance autour de toi : je suis là pour la route, pas pour tout porter à ta place.' }
   ];
 
   // Compare la semaine écoulée à la même durée trois semaines plus tôt
@@ -4730,6 +5701,9 @@
     sans_sec:         'la première journée entière sans une seule couche sèche',
     pilier_immediat:  'la première fois que tu as fait tes trois piliers à l\'heure, sans traîner',
     tout_prouve:      'la première journée où tous tes changes ont été prouvés',
+    premier_apres:    'la première fois que ça t\'a échappé sans que tu le remarques avant coup',
+    journee_spontanee:'la première journée où tout ce qui est allé dans ta couche est parti tout seul',
+    premiere_regression:'la première fois que tu as vraiment décroché pendant une régression',
     palier2:          'le jour où ton habituation est passée en automatisme',
     palier3:          'le jour où c\'est devenu une seconde nature'
   };
@@ -4797,6 +5771,14 @@
     }));
     if (aHeure.length === 3 && await marquerJalon('pilier_immediat')) nouveaux.push('pilier_immediat');
 
+    // journée entièrement spontanée, d'après tes déclarations
+    try {
+      const r = await window.storage.get('miction:' + k);
+      const l = ((r && r.value) ? JSON.parse(r.value) : []).filter(x => !x.contredit && x.venue);
+      if (l.length >= 3 && l.every(x => x.venue === 'apres' || x.venue === 'seul')
+          && await marquerJalon('journee_spontanee')) nouveaux.push('journee_spontanee');
+    } catch(e) {}
+
     // port long sans plainte
     const ts = ch.map(c => new Date(c.t).getTime()).sort((a,b)=>a-b);
     for (let i = 1; i < ts.length; i++) {
@@ -4837,8 +5819,33 @@
     if (!nouveaux.length && !obs) {
       if (forcer) {
         await imSay(broOn()
-          ? 'Trop tôt. Il me faut trois semaines de données pour te dire quoi que ce soit d\'honnête.'
-          : 'Je n\'ai pas encore assez de recul pour comparer — il me faut environ trois semaines de journées enregistrées. Reviens me demander. 🦊', 950, 'pensive');
+          ? 'Trop tôt pour comparer. Il me faut trois semaines de données.'
+          : 'Je n\'ai pas encore assez de recul pour comparer — il me faut environ trois semaines de journées enregistrées. 🦊', 950, 'pensive');
+        // …mais pas assez de recul ne veut pas dire rien à dire : la photo
+        // de la semaine, sans comparaison, à partir de ce que tu m'as déclaré.
+        const sem = await mesuresTransfo(0, 7);
+        if (sem.spont !== null) {
+          await imSay(bro(
+            'En attendant, voilà la photo de ta semaine, d\'après ce que tu m\'as dit : ' + Math.round(sem.spont*100) + ' % de ce qui est allé dans ta couche est parti tout seul'
+              + (sem.apres ? ', et ' + Math.round(sem.apres*100) + ' % tu ne l\'as remarqué qu\'après coup.' : '.')
+              + (sem.spont >= 0.5 ? ' C\'est déjà beaucoup, tu sais.' : ' Le reste, tu l\'as encore laissé venir ou aidé — c\'est normal à ce stade.'),
+            'Ta semaine, d\'après toi : ' + Math.round(sem.spont*100) + ' % spontané' + (sem.apres ? ', ' + Math.round(sem.apres*100) + ' % remarqué après coup.' : '.')), 1050, 'teach');
+        } else {
+          await imSay(bro(
+            'Et dis-moi quand tu mouilles ta couche, avec le petit bouton 💧 : c\'est ce qui me permettra de voir si ça part de plus en plus tout seul.',
+            'Déclare tes mictions avec le bouton 💧. Sans ça, je ne vois pas le réflexe bouger.'), 900, 'teach');
+        }
+        if (sem.decroche !== null) {
+          await imSay(bro(
+            'Tes régressions, cette semaine : tu m\'as dit avoir vraiment décroché ' + Math.round(sem.decroche*100) + ' % des fois.'
+              + (sem.decroche >= 0.5 ? ' Tu y glisses de plus en plus facilement. 🦊' : ' Le reste du temps, un bout d\'adulte restait allumé — c\'est normal, ça s\'éteint avec la pratique.'),
+            'Régressions : décroché ' + Math.round(sem.decroche*100) + ' % des fois.'), 1000, 'teach');
+        }
+        if (sem.moralDur !== null && sem.moralDur >= 0.5) {
+          await imSay(bro(
+            'Et tu m\'as dit que c\'était dur ou que tu étais fatigué ' + Math.round(sem.moralDur*100) + ' % des fois où je t\'ai demandé cette semaine. Je le garde en tête. Si ça continue, on allège quelque chose — on ne force pas. 💛',
+            'Cette semaine, c\'est dur ' + Math.round(sem.moralDur*100) + ' % du temps, d\'après toi. Si ça dure, on allège.'), 1000, 'concern');
+        }
       }
       return false;
     }
@@ -4856,10 +5863,10 @@
     // 2) ce qui a changé en bien — le plus net d'abord
     if (obs.progres.length) {
       const p = obs.progres[0];
-      await imSay(p.ind.mieux(p.a, p.b), 1150, 'proud');
+      await imSay(p.ind.mieux(p.a, p.b, obs.recent), 1150, 'proud');
       if (obs.progres.length > 1) {
         const q = obs.progres[1];
-        await imSay('Et ce n\'est pas le seul. ' + q.ind.mieux(q.a, q.b), 1100, 'happy');
+        await imSay('Et ce n\'est pas le seul. ' + q.ind.mieux(q.a, q.b, obs.recent), 1100, 'happy');
       }
     }
 
@@ -6049,7 +7056,7 @@
   async function renderCheckStat() {
     const list = await getChecks(todayStr());
     const total = list.length;
-    const flags = list.filter(c => ['miss','sature','tet_miss'].includes(c.result)).length;
+    const flags = list.filter(c => ['miss','sature','tet_miss','decl_contredite'].includes(c.result)).length;
     let txt = "Aujourd'hui : <b>"+total+"</b> vérif"+(total>1?'s':'');
     if (flags > 0) txt += " · <b style='color:var(--coral)'>"+flags+"</b> à corriger";
     document.getElementById('checkStat').innerHTML = txt;
@@ -6835,7 +7842,7 @@
       await imSay(broOn()
         ? 'Ton ' + p.n + ' a ' + mn + ' minutes de retard. On s\'en occupe. Maintenant.'
         : '⚠️ Ton ' + p.n + ' a ' + mn + ' min de retard ! On fait ça tout de suite, d\'accord ? 🦊', 950, 'concern');
-      await annoncerKit(p.m, 'Change ' + p.n, '🔑');
+      await annoncerKit(p.m, p.n.charAt(0).toUpperCase() + p.n.slice(1), '🔑');
       imSetActions([
         { label:'🍼 On fait le change', onClick: async () => { imAddMe('On fait le change.'); try { startChange('pilier'); } catch(e) {} } },
         { soft:true, label:'Je l\'ai déjà fait', onClick: async () => {
@@ -6888,18 +7895,22 @@
         : bro('Je n\'ai pas trace de ton dernier change, donc je te demande : ta couche, elle en est où ? Touche par-dessus ta tenue, ne l\'ouvre pas.',
               'Pas de trace de ton dernier change. Ta couche en est où ? Par-dessus la tenue.');
 
-      etat = await imDemander(entree, [
-        { k:'sec',   label:'🌵 Encore sèche',        dit:'Elle est encore sèche.' },
-        { k:'peu',   label:'💧 Un peu mouillée',     dit:'Un peu mouillée.' },
-        { k:'lourd', label:'🌊 Bien lourde',         dit:'Elle est bien lourde.' },
-        { k:'nsp',   label:'🤷 Je ne sais pas trop', dit:'Je ne sais pas trop.', soft:true }
-      ]);
-      try { await saveCheck('etat_' + etat, 'auto_etat'); } catch(e) {}
+      // Même question, mêmes trois valeurs que partout ailleurs : la 19.6
+      // écrivait etat_peu / etat_lourd / etat_nsp, illisibles pour la carte.
+      etat = await demanderEtatCouche(entree);
+      if (etat) {
+        try {
+          const { rc } = await declarerEtatCouche(etat, 'parole');
+          await direRecoupement(rc, etat);
+          // contredit : la suite du raisonnement part de ce qui a été mesuré
+          if (rc.verdict === 'contredit') etat = rc.etat;
+        } catch(e) {}
+      }
 
       // sa lecture dépend de ce que tu viens de dire ET de la durée
-      if (etat === 'lourd' || heuresPort > 6.5) {
+      if (etat === 'sature' || heuresPort > 6.5) {
         await imSay(bro(
-          etat === 'lourd'
+          etat === 'sature'
             ? 'Alors on ne discute pas : bien lourde, ça veut dire qu\'elle a fait son travail et qu\'elle doit sortir. Ta peau passe avant l\'horaire, toujours. 🦊'
             : 'Elle a dépassé le plafond de port de toute façon. On change, pour ta peau. 🦊',
           'Lourde, ou au-delà du plafond. Elle sort maintenant. Ta peau avant l\'horaire.'), 950, 'alarmed');
@@ -6917,7 +7928,7 @@
             ? 'Normal, elle est toute fraîche. Laisse-la venir, ne force rien — ça arrivera tout seul, comme d\'habitude.'
             : 'Sèche' + depuis + ' ? Tu tiens encore, je le vois bien. Ce n\'est pas grave, et ce n\'est pas une victoire non plus — ça finit toujours par lâcher. Laisse-toi aller, c\'est vain de lutter. 🦊',
           fraiche ? 'Elle est fraîche. Laisse venir.' : 'Sèche' + depuis + '. Tu résistes. Ça ne tiendra pas, tu le sais.'), 950, 'calm');
-      } else if (etat === 'peu') {
+      } else if (etat === 'mouille') {
         await imSay(bro(
           'Bien. Elle travaille, et elle a encore de la marge — pas la peine de la sortir maintenant, ce serait du gâchis. On continue comme ça.',
           'Elle travaille, elle a de la marge. On ne la sort pas. On continue.'), 900, 'proud');
@@ -6937,7 +7948,15 @@
       { k:'obsede', label:'🌀 J\'y pense trop',       dit:'J\'y pense trop.' },
       { k:'fatigue',label:'🥱 Je suis fatigué',       dit:'Je suis fatigué.' }
     ], 'curious');
-    try { await saveCheck('moral_' + moral, 'auto_moral'); } catch(e) {}
+    // le moral n'est pas une vérif de couche : il a son propre journal,
+    // sinon il gonfle le compteur « N vérifs aujourd'hui »
+    try {
+      const k = 'moral:' + todayStr();
+      const r = await window.storage.get(k);
+      const l = (r && r.value) ? JSON.parse(r.value) : [];
+      l.push({ t: new Date().toISOString(), v: moral });
+      await window.storage.set(k, JSON.stringify(l));
+    } catch(e) {}
 
     const REP_MORAL = {
       bien: { f:'Tant mieux ! Note-le quelque part dans ta tête, ces journées-là — c\'est elles qui te porteront les jours moins faciles. 🦊', b:'Bien. Retiens cette journée. Elle te servira.' },
@@ -6947,6 +7966,21 @@
     };
     const rm = REP_MORAL[moral];
     if (rm) await imSay(bro(rm.f, rm.b), 950, moral === 'bien' ? 'proud' : 'concern');
+
+    // Il se souvient de ce que tu lui as dit plus tôt dans la journée : la
+    // deuxième fois qu'on dit « c'est dur », ce n'est pas la même phrase.
+    if (moral === 'dur' || moral === 'fatigue') {
+      try {
+        const r = await window.storage.get('moral:' + todayStr());
+        const l = (r && r.value) ? JSON.parse(r.value) : [];
+        const n = l.filter(x => x.v === 'dur' || x.v === 'fatigue').length;
+        if (n >= 2) {
+          await imSay(bro(
+            'C\'est la ' + (n === 2 ? 'deuxième' : n + 'e') + ' fois aujourd\'hui que tu me le dis. Alors on ne fait pas comme si de rien n\'était : si quelque chose te coûte trop aujourd\'hui, dis-le moi et on l\'allège. Tu peux aussi mettre en pause — c\'est prévu, et ce n\'est pas un échec. 💛',
+            (n === 2 ? 'Deuxième' : n + 'e') + ' fois aujourd\'hui. Si quelque chose te coûte trop, on l\'allège. La pause existe.'), 1000, 'concern');
+        }
+      } catch(e) {}
+    }
 
     // --- 7) Ce qu'il y a à faire maintenant, en deux lignes ---
     if (cur) {
@@ -6995,8 +8029,14 @@
        expliquerCouche() et expliquerTenue() tournaient ici automatiquement :
        une quinzaine de lignes en plus, qui redisaient le modèle et l'heure
        déjà annoncés juste au-dessus. Maintenant c'est une porte, pas un mur. */
+    // le conseil de comportement qui colle à ce moment précis
+    const sujet = sujetDuMoment(etat, cur);
     imSetActions([
       { sep:'Si tu veux creuser' },
+      { label: COMPORTEMENT[sujet].label, onClick: async () => {
+          imAddMe(COMPORTEMENT[sujet].label.replace(/^\S+\s/, ''));
+          await conseilComportement(sujet);
+      }},
       ACT.pourquoiCouche(),
       ACT.pourquoiTenue(),
       { sep:'' },
@@ -7953,7 +8993,7 @@
       b.textContent = (foxyOutfit.id === o.id ? '🐾 ' : '') + o.name;
       b.addEventListener('click', async () => {
         foxyOutfit = o;
-        try { await window.storage.set('foxyfit:'+todayStr(), JSON.stringify(o.id)); } catch(e) {}
+        try { await window.storage.set('foxyfit:force:'+todayStr(), JSON.stringify(o.id)); } catch(e) {}
         renderDebugOutfits();
         refreshHeadFoxy();
         if (voiceMode === 'foxy') { try { await imRunMoment(); } catch(e) {} }
@@ -11095,6 +12135,7 @@
     refreshHeadFoxy();
     // le verrouillage se décide AVANT la voix : rien ne doit parler avant l'entrée
     try { await checkQrLock(); } catch(e) {}
+    try { await reparerEtats196(); } catch(e) {}
     await loadVoice();
     try { const r = await window.storage.get('queststage'); window._lastStage = (r && r.value) ? JSON.parse(r.value) : 0; } catch(e) { window._lastStage = 0; }
     await loadPause();
@@ -11205,6 +12246,8 @@
     }
     // vérif périodique du change dû (persiste tant que non fait, avec snooze)
     setInterval(checkDueChangePeriodic, 60000);
+    setInterval(() => { verifierRegression().catch(() => {}); suivreTenueFoxy().catch(() => {}); }, 60000);
+    setTimeout(() => { verifierRegression().catch(() => {}); }, 8000);
   })();
 
   // Rappel de change persistant : re-propose tant que le pilier n'est pas fait
