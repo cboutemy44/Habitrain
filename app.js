@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '20.8';
+  const APP_VERSION = '21.2';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -8803,6 +8803,8 @@
      ============================================================ */
   async function rituelReveil() {
     if (paused || new Date().getHours() < 6) return false;
+    // pas avant la fin de l'installation : c'est elle qui passe la main au réveil
+    try { const se = await lireStock('setup:etat', null); if (!se || !se.termine || document.body.classList.contains('onboarding')) return false; } catch(e) {}
     const cle = 'reveil:rituel:' + todayStr();
     if (await lireStock(cle, false)) return false;
     await ecrireStock(cle, true);
@@ -11246,7 +11248,7 @@
      ============================================================ */
   const SETUP_CLE = 'setup:etat';
   const CHAPITRES = [
-    { id:'accueil',     t:'Faire connaissance',        ic:'🦊' },
+    { id:'accueil',     t:'Bienvenue',                 ic:'🦊' },
     { id:'nom',         t:'Ton prénom',                ic:'👋' },
     { id:'profil',      t:'Ton profil et ta discipline', ic:'🧭' },
     { id:'materiel',    t:'Le matériel de base',       ic:'🧴' },
@@ -11256,6 +11258,7 @@
     { id:'etiquettes',  t:'Les étiquettes',            ic:'🏷️' },
     { id:'securite',    t:'Sécurité et sauvegarde',    ic:'🛟' },
     { id:'preparation', t:'Ta première préparation',   ic:'✨' },
+    { id:'rencontre',   t:'Faire connaissance',        ic:'💛' },
     { id:'fin',         t:'Bienvenue',                 ic:'🌱' }
   ];
   let setupEtat = null;
@@ -11275,6 +11278,11 @@
 
   async function lireSetup() {
     setupEtat = await lireStock(SETUP_CLE, null) || { fait: {}, rep: {}, debut: Date.now() };
+    if (setupEtat.termine) {
+      let maj = false;
+      CHAPITRES.forEach(c => { if (c.id !== 'nom' && !setupEtat.fait[c.id]) { setupEtat.fait[c.id] = setupEtat.termine; maj = true; } });
+      if (maj) await ecrireStock(SETUP_CLE, setupEtat);
+    }
     return setupEtat;
   }
   async function ecrireSetup() { await ecrireStock(SETUP_CLE, setupEtat); }
@@ -11437,12 +11445,10 @@
     await repondre('nom_demande', true);
   }
 
-  SETUP_CHAP.accueil = async () => {
-    // 1) la rencontre
-    await sDire('Oh ! Te voilà. 🦊<br><br>Je t\'attendais, tu sais.', 'wave', 'Bonjour…', 'Bienvenue à la maison');
-    await demanderNom(true);
+  SETUP_CHAP.rencontre = async () => {
     const n = nomOu(null);
     const toi = n ? esc(n) : 'toi';
+    await sDire('Viens, installe-toi. 🦊<br><br>Maintenant que tu es prêt, bien au chaud dans ta tenue, j\'aimerais qu\'on prenne un moment, rien que toi et moi. Pour qu\'on se connaisse un peu mieux.', 'comfort', 'Avec plaisir', 'Faire connaissance');
 
     // 2) comment il arrive
     const r = await sChoix('Dis-moi, ' + toi + '… là, maintenant, tu te sens comment, d\'être ici ?', [
@@ -11534,7 +11540,29 @@
     await ecrireStock('profil:ressenti', { ressenti: r, peurs: dites, questions: posees, date: Date.now() });
 
     // 8) la suite
-    await sDire('Merci, ' + toi + '. 🦊💛<br><br>Maintenant, on va préparer ta maison ensemble : ce qui te ressemble, tes couches, tes tenues, tes petites affaires. Tu peux t\'arrêter quand tu veux — je me souviens de tout.', 'proud', 'On prépare tout');
+    await sDire('Merci de m\'avoir fait confiance, ' + toi + '. 🦊💛<br><br>Je suis vraiment content que tu sois là.', 'moved', 'Moi aussi, Foxy');
+  };
+
+  /* Le tout premier écran : bienvenue, pourquoi tu es là, et « suis-moi ».
+     Son histoire à lui, tes peurs et les règles viennent plus tard, une
+     fois ta maison prête (chapitre « Faire connaissance »). */
+  SETUP_CHAP.accueil = async () => {
+    await sDire('Oh ! Te voilà. 🦊<br><br>Bienvenue ! Je t\'attendais, tu sais.', 'wave', 'Bonjour…', 'Bienvenue à la maison');
+    await demanderNom(true);
+    const n = nomOu(null);
+    const toi = n ? esc(n) : 'toi';
+    await sDire('Tu te demandes peut-être pourquoi tu es là, ' + toi + ' ?<br><br>Je vais te le dire, tout simplement. 🦊', 'curious', 'Dis-moi');
+    await sDire('Ici, on vient pour <b>lâcher prise</b>.<br><br>Tu sais, tous ces trucs de grand qui te trottent dans la tête toute la journée ? Les choses à décider, à gérer, à tenir… Eh bien ici, tu peux tout poser. Comme un gros sac à dos qu\'on enlève enfin. 🎒', 'comfort', 'C\'est vrai');
+    await sDire('Ici, on a le droit de redevenir tout petit. 🧸<br><br>Se laisser aller, se laisser faire, qu\'on s\'occupe de toi… C\'est ça, la <b>régression</b> : retrouver cette douceur d\'avant, quand on n\'avait rien à porter.', 'paci', 'Ça me parle');
+    await sDire('C\'est pour ça qu\'ici, tout le monde porte des petits vêtements tout doux, et une couche, tout le temps. Moi aussi, regarde ! 🦊<br><br>Au début, ça fait un peu drôle, hein. Mais ne t\'inquiète pas : très vite, on n\'y pense plus du tout !', 'happy', 'Ça me rassure');
+    await sDire('Et tu sais à quoi ça va servir ? 🦊<br><br>'
+      + '✨ à vivre quelque chose de <b>tout nouveau</b>, que tu n\'as sans doute jamais osé vivre jusqu\'au bout ;<br><br>'
+      + '🌱 à <b>t\'habituer tout doucement</b> à cette nouvelle vie, jour après jour, jusqu\'à ce qu\'elle devienne la tienne ;<br><br>'
+      + '🧸 et surtout… à <b>arrêter de lutter</b>, et à te laisser porter dans toute cette douceur.', 'happy', 'Ça me plaît');
+    await sDire('Et un jour, tu verras, ce ne sera même plus un programme.<br><br>Ce sera juste ta vie. En tout doux. 💛', 'moved', 'J\'ai hâte');
+    await sDire('Bon, je ne vais pas te mentir : ça ne se fait pas en un jour. Il y aura des jours tout faciles, et d\'autres un peu moins.<br><br>Mais on y va petit à petit, et je serai là à chaque pas. Promis juré. 🐾', 'reassure', 'Merci');
+    await sDire('Avant de commencer, on va préparer ta maison ensemble : tes couches, tes tenues, tes petites affaires.<br><br>Ensuite, je t\'aiderai à te préparer, toi. Et après, on prendra tout le temps de faire connaissance.', 'happy', 'D\'accord');
+    await sDire('Tu me suis ? 🦊', 'wave', '🐾 Je te suis');
   };
 
   SETUP_CHAP.nom = async () => {
@@ -11901,22 +11929,52 @@
     await sDire('Tu sais, ici, c\'est un peu comme entrer dans une maison qui a ses habitudes. Il y a une tenue, et tout le monde la porte. Moi aussi.<br><br>Alors on va te préparer. Ensemble. Je t\'explique tout, une chose après l\'autre — tu n\'as qu\'à suivre.', 'reassure', 'D\'accord, je te suis');
     if (nuit) await sDire('Vu l\'heure, on part directement sur ta tenue et ta couche de nuit. Pas la peine de faire les choses deux fois ce soir.', 'calm');
 
+    // lui, là, maintenant
+    let saTenue = '';
+    try { saTenue = foxyDecrit(foxyJournee()).tenue.replace(/^Moi, là, /, ''); } catch(e) {}
+    const typeT = typeTenue(tenue || '');
+    const SUR_TENUE = {
+      gren_dos: 'Et elle se ferme dans le dos. Une fois dedans, tu es dedans — et c\'est justement ça qui est bon. Tu n\'as plus à y penser.',
+      keeper:   'Et celle-là, une fois fermée, plus rien ne bouge. Tu vas voir comme on se sent tenu, là-dedans. C\'est ma préférée pour la nuit.',
+      gren_devant: 'Une grenouillère, des pieds jusqu\'aux épaules… Tu vas voir comme on s\'y sent enveloppé.',
+      gren:     'Une grenouillère, des pieds jusqu\'aux épaules… Tu vas voir comme on s\'y sent enveloppé.',
+      romper:   'Avec ça, ta couche se sent encore plus quand tu bouges. C\'est fait pour, et c\'est très bien comme ça.',
+      body:     'Avec un body, ta couche reste bien en place, et on la devine juste un peu. Tu vas adorer la sentir en t\'asseyant.'
+    };
+
     const etapes = [
       { t:'Va là où tu te changeras désormais, près de ton tapis à langer.<br><br>Prépare tout à portée de main :'
           + '<br>🍼 ' + (modele ? 'ta couche : <b>' + esc(modele.name) + '</b>' : 'une couche')
           + '<br>🧴 ta crème et tes lingettes'
           + '<br>👕 ' + (tenue ? 'ta tenue : <b>' + esc(tenue) + '</b>' : 'ta tenue'),
         ok:'Tout est prêt', expr:'explain' },
-      { t:'Maintenant, enlève tes vêtements. Tous.<br><br>Prends ton temps. Plie-les bien.', ok:'C\'est fait', expr:'calm' },
+      { t:'Maintenant, enlève tes vêtements. Tous.<br><br>Prends ton temps. Plie-les bien.', ok:'C\'est fait', expr:'calm',
+        apres:[ ['Je sais… c\'est le moment où on se sent le plus tout nu, forcément. 😅<br><br>Moi, je me suis caché derrière ma porte. Mais ça ne dure qu\'une minute. Et juste après, tu vas voir, tout devient doux.', 'comfort', 'Ça me rassure'] ] },
       { t:'Ces habits-là, ce sont tes habits d\'avant.<br><br>Range-les à part — un sac, le fond d\'un placard. Pas jetés : rangés. Ici, tu n\'en auras plus besoin.', ok:'Je les ai rangés', expr:'wistful' },
       { t:'Si tu as besoin d\'aller aux toilettes, c\'est maintenant.<br><br>Après, ta couche s\'occupera de tout.', ok:'C\'est bon', expr:'calm' },
-      { t:'Allonge-toi sur ton tapis. Un coup de lingette, la peau bien sèche.<br><br>Puis la crème, généreusement. C\'est ce qui va protéger ta peau, tous les jours.', ok:'C\'est fait', expr:'teach' },
+      { t:'Allonge-toi sur ton tapis. Un coup de lingette, la peau bien sèche.<br><br>Puis la crème, généreusement. C\'est ce qui va protéger ta peau, tous les jours.', ok:'C\'est fait', expr:'teach',
+        apres:[ ['Tu sens comme c\'est frais ? Moi, j\'adore ce moment-là. C\'est comme si quelqu\'un prenait soin de toi.<br><br>Et c\'est exactement ce qui est en train de se passer. 🦊', 'happy', 'C\'est doux'] ] },
       { t:'Ta couche, maintenant.<br><br>Glisse-la sous toi, bien centrée. Remonte-la devant. Écarte bien les petites barrières sur le haut des cuisses.<br><br>Puis les attaches : celles du bas d\'abord, vers le haut ; celles du haut ensuite, bien droites. Contenant, sans serrer.',
-        ok:'Elle est en place', expr:'teach', preuve: etiquettes ? 'change_pilier' : null },
-      { t:'Relève-toi doucement. Fais quelques pas.<br><br>Tu la sens ? Ce petit bruit, cette épaisseur entre tes jambes, ta façon de marcher qui change déjà un peu… Au début, on ne sent que ça. Tu verras : bientôt, tu ne la remarqueras plus.', ok:'Je la sens', expr:'happy' },
-      { t:'Ta tenue' + (tenue ? ' : <b>' + esc(tenue) + '</b>' : '') + '.<br><br>Enfile-la, et ferme-la jusqu\'en haut.',
-        ok:'Je l\'ai mise', expr:'explain', preuve: etiquettes && tenue ? 'tenue' : null },
-      access.length ? { t:'Et pour finir : ' + access.map(esc).join(' et ') + '. Garde-les près de toi.', ok:'Je les ai', expr:'paci' } : null,
+        ok:'Elle est en place', expr:'teach', preuve: etiquettes ? 'change_pilier' : null,
+        apres:[ ['Ça y est… 🦊 Elle est là.<br><br>Je suis presque aussi excité que toi, tu sais. Je me souviens exactement de ce moment, la première fois : le cœur qui bat un peu trop vite… et en même temps, quelque chose qui se pose.', 'proud', 'C\'est exactement ça'] ] },
+      { t:'Relève-toi doucement. Fais quelques pas.<br><br>Tu la sens ? Ce petit bruit, cette épaisseur entre tes jambes, ta façon de marcher qui change déjà un peu… Au début, on ne sent que ça. Tu verras : bientôt, tu ne la remarqueras plus.', ok:'Je la sens', expr:'happy',
+        apres:[ ['Moi, il m\'a fallu deux jours, peut-être trois, pour ne plus y penser en marchant. Aujourd\'hui, je la porte comme on porte des chaussettes.<br><br>Et pourtant… chaque matin, quand je remets une couche toute propre, j\'ai encore ce petit frisson. Tu vas voir. 🦊', 'wistful', 'J\'ai hâte de voir'] ] },
+      { t:'Et maintenant, mon moment préféré : ta tenue. 🦊<br><br>' + (tenue ? '<b>' + esc(tenue) + '</b>. ' : '') + 'Enfile-la, et ferme-la jusqu\'en haut. Prends ton temps, je regarde.',
+        ok:'Je l\'ai mise', expr:'happy', preuve: etiquettes && tenue ? 'tenue' : null,
+        apres:[
+          ['Oh… 🦊 Ça te va tellement bien.' + (SUR_TENUE[typeT] ? '<br><br>' + SUR_TENUE[typeT] : ''), 'proud', 'Tu trouves ?'],
+          [(/^je suis en /.test(saTenue) ? 'Regarde-moi : moi aussi, là, ' + esc(saTenue) : 'Moi, là, je suis juste en couche — il fait bon à la maison. Mais la plupart du temps, je suis en tenue, comme toi.') + '<br><br>Et je m\'y sens tellement bien. La première fois, je me suis trouvé bizarre devant le miroir. Le deuxième jour, je ne voulais déjà plus l\'enlever. Je m\'y suis fait super vite — beaucoup plus vite que je l\'aurais cru.', 'happy', 'Et moi ?'],
+          { choix: 'Alors dis-moi… ça te fait quoi, de te voir comme ça ?', options: [
+              { k:'bizarre', label:'😳 Un peu bizarre',
+                rep:'C\'est normal ! Ton reflet ne te ressemble pas encore. Laisse-lui quelques jours : c\'est lui qui va s\'habituer à toi, pas l\'inverse. Et un matin, c\'est l\'autre reflet, celui d\'avant, qui te paraîtra étrange.' },
+              { k:'bien', label:'😊 Étonnamment bien',
+                rep:'Je le savais ! 🦊 Je le voyais dans ta façon de te tenir. Garde ce sentiment-là, il ne va faire que grandir.' },
+              { k:'sais', label:'🌀 Je ne sais pas encore',
+                rep:'Tu as le droit de ne pas savoir. Moi non plus, je ne savais pas, le premier jour. Je sais juste que j\'avais envie de voir la suite. Et toi aussi, je crois. 💛' }
+            ] }
+        ] },
+      access.length ? { t:'Et pour finir : ' + access.map(esc).join(' et ') + '. Garde-les près de toi.', ok:'Je les ai', expr:'paci',
+        apres:[ ['Ah, ça… c\'est ce que je préfère dans la journée. Quand je les ai près de moi, tout ralentit. Tu verras, ce soir. 🦊', 'paci', 'J\'ai hâte'] ] } : null,
       acc.bracelet ? { t:'Ton bracelet, au poignet. Il ne te quitte plus non plus.', ok:'Il est au poignet', expr:'calm' } : null,
       acc.capteur === 'connecte' ? { t:'Ton capteur : clipse-le à l\'avant de ta couche, sous la ceinture.', ok:'Il est en place', expr:'explain' } : null
     ].filter(Boolean);
@@ -11935,6 +11993,13 @@
         });
         sPlusTard(rej);
       });
+      // ce que Foxy en dit, lui qui porte la même chose
+      for (const a of (e.apres || [])) {
+        if (Array.isArray(a)) { await sDire(a[0], a[1], a[2]); continue; }
+        const k = await sChoix(a.choix, a.options.map(o => ({ k:o.k, label:o.label })), 'curious');
+        await repondre('premiere_tenue', k);
+        await sDire(a.options.find(o => o.k === k).rep, k === 'bien' ? 'proud' : 'comfort', 'Merci Foxy');
+      }
     }
 
     // c'est le premier change du programme : il compte, comme tous les autres
@@ -11944,7 +12009,7 @@
     } catch(e) {}
     await repondre('premiere_prep', Date.now());
 
-    await sDire('Viens là. Regarde-toi.<br><br>Te voilà prêt, ' + toi + '. Bien installé, bien au chaud, comme il faut. 🦊💛', 'moved', 'Merci Foxy', 'Te voilà prêt');
+    await sDire('Viens là. Regarde-toi.<br><br>Te voilà prêt, ' + toi + '. Bien installé, bien au chaud, comme il faut. 🦊💛', 'moved', '🦊💛', 'Te voilà prêt');
     await sDire('Je suis fier de toi. Vraiment.<br><br>La première fois, c\'est la plus difficile. Moi, j\'ai mis une heure à oser enlever mon pantalon. Toi, tu l\'as fait.', 'proud', 'Ça me fait drôle');
     await sDire('Maintenant, écoute-moi bien, parce que c\'est important.<br><br>À partir de maintenant, c\'est comme ça que tu vis. Ta couche, ta tenue — c\'est ton uniforme. Tu ne les enlèves pas. Tu ne les discutes pas. Tu ne les quittes qu\'au moment du change, et c\'est pour en remettre une propre.', 'calm', 'D\'accord');
     await sDire('Tes habits d\'avant restent rangés. Ils ne sont pas pour ici.<br><br>Et tu vas voir : très vite, c\'est eux qui te paraîtront bizarres. Pas ta couche.', 'calm', 'Je reste comme ça');
@@ -12113,8 +12178,10 @@
     setupEtat.termine = Date.now();
     await ecrireSetup();
     try { await ecrireStock('ob:done', true); } catch(e) {}
-    fermerInstallation();
+    // la voix de Foxy s'installe AVANT de rendre l'écran : sinon son premier
+    // message recouvrait la question du réveil, qui passe juste après
     try { if (voiceMode !== 'foxy') await setVoiceMode('foxy'); } catch(e) {}
+    fermerInstallation();
     try { await refresh(); } catch(e) {}
     try { await renderOutfitCard(); } catch(e) {}
     // et on enchaîne sur le premier réveil : superviseur, tenue du jour
