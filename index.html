@@ -182,7 +182,14 @@
         <div class="info"><div class="n">🐺 Foxy grand frère</div><div class="d">Ton dominateur bienveillant (« résister ne sert à rien... »). Nécessite le mode intensif.</div></div>
         <div class="switch" id="bigbroSwitch"><div class="knob"></div></div>
       </div>
-      <div class="set-note">Domination par le lâcher-prise, jamais dégradante. <b>Safeword</b> : écris « stop foxy » à tout moment (ou tape 3× le titre) pour revenir au Foxy doux instantanément. Les garde-fous santé restent absolus.</div>
+      <div class="set-note">Domination par le lâcher-prise, jamais dégradante. Les garde-fous santé restent absolus.</div>
+    </div>
+
+    <div class="set-cat">
+      <h4>🛑 Safeword</h4>
+      <div class="set-note" style="margin-top:0">Coupe tout, immédiatement et sans conséquence : Foxy redevient doux, la file de discussions se vide, et une reprise après désertion en cours est levée. Tu peux aussi écrire « stop foxy » dans le chat.</div>
+      <button id="safewordBtn" class="settings-toggle-btn" style="margin-top:10px;border-color:#c86b6b;color:#a83b3b;font-weight:800">🛑 Stop Foxy</button>
+      <div class="saved-flash" id="safewordFlash"></div>
     </div>
 
     <div class="set-note" id="setNote">Rappel : une appli web ne garantit pas les notifications quand elle est complètement fermée. Pour les rappels critiques, garde tes alarmes système.</div>
@@ -306,7 +313,7 @@
 
   <div class="card" id="sensorCard" style="display:none">
     <h2>📡 Capteur de couche</h2>
-    <div class="sub">Le capteur (ESP32) enregistre ta couche en autonomie, même appli fermée. À la connexion, il transmet tout l'historique horodaté et Foxy le commente.</div>
+    <div class="sub">Le capteur enregistre ta couche en autonomie, même appli fermée : portée ou retirée, sèche, mouillée ou saturée, et si la couche posée est fraîche. Pour le connecter, <b>appuie d'abord sur son bouton</b> (il dort le reste du temps), puis sur Connecter.</div>
     <div class="set-cat"><h4>Connexion</h4>
       <button class="settings-toggle-btn" id="sensorConnect">🔗 Connecter mon capteur</button>
       <div class="set-row" style="margin-top:8px">
@@ -314,9 +321,21 @@
         <div class="info" style="text-align:right"><div class="n" id="sensorLive">—</div></div>
       </div>
     </div>
-    <div class="set-cat"><h4>Calibration</h4>
-      <div class="sub">Valeur brute en direct (te sert à régler les seuils dans le firmware). Sec = valeur basse, saturé = valeur haute.</div>
+    <div class="set-cat"><h4>Réglage</h4>
+      <div class="sub">Valeurs en direct quand le capteur est connecté. Pour chaque zone : la mesure, et son écart à la couche sèche. Au-delà du seuil « mouillée », la zone passe en orange ; au-delà de « saturée », en rouge.</div>
       <div style="font-family:'Fraunces',serif;font-size:22px;font-weight:600;color:var(--blue-deep);text-align:center;margin:8px 0" id="sensorRaw">—</div>
+      <div class="set-row"><div class="info"><div class="n">Seuils (en % d'écart)</div><div class="d">mouillée / saturée — par défaut 8 et 18</div></div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="sensorSeuilM" type="number" min="2" max="60" value="8" style="width:52px;padding:6px;border:1.5px solid var(--line);border-radius:8px;font-weight:700">
+          <input id="sensorSeuilS" type="number" min="3" max="80" value="18" style="width:52px;padding:6px;border:1.5px solid var(--line);border-radius:8px;font-weight:700">
+          <button class="settings-toggle-btn" id="sensorSeuils" style="padding:6px 10px">OK</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="settings-toggle-btn" id="sensorAir" style="flex:1">📏 Étalonner à vide</button>
+        <button class="settings-toggle-btn" id="sensorRaz" style="flex:1">🧽 Oublier la couche sèche</button>
+      </div>
+      <div class="d" id="sensorReglageMsg" style="margin-top:6px;font-size:12px;font-weight:700;color:var(--muted)">« À vide » : pad posé à plat sur la table, sans le toucher. « Oublier » : si tu changes de modèle de couche.</div>
     </div>
     <div class="set-cat">
       <button class="settings-toggle-btn" id="sensorGuideToggle" style="width:100%">📖 Guide de montage — afficher / masquer</button>
@@ -506,6 +525,15 @@
     </div>
   </div>
 
+  <div class="card tabcard" id="desCard" data-tab="maintenant" style="display:none;border:2px solid #7a5aa0;background:#F3EEF8">
+    <div style="display:flex;align-items:flex-start;gap:12px">
+      <div style="font-size:30px">🏠</div>
+      <div style="flex:1">
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:17px;color:#6b4f8a">Reprise</div>
+        <div id="desTxt" style="font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.45;margin-top:2px"></div>
+      </div>
+    </div>
+  </div>
   <div class="card tabcard" id="discCard" data-tab="maintenant" style="display:none;border:2px solid #c86b3a;background:#FBF0E8">
     <div style="display:flex;align-items:center;gap:12px">
       <div style="font-size:30px">🔒</div>
@@ -581,8 +609,8 @@
 
   <div class="card outfit-card tabcard" id="outfitCard" data-tab="maintenant" style="display:none">
     <h2>Tenue du jour</h2>
-    <div class="sub">Tirée au sort une fois par jour : une tenue de jour et une tenue de nuit. Les équipements de restriction ne sont pas inclus ici.</div>
-    <button class="sup-btn" id="outfitDraw" style="background:#5c9463">🎲 Tirer la tenue du jour</button>
+    <div class="sub">Tirée au sort par Foxy à ton réveil : une tenue de jour et une tenue de nuit. Les équipements de restriction ne sont pas inclus ici.</div>
+    <button class="sup-btn" id="outfitDraw" style="display:none"></button>
     <div id="outfitList" style="margin-top:14px"></div>
     <div class="outfit-note" id="outfitNote" style="display:none"></div>
     <div class="outfit-note" id="outfitOnce" style="display:none;font-style:italic">🔒 Un seul tirage par jour — la tenue est fixée.</div>
@@ -599,7 +627,7 @@
 
   <div class="card sup-card tabcard" id="supCard" data-tab="maintenant" style="display:none">
     <h2>Mode supervisé</h2>
-    <div class="sub">Jour avec superviseur : tire au sort l'équipement du jour (2 à 5 pièces). Un seul tirage par jour.</div>
+    <div class="sub">Ton superviseur est là aujourd'hui : Foxy a tiré l'équipement du jour au réveil (2 à 5 pièces). Un seul tirage par jour.</div>
 
     <div id="supPrompt" style="display:none">
       <div class="qline" style="font-size:13.5px;font-weight:700;margin:8px 0 12px">Ce jour est-il un jour supervisé ?</div>
@@ -614,7 +642,7 @@
         <span>🔒</span>
         <span>La culotte Segufix verrouillée ne peut sortir que si ton superviseur est présent, éveillé, aux clés, du début à la fin. Jamais pendant la sieste ou la nuit.</span>
       </div>
-      <button class="sup-btn" id="supDraw">🎲 Tirer l'équipement du jour</button>
+      <button class="sup-btn" id="supDraw" style="display:none"></button>
       <div class="sup-result" id="supResult">
         <div class="lead" id="supLead">Équipement tiré</div>
         <div id="supList"></div>

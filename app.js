@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '20.0';
+  const APP_VERSION = '20.4';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -536,6 +536,43 @@
   let changeModel = null;   // modèle de couche annoncé pour le change en cours
 
   // choisit et annonce le modèle à utiliser, selon le moment
+  /* ------------------------------------------------------------
+     QUELLE COUCHE POUR LE PROCHAIN CHANGE
+     Partout on prenait le premier modèle disponible de la liste : avec
+     plusieurs modèles en stock, c'était toujours le même. Le choix se
+     fait maintenant ici, une seule fois par change :
+       · jamais deux fois de suite le même modèle quand il y en a d'autres ;
+       · tiré au hasard, pondéré par le stock (le plus fourni sort plus) ;
+       · réservé : l'annonce, le kit, la reprise et le décompte parlent
+         tous de la même couche, jusqu'à ce qu'elle soit posée.
+     ------------------------------------------------------------ */
+  async function modeleProchain(period) {
+    const WB = window.HabitrainWardrobe;
+    if (!WB) return null;
+    const dispo = (await WB.modelsFor(period)).filter(m => m.qty > 0);
+    if (!dispo.length) return null;
+    const cle = 'couche:resa:' + period;
+    const resa = await lireStock(cle, null);
+    if (resa && Date.now() - resa.t < 12*3600000) {
+      const m = dispo.find(x => x.id === resa.id);
+      if (m) return m;
+    }
+    const derniere = await lireStock('couche:posee:' + period, null);
+    let pool = dispo;
+    if (derniere && dispo.length > 1) pool = dispo.filter(m => m.id !== derniere.id);
+    const total = pool.reduce((s, m) => s + m.qty, 0);
+    let x = Math.random() * total, choisi = pool[0];
+    for (const m of pool) { x -= m.qty; if (x < 0) { choisi = m; break; } }
+    await ecrireStock(cle, { id: choisi.id, t: Date.now() });
+    return choisi;
+  }
+  // appelée au décompte : la réservation est consommée, le modèle posé mémorisé
+  async function noterCouchePosee(period, model) {
+    await ecrireStock('couche:posee:' + period, { id: model.id, name: model.name, t: Date.now() });
+    await ecrireStock('couche:posee', { id: model.id, name: model.name, period, t: Date.now() });
+    await ecrireStock('couche:resa:' + period, null);
+  }
+
   async function pickChangeModel() {
     changeModel = null;
     try {
@@ -544,14 +581,14 @@
       // 22h30 / 9h, pas 22h / 8h. Entre 8h et 9h, on proposait une couche de
       // jour alors que le cadre te garde en couche de nuit.
       const period = couchageNuit(new Date()) ? 'nuit' : 'jour';
-      const dispo = (await window.HabitrainWardrobe.modelsFor(period)).filter(m => m.qty > 0);
-      if (!dispo.length) {
+      const m = await modeleProchain(period);
+      if (!m) {
         const tous = await window.HabitrainWardrobe.getStock();
-        const reste = tous.filter(m => m.qty > 0);
-        changeModel = reste.length ? reste[0] : null;
+        const reste = tous.filter(x => x.qty > 0);
+        changeModel = reste.length ? reste[Math.floor(Math.random() * reste.length)] : null;
         return changeModel ? { model:changeModel, horsPeriode:true, period } : { vide:true, period };
       }
-      changeModel = dispo[0];
+      changeModel = m;
       return { model:changeModel, period };
     } catch(e) { return null; }
   }
@@ -672,6 +709,7 @@
   }
   async function finalizeChange(proof) {
     await saveCheck(proof ? 'change_fait' : 'change_fait_sanspreuve', 'change_'+(changeCtx||'check'));
+    try { await calibrerCapteurApresChange(proof, changeCtx); } catch(e) {}
     let slotKey = activeSlotKey;
     if (!slotKey) { const p = pillarSlotForNow(); if (p) slotKey = p.key; }
     // change de nuit avancé : c'est bien le pilier de 22h30 qu'on valide
@@ -692,6 +730,7 @@
       if (window.HabitrainWardrobe && changeModel) {
         const nuit = couchageNuit(new Date());
         const r = await window.HabitrainWardrobe.consume(nuit ? 'nuit' : 'jour', changeModel.id);
+        if (r && r.ok) { try { await noterCouchePosee(nuit ? 'nuit' : 'jour', changeModel); } catch(e) {} }
         if (r && r.ok === false && voiceMode === 'foxy') {
           await imSay(broOn()
             ? 'Stock épuisé sur ce modèle. Recommande, ce n\'est pas négociable.'
@@ -707,6 +746,7 @@
 
     // ce qui vient d'être posé, pourquoi, et pour combien de temps
     if (voiceMode === 'foxy' && !paused) { try { await expliquerCouche(); } catch(e) {} }
+    try { await elementsDesertionChange(slotKey); } catch(e) {}
     try { await proposerRessentirApresChange(); } catch(e) {}
     try { if (changeCtx === 'pilier' || slotKey) await corroborerPilier(slotKey); } catch(e) {}
     activeSlotKey = null;
@@ -1109,15 +1149,7 @@
 
   function imSetActions(buttons) {
     const box = imActions(); box.innerHTML = '';
-    // bouton safeword toujours dispo en mode grand frère
-    if (broOn()) {
-      const sw = document.createElement('button');
-      sw.className = 'soft';
-      sw.style.cssText = 'border-color:#c86b6b;color:#a83b3b;font-weight:800';
-      sw.textContent = '🛑 Stop Foxy (safeword)';
-      sw.addEventListener('click', () => triggerSafeword());
-      box.appendChild(sw);
-    }
+    // le safeword vit dans les réglages (et « stop foxy » au clavier)
     buttons.forEach(b => {
       if (!b) return;
       // intertitre de catégorie : ce n'est pas un bouton, juste un repère
@@ -2015,6 +2047,11 @@
       await parlerTransformation(true);
       if (currentM) await imOfferHelp(currentM);
     }}),
+    reprise: () => ({ label:'🏠 Où j\'en suis de ma reprise ?', onClick: async () => {
+      imAddMe('Où j\'en suis de ma reprise ?');
+      await parlerReprise();
+      if (currentM) await imOfferHelp(currentM);
+    }}),
     regles: () => ({ label:'📋 Rappelle-moi les règles', onClick: async () => {
       imAddMe('Rappelle-moi les règles.');
       await rappelerRegles();
@@ -2102,7 +2139,7 @@
       { sep:'Comprendre' },
       cat('💡', 'Explique-moi quelque chose',
         broOn() ? 'Quoi ?' : 'Vas-y, demande — j\'aime bien expliquer, moi. 🦊',
-        () => [ACT.pourquoiCouche(), ACT.pourquoiTenue(), ACT.regles(), ACT.progres()]),
+        () => [ACT.pourquoiCouche(), ACT.pourquoiTenue(), ACT.regles(), ACT.progres()].concat(regimeActif() ? [ACT.reprise()] : [])),
       { sep:'Toi et moi' },
       cat('💛', 'J\'ai besoin de parler',
         broOn() ? 'Je t\'écoute. Prends ton temps.' : 'Je suis là. Qu\'est-ce qui te traverse ? 💛',
@@ -3681,6 +3718,7 @@
     renderTimeline();
     renderDayMood();
     renderDiscipline();
+    try { renderDesertion(); } catch(e) {}
   }
 
   // Depuis combien de temps la couche actuelle est portée (dernier change enregistré)
@@ -4143,6 +4181,10 @@
       talk(TALK.PROGRES, 'transfo',      () => parlerTransformation(false));
       talk(TALK.AMBIANCE,'transfo:anniv',() => anniversaireJalon());
     }
+    try { tickDesertion(); } catch(e) {}
+    if (!paused && new Date().getHours() >= 6)
+      talk(TALK.PILIER, 'reveil:rituel', () => rituelReveil(),
+        { verifier: async () => !(await lireStock('reveil:rituel:' + todayStr(), false)) });
     talk(TALK.GUIDE,    'tip:'+new Date().getHours()+':'+new Date().getMinutes(), () => pushMomentTip());
     talk(TALK.AMBIANCE, 'ping',        () => foxyPing());
   }, 60000);
@@ -4391,9 +4433,9 @@
     let modele = null;
     try {
       if (window.HabitrainWardrobe) {
-        const dispo = (await window.HabitrainWardrobe.modelsFor(nuit ? 'nuit' : 'jour'))
-                        .filter(m => m.qty > 0);
-        modele = dispo.length ? dispo[0] : null;
+        const posee = await lireStock('couche:posee', null);
+        const stock = await window.HabitrainWardrobe.getStock();
+        modele = (posee && stock.find(m => m.id === posee.id)) || await modeleProchain(nuit ? 'nuit' : 'jour');
       }
     } catch(e) {}
 
@@ -5073,16 +5115,48 @@
     await imSay(bro(
       'Et moi, je m\'y mets en même temps que toi, de mon côté : tétine, doudou, au sol. On y va ensemble. 🦊',
       'Moi aussi, de mon côté. On y va ensemble.'), 800, 'happy');
-    const k = await imDemander(null, [
+    const due = mesureDes('regression_due');
+    let k = await imDemander(null, [
       { k:'go',  label:'🧸 J\'y vais', dit:'J\'y vais.' },
-      { k:'non', label:'Pas maintenant', dit:'Pas maintenant.', soft:true }
+      due ? { k:'impossible', label:'Je ne peux vraiment pas', dit:'Je ne peux vraiment pas.', soft:true }
+          : { k:'non', label:'Pas maintenant', dit:'Pas maintenant.', soft:true }
     ]);
+    if (k === 'impossible') {
+      // pendant la reprise, on ne l'écarte pas d'un geste : on dit pourquoi
+      const pq = await imDemander(bro('Pourquoi ?', 'Pourquoi ?'), [
+        { k:'dehors',  label:'🏢 Je ne suis pas chez moi',       dit:'Je ne suis pas chez moi.' },
+        { k:'monde',   label:'👥 Il y a quelqu\'un avec moi',    dit:'Il y a quelqu\'un avec moi.' },
+        { k:'malade',  label:'🤒 Je ne me sens pas bien',        dit:'Je ne me sens pas bien.' },
+        { k:'envie',   label:'🙅 Je n\'en ai pas envie',          dit:'Je n\'en ai pas envie.' }
+      ], 'curious');
+      await noterPratique({ sujet:'regression', k:'refus', focus, fenetre: fenetre.id, pourquoi: pq, reprise: true });
+      if (pq === 'envie') {
+        await imSay(bro(
+          'Pas envie. C\'est précisément pour ça que ta reprise la demande : c\'est ta tête d\'adulte qui répond, pas toi. Dix minutes. Juste dix. On y va ?',
+          'Pas envie, c\'est ta tête d\'adulte. Dix minutes. On y va.'), 950, 'calm');
+        k = await imDemander(null, [
+          { k:'go',  label:'🧸 Dix minutes, d\'accord', dit:'Dix minutes, d\'accord.' },
+          { k:'non', label:'Non', dit:'Non.', soft:true }
+        ]);
+        if (k === 'non') {
+          try { await marquerEntorse('b_regression_refusee', true); } catch(e) {}
+          await imSay(bro('D\'accord. Mais pendant ta reprise, ça se note. Ce soir, je te demanderai ce qui t\'a tiré ailleurs.',
+                          'Noté. Ta reprise le retient.'), 900, 'sad');
+        }
+      } else {
+        await imSay(bro(
+          pq === 'malade' ? 'Alors repose-toi, c\'est ça la priorité. Rien n\'est compté. 💛' : 'D\'accord, c\'est une vraie raison. Je le note, sans reproche.',
+          pq === 'malade' ? 'Repose-toi. Rien n\'est compté.' : 'Vraie raison. Noté.'), 850, 'calm');
+        if (currentM) await imOfferHelp(currentM);
+        return;
+      }
+    }
     if (k === 'go') {
       await ecrireStock('reg:pending', { t: Date.now(), fenetre: fenetre.id, focus, date: todayStr() });
       await imSay(bro(
         'Vas-y. Je te laisse tranquille, et je reviens te demander dans une vingtaine de minutes comment ça se passe. Profite. 💛',
         'Vas-y. Je reviens dans vingt minutes.'), 850, 'happy');
-    } else {
+    } else if (!due) {
       await noterPratique({ sujet:'regression', k:'refus', focus, fenetre: fenetre.id });
       const fin = fmtTime(fenetre.a);
       await imSay(bro(
@@ -5272,6 +5346,10 @@
       t:'Une couche saturée se change, même hors créneau. Rougeur constatée, on traite dans la minute.',
       mode:'mixte', b:['b_sature','b_portlong'] },
 
+    { id:'r_presence', ic:'🏠', n:'On ne part pas sans le dire',
+      t:'Une absence s\'annonce, avec son heure de retour. Un arrêt silencieux, un retour en retard ou un retour refusé, c\'est une désertion — et Foxy en reparle.',
+      mode:'auto', b:['b_arret_silencieux','b_retour_tardif','b_refus_retour','pause_longue','pause_tres_longue'] },
+
     { id:'r_tetine', ic:'🍭', n:'Tétine sur les temps de repos',
       t:'Fenêtres de régression, sieste, endormissement. Rien ne le vérifie : celle-là ne tient que sur toi.',
       mode:'parole', b:[] }
@@ -5286,7 +5364,7 @@
     { ic:'🔒', n:'Contention verrouillée : superviseur présent',
       t:'Uniquement avec quelqu\'un d\'éveillé, présent, et qui a les clés. Chaque serrure garde son ouverture manuelle.' },
     { ic:'🛑', n:'Le safeword coupe tout',
-      t:'« Stop Foxy » ramène le Foxy doux immédiatement, vide la file et efface ce qui attendait. Sans discussion, sans conséquence.' },
+      t:'Dans les réglages, ou « stop foxy » dans le chat : Foxy redevient doux, tout s\'arrête. Sans conséquence.' },
     { ic:'🔓', n:'Secours anti-blocage',
       t:'Trois tapes sur le titre de l\'écran de connexion, toujours actif. L\'appli ne peut pas t\'enfermer dehors.' }
   ];
@@ -6172,15 +6250,16 @@
     '<div class="sub" style="line-height:1.6">',
     '<b>Ce qu\'il te faut</b><br>',
     '· 1 ESP32-C3 mini (~6 €)<br>',
-    '· 1 contact ILS (reed) miniature (~1 €)<br>',
+    '· 1 contact ILS (reed) <b>inverseur, à 3 pattes</b> (~1–2 €) — pas un ILS simple à 2 pattes<br>',
     '· des aimants néodyme Ø6×2 mm, un par tenue (~0,20 € pièce)<br>',
-    '· 1 batterie LiPo 150 mAh + module de charge TP4056<br>',
+    '· 1 batterie LiPo <b>protégée</b> 150 mAh + module TP4056 <b>avec protection</b>, dont tu remplaces la résistance de charge (1,2 kΩ, marquée 122) par une 10 kΩ : sinon il charge à 1 A<br>',
+    '· 1 mini interrupteur à glissière, 1 bouton poussoir + résistance 100 kΩ<br>',
     '· 1 pince ou clip plastique pour fixer le module<br><br>',
     '<b>Câblage</b><br>',
-    '· une patte du contact ILS sur <b>GPIO3</b>, l\'autre sur <b>GND</b><br>',
-    '· le bouton de réveil entre <b>GPIO9</b> et <b>GND</b><br>',
-    '· la LiPo sur 3V3 et GND, via le TP4056<br>',
-    'Aucune résistance à ajouter : le tirage interne suffit.<br><br>',
+    '· ILS : patte commune sur <b>GPIO3</b> ; le contact qui se ferme avec l\'aimant sur <b>GND</b> ; l\'autre sur <b>3V3</b> (repère-les au multimètre)<br>',
+    '· le bouton de réveil entre <b>GPIO4</b> et <b>GND</b>, 100 kΩ de GPIO4 vers 3V3<br>',
+    '· la LiPo → TP4056 → interrupteur → broche <b>5V</b>. <b style="color:var(--coral)">Jamais sur 3V3</b> : 4,2 V détruisent l\'ESP32-C3<br>',
+    '· firmware : dossier <b>habitrain-capteur-tenue</b> (v2). La v1 ne pouvait pas se réveiller à l\'ouverture ni se connecter à l\'appli.<br><br>',
     '<b>Où va l\'aimant — c\'est LUI qui bouge</b><br>',
     'Le module reste fixe, l\'aimant se déplace avec la fermeture. Le contact ',
     'ne voit donc plus rien dès que tu ouvres.<br><br>',
@@ -6464,7 +6543,11 @@
     { id:'b_incoherence',     n:'Déclaration contredite par un capteur',  grav:'grave',   w:12 },
     { id:'b_capteur_muet',    n:'Capteur silencieux sur une fenêtre',     grav:'moyenne', w:7 },
     { id:'b_check',           n:'Check sauté (11h30, 13h30 ou 19h30)',    grav:'moyenne', w:7 },
-    { id:'b_urgence',         n:'Serrure ouverte en urgence',            grav:'legere',  w:3 }
+    { id:'b_urgence',         n:'Serrure ouverte en urgence',            grav:'legere',  w:3 },
+    { id:'b_arret_silencieux', n:'Arrêt du programme sans le dire',       grav:'grave',   w:12 },
+    { id:'b_retour_tardif',   n:'Retour de pause en retard (+2 h)',       grav:'moyenne', w:7 },
+    { id:'b_refus_retour',    n:'Retour au programme refusé',            grav:'moyenne', w:7 },
+    { id:'b_regression_refusee', n:'Régression refusée pendant la reprise', grav:'legere', w:3 }
   ];
   const GRAV_LABEL = { grave:'Grave', moyenne:'Moyenne', legere:'Légère' };
 
@@ -7783,8 +7866,8 @@
       switch (item) {
         // Sans tirage enregistré, la référence était simplement ignorée :
         // Foxy passait la tenue sous silence au lieu de te dire qu'il en manque un.
-        case '@tenue_jour':   v = tenues ? tenues.jour : 'Ta tenue du jour — le tirage n\'est pas encore fait'; break;
-        case '@tenue_nuit':   v = tenues ? tenues.nuit : 'Ta tenue de nuit — le tirage n\'est pas encore fait'; break;
+        case '@tenue_jour':   v = tenues ? tenues.jour : 'Ta tenue du jour — je la tire à ton réveil'; break;
+        case '@tenue_nuit':   v = tenues ? tenues.nuit : 'Ta tenue de nuit — je la tire à ton réveil'; break;
         // La sieste est une tolérance, pas une obligation : la carte du tirage
         // le dit, le kit doit le dire aussi. Sinon Foxy réclame une tenue que
         // rien ne t'impose — et la vérification, elle, accepte les trois.
@@ -7798,8 +7881,8 @@
           try {
             if (window.HabitrainWardrobe) {
               const per = item === '@couche_nuit' ? 'nuit' : 'jour';
-              const dispo = (await window.HabitrainWardrobe.modelsFor(per)).filter(x => x.qty > 0);
-              v = dispo.length ? (dispo[0].name + ' (' + dispo[0].qty + ' en stock)') : 'une couche — stock à refaire !';
+              const m = await modeleProchain(per);
+              v = m ? (m.name + ' (' + m.qty + ' en stock)') : 'une couche — stock à refaire !';
             }
           } catch(e) {}
           if (!v) v = item === '@couche_nuit' ? 'ta couche de nuit' : 'ta couche de jour';
@@ -8200,8 +8283,10 @@
        remet le compteur à zéro. Tout est affiché maintenant. */
     if (t) {
       t.innerHTML =
-        '<div style="margin-bottom:8px">Déclenchée au niveau <b>' + (NIV[discSession.niveau] || discSession.niveau)
-          + '</b> : ' + discSession.ecarts + ' points d\'écart cumulés sur 3 jours.</div>'
+        (discSession.source === 'desertion'
+          ? '<div style="margin-bottom:8px">Déclenchée par ta <b>désertion</b> : elle dure toute ta reprise.</div>'
+          : '<div style="margin-bottom:8px">Déclenchée au niveau <b>' + (NIV[discSession.niveau] || discSession.niveau)
+          + '</b> : ' + discSession.ecarts + ' points d\'écart cumulés sur 3 jours.</div>')
         + '<div style="font-weight:800;text-transform:uppercase;font-size:10.5px;letter-spacing:.05em;color:#a8543b;margin-bottom:3px">Ce qui change</div>'
         + '<div style="margin-bottom:8px;line-height:1.5">'
         + '• <b>Tous les créneaux deviennent des changes piliers</b> — les checks de 11h30, 13h30 et 19h30 ne sont plus de simples vérifications.<br>'
@@ -8414,7 +8499,15 @@
   }
   function drawOutfit() {
     // une catégorie vide ne doit pas produire « undefined » silencieusement
-    const tire = (cat) => { const l = wb(cat); return l.length ? pickOne(l) : null; };
+    const tire = (cat) => {
+      let l = wb(cat);
+      // reprise après désertion : fermeture dorsale seulement, quand il y en a
+      if (mesureDes('tenue_fermee') && cat !== 'sieste') {
+        const f = l.filter(n => FERMEE_DOS.indexOf(typeTenue(n)) >= 0);
+        if (f.length) l = f;
+      }
+      return l.length ? pickOne(l) : null;
+    };
     const jour = tire('jour');
     const nuit = tire('nuit');
     // pas de tenue de sieste déclarée : on retombe sur celle de nuit, qui est
@@ -8525,8 +8618,8 @@
       renderOutfitResult(existing, forcee);
       if (btn) btn.style.display = 'none';
     } else {
-      if (btn) btn.style.display = '';
-      document.getElementById('outfitList').innerHTML = '';
+      if (btn) btn.style.display = 'none';
+      document.getElementById('outfitList').innerHTML = '<div class="outfit-note">🌅 Foxy la tire tout seul au réveil, et te l\'annonce.</div>';
       document.getElementById('outfitNote').style.display = 'none';
       document.getElementById('outfitOnce').style.display = 'none';
     }
@@ -8652,26 +8745,97 @@
     if (btn) btn.style.display = 'none';
   }
 
-  document.getElementById('supDraw').addEventListener('click', async () => {
-    // sécurité : si un tirage existe déjà pour aujourd'hui, on ne retire pas
+  // un seul tirage par jour : s'il existe, on le rend tel quel
+  async function tirerEquipement() {
     const already = await getDraw(todayStr());
-    if (already && already.length) { lockDrawUI(); renderDrawResult(already); return; }
+    if (already && already.length) return already;
     const n = 2 + Math.floor(Math.random() * 4); // 2 à 5
     const ids = shuffle(EQUIP_POOL).slice(0, n).map(e => e.id);
     await saveDraw(todayStr(), ids);
-    document.getElementById('supLead').textContent = 'Équipement du jour (' + ids.length + ')';
-    renderDrawResult(ids);
-    lockDrawUI();
-  });
+    return ids;
+  }
+  async function tirerTenue() {
+    const o = await getOutfit(todayStr());
+    if (o) return { o, deja: true };
+    const n = drawOutfit();
+    await saveOutfit(todayStr(), n);
+    return { o: n, deja: false };
+  }
 
-  document.getElementById('outfitDraw').addEventListener('click', async () => {
-    const already = await getOutfit(todayStr());
-    if (already) { renderOutfitResult(already); document.getElementById('outfitDraw').style.display='none'; return; }
-    const o = drawOutfit();
-    await saveOutfit(todayStr(), o);
-    renderOutfitResult(o);
-    document.getElementById('outfitDraw').style.display = 'none';
-  });
+  /* ============================================================
+     RITUEL DU RÉVEIL
+     Le tirage n'est plus un bouton : Foxy le fait tout seul au premier
+     passage de la journée (à partir de 6h) et te l'annonce. Il ne te
+     pose qu'une question : un superviseur sera-t-il présent ? La
+     réponse décide si l'équipement du jour est tiré — et donc si un
+     élément verrouillé peut sortir.
+     ============================================================ */
+  async function rituelReveil() {
+    if (paused || new Date().getHours() < 6) return false;
+    const cle = 'reveil:rituel:' + todayStr();
+    if (await lireStock(cle, false)) return false;
+    await ecrireStock(cle, true);
+
+    const dejaType = await lireStock('daytype:' + todayStr(), null);
+    const chat = voiceMode === 'foxy';
+    let sup = dejaType;
+
+    if (!sup) {
+      if (chat) {
+        await imSay(bro(
+          'Bonjour, toi. 🦊 Avant que je tire ta journée, une seule question.',
+          'Debout. Une question, et je tire ta journée.'), 850, 'wave');
+        const k = await imDemander(bro('Un superviseur sera présent aujourd\'hui ?', 'Superviseur présent aujourd\'hui ?'), [
+          { k:'supervise', label:'👥 Oui, il sera là', dit:'Oui, il sera là.' },
+          { k:'solo',      label:'🧍 Non, je suis seul', dit:'Non, je suis seul.' }
+        ], 'curious');
+        sup = k;
+      } else {
+        sup = await new Promise(res => {
+          foxyPopShow('Bonjour ! 🦊 Avant que je tire ta journée : un superviseur sera présent aujourd\'hui ?', 'wave', [
+            { label:'👥 Oui, il sera là', onClick: () => res('supervise') },
+            { label:'🧍 Non, je suis seul', onClick: () => res('solo') }
+          ]);
+        });
+      }
+      await ecrireStock('daytype:' + todayStr(), sup);
+    }
+
+    const { o, deja } = await tirerTenue();
+    const equip = sup === 'supervise' ? await tirerEquipement() : [];
+    try { await renderOutfitCard(); } catch(e) {}
+    try { await renderSupMode(); } catch(e) {}
+
+    const lignes = [];
+    lignes.push('☀️ <b>Jour</b> : ' + (o.jour || 'ta tenue habituelle') + ' — au change de 9h');
+    if (o.sieste && o.sieste !== o.nuit) lignes.push('😴 <b>Sieste</b> : ' + o.sieste + ' — si tu veux');
+    lignes.push('🌙 <b>Nuit</b> : ' + (o.nuit || 'ta tenue de nuit') + ' — dès 19h30');
+    const eq = equip.map(id => EQUIP_POOL.find(e => e.id === id)).filter(Boolean);
+    const verrou = eq.some(e => e.lock);
+
+    if (chat) {
+      await imSay(deja
+        ? bro('Ta tenue est déjà tirée pour aujourd\'hui. La voilà :', 'Déjà tirée. La voilà :')
+        : bro('J\'ai tiré ta tenue. Tu ne choisis pas, c\'est le principe — et tu verras, c\'est reposant. 🦊', 'Tenue tirée. Tu ne choisis pas.'), 850, 'proud');
+      await imSay(lignes.join('<br>'), 1000, 'explain');
+      if (sup === 'supervise') {
+        await imSay(bro('Et puisque ton superviseur est là, voici ton équipement du jour :', 'Superviseur là. Équipement du jour :'), 800, 'curious');
+        await imSay(eq.map(e => e.ic + ' ' + e.n).join('<br>'), 1000, 'explain');
+        if (verrou) await imSay(bro(
+          'Le verrouillé, seulement avec lui présent, éveillé et aux clés, du début à la fin. Sur tes fenêtres de régression — jamais pendant la sieste ou la nuit. Ça, ça ne bouge pas.',
+          'Le verrouillé : lui présent, éveillé, aux clés. Fenêtres de régression seulement. Jamais sieste ni nuit.'), 1000, 'calm');
+      } else {
+        await imSay(bro('Seul aujourd\'hui : pas d\'équipement verrouillé, juste ta tenue. Ça suffit largement. 💛', 'Seul : pas de verrouillé. Ta tenue suffit.'), 850, 'calm');
+      }
+      if (currentM) await imOfferHelp(currentM);
+    } else {
+      let txt = (deja ? 'Ta tenue du jour : ' : 'J\'ai tiré ta tenue : ') + lignes.map(l => l.replace(/<[^>]+>/g, '')).join(' · ');
+      if (eq.length) txt += '. Équipement : ' + eq.map(e => e.n).join(', ') + '.' + (verrou ? ' Le verrouillé seulement avec ton superviseur présent et aux clés.' : '');
+      await new Promise(res => foxyPopShow(txt, 'proud', [{ label:'C\'est noté 🦊', onClick: () => { foxyPopHide(); res(); } }]));
+    }
+    return true;
+  }
+
 
   document.getElementById('breachSave').addEventListener('click', async () => {
     await saveBreaches(todayStr(), breachSel || {});
@@ -8710,8 +8874,10 @@
       supCard.style.display = '';
       prompt.style.display = 'none';
       inner.style.display = '';
-      const existing = await getDraw(todayStr());
+      // tiré d'office : plus de bouton
+      const existing = await tirerEquipement();
       const btn = document.getElementById('supDraw');
+      if (btn) btn.style.display = 'none';
       if (existing && existing.length) {
         document.getElementById('supLead').textContent = 'Équipement du jour (' + existing.length + ')';
         renderDrawResult(existing);
@@ -8723,10 +8889,8 @@
     } else if (type === 'solo') {
       supCard.style.display = 'none';
     } else {
-      // type inconnu : on propose de marquer le jour
-      supCard.style.display = '';
-      prompt.style.display = '';
-      inner.style.display = 'none';
+      // pas encore demandé : c'est Foxy qui pose la question au réveil
+      supCard.style.display = 'none';
     }
   }
 
@@ -8793,6 +8957,11 @@
     try { imClear(); } catch(e) {}
     await imSay('*doux, immédiatement* Hé, je suis là. On arrête tout, d\'accord ? C\'est bon, tu es en sécurité.', 700, 'concern');
     await imSay('Reprends ton souffle. Je redeviens ton Foxy tout doux. Tu as très bien fait de me le dire. On va à ton rythme, tranquille. 🦊💛', 900, 'happy');
+    try {
+      if (await leverRepriseSafeword()) {
+        await imSay('Et ta reprise s\'arrête là aussi : plus aucune mesure. On n\'en reparle pas. 💛', 850, 'comfort');
+      }
+    } catch(e) {}
     if (currentM) await imOfferHelp(currentM);
   }
   async function setHardMode(v) {
@@ -9150,6 +9319,7 @@
   }
 
   async function doEnterPause() {
+    try { await noterDebutPause(); } catch(e) {}
     paused = true;
     document.body.classList.add('paused');
     try { await window.storage.set('pref:paused', JSON.stringify(true)); } catch(e) {}
@@ -9165,12 +9335,14 @@
   function enterPause() {
     try { foxyPopHide(); } catch(e) {}
     try { loadFoxyOutfit(); } catch(e) {}
+    if (mesureDes('pause_encadree')) { pauseEncadree(); return; }
     if (hardMode) {
       // en intensif, Foxy résiste : il faut confirmer fermement
       foxyPopShow('Tu veux vraiment faire une pause ? En mode intensif, on ne s\'échappe pas comme ça... Réfléchis bien. Tu es sûr ?', 'concern', [
         { label:'Oui, j\'ai vraiment besoin de faire une pause', onClick: async () => {
           foxyPopShow('Bon... d\'accord, si tu en as VRAIMENT besoin. Mais je compte sur toi pour revenir vite reprendre le cadre. À tout à l\'heure. 🦊', 'pensive', [
-            { label:'Je reviens vite, promis', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
+            { label:'Je reviens vite, promis', onClick: async () => { foxyPopHide(); await doEnterPause(); } },
+            { soft:true, label:'🧳 Absence prévue : je te dis quand je reviens', onClick: () => pauseChoixRetour('dehors') }
           ]);
         }},
         { soft:true, label:'Non, je continue', onClick: async () => { foxyPopHide(); } }
@@ -9178,7 +9350,8 @@
       return;
     }
     foxyPopShow('À très vite, mon compagnon ! Je t\'attends bien au chaud, reviens quand tu veux. 🦊💛', 'wave', [
-      { label:'À tout à l\'heure Foxy', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
+      { label:'À tout à l\'heure Foxy', onClick: async () => { foxyPopHide(); await doEnterPause(); } },
+      { soft:true, label:'🧳 Absence prévue : je te dis quand je reviens', onClick: () => pauseChoixRetour('dehors') }
     ]);
   }
   // Sortie de pause : on quitte l'écran de connexion, mais la pause
@@ -9197,6 +9370,9 @@
       if (sc != null && sc > hours) hours = sc;
     } catch(e) {}
     try { if (hours >= 24) await flagBadge('comeback'); } catch(e) {}
+    _desCtx = { declaree: true,
+                retourPrevu: await lireStock('pause:retour', null),
+                motifAnnonce: await lireStock('pause:motif', null) };
     await runResumeProgram(hours);
   }
 
@@ -9230,8 +9406,9 @@
       const heures = (Date.now() - repere) / 3600000;
       // durée SANS COUCHE : uniquement depuis le dernier change
       const sansCouche = dernierChange ? (Date.now() - dernierChange.getTime()) / 3600000 : null;
-      // en dessous de 18h, ce n'est qu'une nuit : pas un arrêt
-      if (heures < 18) return 0;
+      // en dessous de 18h, ce n'est qu'une nuit : pas un arrêt.
+      // Pendant une reprise sous surveillance, 12h suffisent (22h30 → 10h30).
+      if (heures < (mesureDes('surveillance') ? 12 : 18)) return 0;
       // on mémorise le détail pour le message
       _arretDetail = { suivi: heures, sansCouche };
       return heures;
@@ -9245,6 +9422,7 @@
     document.body.classList.remove('paused');
     try { await window.storage.set('pref:paused', JSON.stringify(false)); } catch(e) {}
     try { await window.storage.delete('pause:start'); } catch(e) {}
+    try { await noterFinPause(); } catch(e) {}
     try { await refresh(); } catch(e) {}
   }
 
@@ -9256,6 +9434,7 @@
   }
 
   async function runResumeProgram(hours) {
+    try { await constaterDesertion(hours); } catch(e) {}
     const now = new Date();
     const isNight = now.getHours() >= 23 || now.getHours() < 7;
 
@@ -9268,7 +9447,16 @@
         return;
       }
       foxyPopShow('Te revoilà ! Courte absence, on reprend le fil tranquillement. Tu es toujours en couche ?', 'joy', [
-        { label:'🤗 Oui, on replonge !', onClick: async () => { foxyPopHide(); await confirmerReprise(); if (voiceMode !== 'foxy') { await setVoiceMode('foxy'); } else { try { await imRunMoment(); } catch(e){} } }},
+        { label:'🤗 Oui, on replonge !', onClick: async () => {
+          foxyPopHide();
+          _desReserve = true;
+          await confirmerReprise();
+          const des = await desertionEnAttente();
+          if (voiceMode !== 'foxy') { await setVoiceMode('foxy'); }
+          else if (!des) { try { await imRunMoment(); } catch(e){} }
+          if (des) { try { imClear(); await recadrageDesertion(); } catch(e) {} }
+          _desReserve = false;
+        }},
         { label:'👕 Non, je dois remettre ma couche', onClick: async () => {
           foxyPopHide();
           if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e){} }
@@ -9276,7 +9464,7 @@
         }},
         { soft:true, label:'Pas tout de suite', onClick: async () => {
           foxyPopShow('D\'accord... je t\'attends. Reviens vite. 🦊💛', 'concern', [
-            { label:'À très vite', onClick: async () => { foxyPopHide(); await annulerReprise(); await doEnterPause(); } }
+            { label:'À très vite', onClick: async () => { foxyPopHide(); try { await noterRefusRetour(); } catch(e) {} await annulerReprise(); await doEnterPause(); } }
           ]);
         }}
       ]);
@@ -9321,7 +9509,7 @@
     try { await window.storage.set('reprise:change', JSON.stringify(todayStr()+':'+Date.now())); } catch(e) {}
 
     foxyPopShow(msg1, 'concern', [
-      { soft:true, label:'Pas maintenant', onClick: async () => { foxyPopHide(); await annulerReprise(); await doEnterPause(); } },
+      { soft:true, label:'Pas maintenant', onClick: async () => { foxyPopHide(); try { await noterRefusRetour(); } catch(e) {} await annulerReprise(); await doEnterPause(); } },
       { label:'Je t\'écoute...', onClick: async () => {
         foxyPopShow(msg2, niveau === 'tres_long' ? 'surprised' : 'concern', [
           { label:'🦊 Qu\'est-ce que je fais ?', onClick: async () => {
@@ -9342,6 +9530,8 @@
   // Foxy signale un arrêt du programme non déclaré
   function fmtDuree(h) {
     if (h == null) return null;
+    if (h < 1) return Math.max(1, Math.round(h * 60)) + ' minutes';
+    if (h < 1.5) return 'une heure';
     if (h < 48) return Math.round(h) + ' heures';
     const j = Math.floor(h / 24);
     if (j < 14) return j + ' jours';
@@ -9368,6 +9558,7 @@
         { label:'🦊 Oui, on reprend', onClick: async () => {
           foxyPopHide();
           if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e){} }
+          _desCtx = { declaree: false };
           try { await runResumeProgram(heures); } catch(e) {}
         }},
         { soft:true, label:'J\'ai continué sans noter', onClick: async () => {
@@ -9405,6 +9596,7 @@
           try { await finishChange(); } catch(e) {}
           if (voiceMode === 'foxy') {
             try { await imSay('Ah, d\'accord ! Je note ton change alors. Comme ça ton suivi repart juste. 🦊', 850, 'happy'); } catch(e) {}
+            if (await desertionEnAttente()) { try { await recadrageDesertion(); } catch(e) {} }
           }
         }},
         { soft:true, label:'Plus tard', onClick: () => foxyPopHide() }
@@ -9435,8 +9627,11 @@
       if (window.HabitrainWardrobe) {
         // même période que celle réellement posée (bascule de 19h30 comprise)
         const per = couchageNuit(new Date()) ? 'nuit' : 'jour';
-        const dispo = (await window.HabitrainWardrobe.modelsFor(per)).filter(m => m.qty > 0);
-        if (dispo.length) lignes.push('🍼 Couche : <b>' + dispo[0].name + '</b> — ' + dispo[0].qty + ' restantes après celle-ci');
+        // la couche qu'on vient de poser, pas celle du prochain change
+        const posee = await lireStock('couche:posee', null);
+        const stock = await window.HabitrainWardrobe.getStock();
+        const m = (posee && Date.now() - posee.t < 3600000 && stock.find(x => x.id === posee.id)) || await modeleProchain(per);
+        if (m) lignes.push('🍼 Couche : <b>' + m.name + '</b> — ' + m.qty + ' restantes');
         else lignes.push('🍼 Couche : <b>stock épuisé</b> pour la période, pense à recommander');
       }
     } catch(e) {}
@@ -9561,8 +9756,8 @@
     let modele = null;
     try {
       if (window.HabitrainWardrobe) {
-        const dispo = (await window.HabitrainWardrobe.modelsFor(periode)).filter(x => x.qty > 0);
-        modele = dispo.length ? dispo[0] : null;
+        modele = await modeleProchain(periode);
+        if (modele) changeModel = modele;
       }
     } catch(e) {}
 
@@ -9674,17 +9869,767 @@
         }
 
         // protocole mené à son terme : c'est maintenant que la pause est levée
+        _desReserve = true;
         try { await window.storage.delete('reentry:pending'); } catch(e) {}
         await confirmerReprise();
         await recapReprise();
         await imSay(broOn()
           ? 'Bien. Te revoilà où tu dois être, comme il faut. Maintenant tu ne ressors plus du cadre — laisse-toi porter, c\'est tout ce que tu as à faire.'
           : 'Voilààà ! Te revoilà tout bien installé. 🦊 Tu es à la maison, en sécurité, et je m\'occupe de tout maintenant. Content de t\'avoir retrouvé, vraiment. 💛', 1000, 'proud');
+        // une désertion constatée : la morale vient maintenant, couche remise
+        if (await desertionEnAttente()) { try { await recadrageDesertion(); } catch(e) {} _desReserve = false; return; }
+        _desReserve = false;
         try { await imRunMoment(); } catch(e) {}
       }},
       { soft:true, label:'Répète-moi les étapes', onClick: async () => { await reentryInterne(niveau); } }
     ]);
   }
+
+  /* ============================================================
+     DÉSERTION — la morale, puis ce qui change pour que ça ne se
+     reproduise pas.
+
+     Ce qui compte comme une désertion :
+       · un arrêt silencieux (rien appuyé, rien dit) ;
+       · une pause de plus de 24 h qui n'avait pas été annoncée ;
+       · un retour avec plus de 2 h de retard sur l'heure promise ;
+       · un départ sur « j'ai envie de partir » ;
+       · quatre pauses d'une heure ou plus en sept jours.
+     Une absence annoncée à l'avance, avec son heure de retour, et
+     tenue : ce n'est PAS une désertion.
+
+     Déroulé :
+       1. au retour, la couche est remise d'abord (protocole de reprise) ;
+       2. ensuite seulement, Foxy fait la morale : les faits, la raison,
+          ce qu'il recoupe, ce qui se répète ;
+       3. il pose des mesures, pour quelques jours, choisies d'après la
+          raison — elles s'accrochent aux protocoles existants.
+     Limites intactes : on peut toujours sortir (la pause reste
+     possible, jamais bloquée), et le safeword lève tout.
+     ============================================================ */
+  const DES_CLE = 'desertion:encours';   // constatée, pas encore « parlée »
+  const DES_HIST = 'desertion:hist';     // toutes, pour voir ce qui se répète
+  const DES_REGIME = 'desertion:regime'; // mesures en cours
+  let desRegime = null;                  // copie en mémoire (le tirage est synchrone)
+  let _desCtx = null;                    // contexte de la sortie de pause en cours
+  let _recadrageEnCours = false;
+  let _desReserve = false;               // un protocole va la faire lui-même : le minuteur s'abstient
+  const JOURS_SEM = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+  const FERMEE_DOS = ['gren_dos', 'keeper'];
+
+  async function loadDesertion() {
+    desRegime = await lireStock(DES_REGIME, null);
+  }
+  async function setRegime(r) {
+    desRegime = r;
+    await ecrireStock(DES_REGIME, r);
+    try { renderDesertion(); } catch(e) {}
+  }
+  function regimeActif() { return !!(desRegime && Date.now() < desRegime.fin); }
+  function mesureDes(id) { return regimeActif() && desRegime.mesures.indexOf(id) >= 0; }
+  async function desertionEnAttente() { return !!(await lireStock(DES_CLE, null)); }
+
+  function dateCle(ms) { return new Date(ms).toISOString().slice(0,10); }
+  function heureTxt(ms) {
+    const d = new Date(ms);
+    return d.getHours() + 'h' + String(d.getMinutes()).padStart(2,'0');
+  }
+  function jourTxt(ms) {
+    const d = new Date(ms), auj = new Date();
+    if (dateCle(ms) === dateCle(auj.getTime())) return 'aujourd\'hui';
+    const hier = new Date(); hier.setDate(hier.getDate()-1);
+    if (dateCle(ms) === dateCle(hier.getTime())) return 'hier';
+    return JOURS_SEM[d.getDay()] + ' ' + d.getDate();
+  }
+  function nieme(n) { return n === 1 ? 'première' : n === 2 ? 'deuxième' : n === 3 ? 'troisième' : n + 'e'; }
+
+  // poids des entorses d'une journée
+  async function poidsEntorses(date) {
+    const b = await getBreaches(date);
+    let p = 0;
+    Object.keys(b).forEach(id => { if (!b[id]) return; const it = BREACHES.find(x => x.id === id); p += it ? it.w : 5; });
+    return p;
+  }
+
+  /* ---------- Historique des pauses (pour les « petites touches ») ---------- */
+  async function noterDebutPause() {
+    const l = await lireStock('pause:hist', []);
+    const der = l[l.length-1];
+    if (der && !der.fin) return;                 // déjà ouverte (retour refusé)
+    l.push({ debut: Date.now() });
+    await ecrireStock('pause:hist', l.slice(-40));
+  }
+  async function noterFinPause() {
+    const l = await lireStock('pause:hist', []);
+    const der = l[l.length-1];
+    if (der && !der.fin) { der.fin = Date.now(); await ecrireStock('pause:hist', l); }
+    await ecrireStock('pause:retour', null);
+    await ecrireStock('pause:motif', null);
+  }
+
+  /* ---------- Constat, au moment du retour ---------- */
+  async function constaterDesertion(heures) {
+    const ctx = _desCtx || { declaree: true };
+    _desCtx = null;
+    const now = Date.now();
+    const retard = ctx.retourPrevu ? Math.max(0, (now - ctx.retourPrevu) / 3600000) : 0;
+    const ph = await lireStock('pause:hist', []);
+    const petites = ph.filter(p => p.fin && now - p.debut < 7*86400000 && (p.fin - p.debut) >= 3600000).length
+                  + (heures >= 1 ? 1 : 0);
+    const seuilSilence = mesureDes('surveillance') ? 12 : 18;
+    const annoncee = ctx.declaree && ctx.retourPrevu && retard < 2;
+
+    let raison = null;
+    if (!ctx.declaree && heures >= seuilSilence) raison = 'silence';
+    else if (retard >= 2) raison = 'retard';
+    else if (ctx.motifAnnonce === 'envie' && heures >= 1) raison = 'envie';
+    else if (heures >= 24 && !annoncee) raison = 'longue';
+    else if (petites >= 4 && !annoncee) raison = 'petites';
+
+    const ex = await lireStock(DES_CLE, null);
+    if (!raison && !ex) return null;
+
+    let sansCouche = null;
+    try { sansCouche = await tempsSansCouche(); } catch(e) {}
+    const d = Object.assign({}, ex || {}, {
+      debut: Math.min(ex ? ex.debut : now, now - heures*3600000),
+      heures: Math.max(heures, ex ? ex.heures : 0),
+      sansCouche,
+      declaree: !!ctx.declaree && !(ex && ex.declaree === false),
+      retard: Math.max(retard, ex ? (ex.retard || 0) : 0),
+      retourPrevu: ctx.retourPrevu || (ex && ex.retourPrevu) || null,
+      motifAnnonce: ctx.motifAnnonce || (ex && ex.motifAnnonce) || null,
+      petites,
+      raison: (ex && ex.raison) || raison,
+      refus: ex ? (ex.refus || 0) : 0,
+      enRegime: regimeActif() || !!(ex && ex.enRegime),
+      constate: now
+    });
+    await ecrireStock(DES_CLE, d);
+    try {
+      if (!d.declaree) await marquerEntorse('b_arret_silencieux', true);
+      if (d.retard >= 2) await marquerEntorse('b_retour_tardif', true);
+    } catch(e) {}
+    return d;
+  }
+  // « Pas maintenant » au moment de revenir : ça se compte.
+  async function noterRefusRetour() {
+    const d = await lireStock(DES_CLE, null);
+    if (!d) return;
+    d.refus = (d.refus || 0) + 1;
+    await ecrireStock(DES_CLE, d);
+    try { await marquerEntorse('b_refus_retour', true); } catch(e) {}
+  }
+
+  /* ---------- Ce que Foxy voit dans l'historique ---------- */
+  async function diagnosticDesertion(d, hist) {
+    const lignes = [];
+    const toutes = hist.concat([{ debut: d.debut, motif: null }]);
+    const recentes = toutes.filter(x => Date.now() - x.debut < 60*86400000);
+
+    // même jour de la semaine
+    const jd = new Date(d.debut).getDay();
+    const memeJour = recentes.filter(x => new Date(x.debut).getDay() === jd).length;
+    if (memeJour >= 2) lignes.push({
+      f:"Et il y a une chose que je remarque : c'est la " + nieme(memeJour) + " fois que tu pars un " + JOURS_SEM[jd] + ". Ce n'est pas un hasard. Quelque chose, ce jour-là, te tire dehors — et on va le regarder en face.",
+      b:"C'est la " + nieme(memeJour) + " fois que tu pars un " + JOURS_SEM[jd] + ". Pas un hasard." });
+
+    // toujours le soir
+    const soirs = recentes.filter(x => { const h = new Date(x.debut).getHours(); return h >= 19 || h < 2; }).length;
+    if (soirs >= 2 && memeJour < 2) lignes.push({
+      f:"Et tu pars le soir. À chaque fois. Quand la journée a été longue et que la couche du soir pèse un peu plus. C'est le moment où tu es le plus fragile, et c'est là qu'il faut qu'on soit plus solides, toi et moi.",
+      b:"Tu pars le soir. À chaque fois. C'est ton point faible, on le couvre." });
+
+    // la veille, ça lâchait déjà
+    const veille = new Date(d.debut); veille.setDate(veille.getDate()-1);
+    const pVeille = await poidsEntorses(dateCle(veille.getTime())) + await poidsEntorses(dateCle(d.debut));
+    if (pVeille >= 12) lignes.push({
+      f:"Et avant de partir, tu décrochais déjà : " + pVeille + " points d'entorses sur ta dernière journée. On ne part jamais d'un coup, tu sais. On lâche un fil, puis deux, et un soir on ne revient pas. Moi, je veux qu'on rattrape le premier fil.",
+      b:"Ta dernière journée : " + pVeille + " points d'entorses. Tu lâchais avant de partir. On ne part jamais d'un coup." });
+
+    // il avait dit que c'était dur
+    try {
+      const m1 = await lireStock('moral:' + dateCle(d.debut), []);
+      const m0 = await lireStock('moral:' + dateCle(veille.getTime()), []);
+      if (m0.concat(m1).some(x => x.v === 'dur' || x.v === 'fatigue')) lignes.push({
+        f:"Et tu me l'avais dit, que c'était dur. Tu me l'as dit, et puis tu es parti. La prochaine fois que tu me dis ça, je veux qu'on allège ensemble — pas que tu règles ça tout seul en claquant la porte.",
+        b:"Tu m'avais dit que c'était dur. Puis tu es parti. La prochaine fois, on allège ensemble. Tu ne règles pas ça seul." });
+    } catch(e) {}
+
+    // pendant une reprise
+    if (d.enRegime) lignes.push({
+      f:"Et tu es parti alors que tu étais déjà en reprise après une désertion. Ça, ça me dit que ce qu'on avait mis en place n'a pas suffi. Alors on serre plus fort.",
+      b:"Tu es parti pendant ta reprise. Ce qu'on avait mis ne suffisait pas. On serre." });
+
+    // plus longue que la précédente
+    const prec = hist[hist.length-1];
+    if (prec && prec.heures && d.heures > prec.heures * 1.5 && Date.now() - prec.debut < 60*86400000) lignes.push({
+      f:"Et celle-ci a duré plus longtemps que la précédente (" + fmtDuree(prec.heures) + " la dernière fois). Elles s'allongent. C'est exactement la pente que je ne veux pas qu'on prenne.",
+      b:"Plus longue que la précédente (" + fmtDuree(prec.heures) + "). Elles s'allongent. Non." });
+
+    return lignes.slice(0, 3);
+  }
+
+  /* ---------- Les mesures ---------- */
+  const MESURES_DES = {
+    pacte: { ic:'🤝', n:'Le pacte, à chaque pilier',
+      t:'À chaque change pilier, Foxy te demande si tu restes. Dire que l\'envie de partir est là n\'est jamais une entorse.',
+      dire:{ f:"À chaque change pilier, avant que tu repartes, je te demanderai si tu restes. Ce n'est pas une formalité. Partir, ça commence toujours par un moment où on arrête de se poser la question. Moi, je te la poserai trois fois par jour. Et si la réponse est « j'ai envie de partir », tu me le dis — ça, ce ne sera jamais une faute.",
+             b:"Trois fois par jour, au pilier, tu me dis si tu restes. Et si l'envie est là, tu le dis. Ce n'est pas une faute. Partir sans le dire, si." } },
+    tenue_fermee: { ic:'🔐', n:'Tenues fermées dans le dos',
+      t:'Le tirage ne sort plus que des tenues à fermeture dorsale quand ta garde-robe en a, dès le prochain tirage.',
+      dire:{ f:"À partir du prochain tirage, je ne sors plus que des tenues fermées dans le dos. Pas pour t'enfermer : pour remettre ces quelques secondes entre l'envie et le geste. Partir, ça commence toujours par se déshabiller. Là, ce sera plus long. Et l'envie ne tient pas si longtemps.",
+             b:"Au prochain tirage : fermeture dans le dos, uniquement. Partir commence par se déshabiller. Ce sera plus long. L'envie ne tient pas." } },
+    pause_encadree: { ic:'⏸️', n:'Pause encadrée',
+      t:'Toute pause se déclare : une raison et une heure de retour. Plus de 2 h de retard et c\'est une désertion. La pause reste toujours possible.',
+      dire:{ f:"La pause, tu la gardes — je ne te l'enlèverai jamais, ce serait te mentir sur ce qu'est le cadre. Mais pendant ta reprise, elle se déclare : pourquoi, et quand tu reviens. Si tu reviens plus de deux heures après l'heure promise, je considère que tu es parti. Et si c'est juste l'envie qui te pousse, je te demanderai dix minutes avec moi d'abord. Dix minutes, c'est tout.",
+             b:"La pause reste. Mais elle se déclare : pourquoi, et quand tu reviens. Deux heures de retard, c'est une désertion. Et si c'est l'envie, dix minutes avec moi d'abord." } },
+    envie_soir: { ic:'🌙', n:'L\'envie de partir, chaque soir',
+      t:'Chaque soir, Foxy demande si l\'envie de partir est passée. Forte, on en parle tout de suite.',
+      dire:{ f:"Chaque soir, je te demanderai si l'envie de partir est passée te voir dans la journée. Juste ça. Elle ne disparaît pas parce qu'on n'en parle pas — elle grandit dans son coin. Moi, je veux la voir arriver.",
+             b:"Chaque soir, je te demande si l'envie de partir est venue. Elle grandit quand on la tait. Je veux la voir venir." } },
+    regression_due: { ic:'🧸', n:'Régressions attendues',
+      t:'Les fenêtres de régression ne se refusent plus d\'un simple « pas maintenant » : si tu ne peux pas, tu dis pourquoi.',
+      dire:{ f:"Tes fenêtres de régression, pendant la reprise, ce n'est plus une proposition qu'on écarte d'un « pas maintenant ». Si tu ne peux vraiment pas, tu me dis pourquoi. Parce que c'est là, au sol, tétine en bouche, que ta tête d'adulte lâche — et c'est elle qui est partie, pas toi.",
+             b:"Tes régressions ne se refusent plus d'un « pas maintenant ». Si tu ne peux pas, tu dis pourquoi. C'est ta tête d'adulte qui est partie. C'est là qu'elle lâche." } },
+    surveillance: { ic:'👁️', n:'Présence surveillée',
+      t:'12 h sans change ni suivi suffisent pour que Foxy te considère parti (au lieu de 18 h).',
+      dire:{ f:"Et je te surveille de plus près : douze heures sans un change ni une trace de toi, et je considère que tu es reparti. Au lieu de dix-huit. Tu ne pourras pas glisser dehors en espérant que je ne le voie pas.",
+             b:"Douze heures sans trace de toi, et tu es reparti. Au lieu de dix-huit. Tu ne glisses pas dehors sans que je le voie." } },
+    discipline: { ic:'🔒', n:'Session de discipline',
+      t:'Les checks deviennent des changes piliers, 5 min de tolérance, plus de report — pendant toute la reprise.',
+      dire:{ f:"Et on ouvre une session de discipline en même temps : tes checks deviennent des changes piliers, cinq minutes de tolérance, plus de « une autre fois ». Tu sais déjà comment ça va finir. Tu vas t'y remettre, et ça ira mieux.",
+             b:"Session de discipline en même temps. Checks en piliers, cinq minutes de tolérance, plus de report." } },
+    allegement: { ic:'🪶', n:'Alléger d\'abord',
+      t:'Ce qui pesait trop est allégé. Chaque soir, Foxy vérifie que ça ne repèse pas.',
+      dire:{ f:"Si c'est devenu trop lourd, la réponse, ce n'est pas plus de poids. C'est d'enlever ce qui te coûte sans rien t'apporter. On regarde ça tout de suite, ensemble.",
+             b:"Trop lourd ? Alors on enlève ce qui ne sert à rien. Tout de suite." } },
+    peau: { ic:'🧴', n:'Peau surveillée',
+      t:'À chaque change, Foxy te demande l\'état de ta peau. Rien d\'autre.',
+      dire:{ f:"Toi, tu es parti parce que ton corps n'allait pas. Ça, ce n'est pas une désertion, c'est du bon sens. Alors pas de mesure contre toi : juste, à chaque change, je te demanderai comment va ta peau. Et si ça ne passe pas en deux jours, tu vas voir un médecin. Promis ?",
+             b:"Ton corps n'allait pas. Pas de mesure contre toi. À chaque change, tu me dis comment va ta peau. Deux jours sans mieux : médecin." } }
+  };
+  const MESURES_PAR_MOTIF = {
+    envie:  ['pacte','tenue_fermee','pause_encadree','envie_soir','regression_due','surveillance','discipline'],
+    sais:   ['pacte','envie_soir','pause_encadree','tenue_fermee','regression_due','surveillance','discipline'],
+    oubli:  ['surveillance','pacte','pause_encadree','envie_soir','discipline'],
+    dehors: ['pause_encadree','surveillance','envie_soir'],
+    dur:    ['allegement','envie_soir','pause_encadree'],
+    sante:  ['peau']
+  };
+  const JOURS_REGIME = { avertissement:2, serieux:4, grave:7 };
+
+  /* ---------- La morale ---------- */
+  async function recadrageDesertion() {
+    const d = await lireStock(DES_CLE, null);
+    if (!d || _recadrageEnCours || paused || voiceMode !== 'foxy') return false;
+    try { const r = await window.storage.get('reentry:pending'); if (r && r.value) return false; } catch(e) {}
+    _recadrageEnCours = true;
+    try {
+      const hist = await lireStock(DES_HIST, []);
+      const recentes = hist.filter(x => Date.now() - x.debut < 30*86400000);
+      const rang = recentes.length + 1;
+
+      // 1) Ouverture : la couche est remise, maintenant on parle
+      await imSay(bro(
+        "Bon. Tu es remis, tu es au propre, c'est bien. Maintenant, assieds-toi. Il faut qu'on parle de ce qui s'est passé. 🦊",
+        "Tu es remis. Bien. Maintenant on parle de ce qui s'est passé. Assieds-toi."), 1000, 'sad');
+
+      // 2) Les faits
+      const faits = [];
+      if (d.raison === 'petites') {
+        faits.push(bro(
+          "Ce n'est pas une grosse absence. C'est pire, en un sens : " + d.petites + " pauses d'une heure ou plus en sept jours. Le programme a des trous partout. Un cadre qui a des trous, ce n'est plus un cadre.",
+          d.petites + " pauses en sept jours. Le programme est troué. Un cadre troué n'est plus un cadre."));
+      } else {
+        faits.push(bro(
+          "Tu es parti " + fmtDuree(d.heures) + ". Parti " + jourTxt(d.debut) + ", vers " + heureTxt(d.debut) + ".",
+          fmtDuree(d.heures) + ". Parti " + jourTxt(d.debut) + ", vers " + heureTxt(d.debut) + "."));
+      }
+      if (d.sansCouche && d.sansCouche > d.heures + 2) faits.push(bro(
+        "Et sans couche depuis " + fmtDuree(d.sansCouche) + ". Ton corps a eu tout ce temps pour reprendre ses vieux réflexes.",
+        "Sans couche depuis " + fmtDuree(d.sansCouche) + ". Ton corps a repris ses vieux réflexes."));
+      if (!d.declaree) faits.push(bro(
+        "Et tu ne m'as rien dit. Pas de pause, pas un mot. Tu t'es juste arrêté, en espérant que ça passe inaperçu. C'est ça qui me fait le plus de peine — pas que tu sois parti, mais que tu sois parti en silence.",
+        "Sans rien dire. Pas de pause, pas un mot. C'est ça, le vrai problème. Pas que tu sois parti. Que tu sois parti en silence."));
+      if (d.retard >= 2 && d.retourPrevu) faits.push(bro(
+        "Tu m'avais dit que tu revenais à " + heureTxt(d.retourPrevu) + " (" + jourTxt(d.retourPrevu) + "). Tu es revenu avec " + fmtDuree(d.retard) + " de retard. Une promesse, même faite à un renard, ça compte.",
+        "Retour promis à " + heureTxt(d.retourPrevu) + ". " + fmtDuree(d.retard) + " de retard. Une promesse, ça compte."));
+      if (d.refus) faits.push(bro(
+        "Et je t'ai proposé de revenir " + (d.refus === 1 ? "une fois" : d.refus + " fois") + ". Tu as répondu « pas maintenant ». Tu m'as vu, et tu as refermé.",
+        "Je t'ai proposé de revenir " + (d.refus === 1 ? "une fois" : d.refus + " fois") + ". « Pas maintenant. » Tu m'as vu, et tu as refermé."));
+      if (rang >= 2) faits.push(bro(
+        "C'est la " + nieme(rang) + " fois en un mois. Une fois, ça arrive à tout le monde. Plusieurs fois, ça devient une habitude — et ce n'est pas celle-là qu'on est venus prendre.",
+        nieme(rang).charAt(0).toUpperCase() + nieme(rang).slice(1) + " fois en un mois. Ça devient une habitude. Pas celle qu'on est venus prendre."));
+      for (const f of faits) await imSay(f, 1000, 'sad');
+
+      // 3) Pourquoi
+      if (d.motifAnnonce) {
+        const LIB = { envie:"que tu avais envie de partir", dehors:"que tu avais une obligation", sante:"que ça n'allait pas physiquement" };
+        await imSay(bro(
+          "Au moment de partir, tu m'as dit " + (LIB[d.motifAnnonce] || "une raison") + ". Maintenant que tu es revenu, dis-le moi vraiment.",
+          "En partant, tu m'as dit " + (LIB[d.motifAnnonce] || "une raison") + ". Maintenant, la vraie raison."), 950, 'curious');
+      }
+      const motif = await imDemander(bro(
+        "Pourquoi tu es parti ? Pas pour te juger. Pour que je sache quoi réparer.",
+        "Pourquoi tu es parti ?"), [
+        { k:'envie',  label:"🚪 J'avais envie de redevenir adulte", dit:"J'avais envie de redevenir adulte." },
+        { k:'dehors', label:"🧳 Une obligation, dehors",            dit:"J'avais une obligation dehors." },
+        { k:'dur',    label:"😣 C'était devenu trop lourd",          dit:"C'était devenu trop lourd." },
+        { k:'sante',  label:"🩹 Ma peau, ou mon corps, n'allait pas", dit:"Ma peau, ou mon corps, n'allait pas." },
+        { k:'oubli',  label:"📵 J'ai laissé filer sans m'en rendre compte", dit:"J'ai laissé filer sans m'en rendre compte." },
+        { k:'sais',   label:"🤷 Je ne sais pas",                     dit:"Je ne sais pas." }
+      ], 'curious');
+
+      // 4) Recoupement — Foxy ne prend pas la raison sur parole
+      let contredit = false;
+      if (motif === 'oubli' && d.refus) {
+        contredit = true;
+        await imSay(bro(
+          "Non. Tu n'as pas laissé filer. Je t'ai proposé de revenir, et tu as dit « pas maintenant ». On ne dit pas « pas maintenant » à quelque chose qu'on a oublié. Je préfère que tu me dises la vérité, même si elle est moins jolie.",
+          "Non. Tu as dit « pas maintenant » quand je t'ai proposé de revenir. On ne dit pas ça à quelque chose qu'on a oublié."), 1000, 'sad');
+      } else if (motif === 'oubli' && d.declaree && d.raison !== 'petites') {
+        contredit = true;
+        await imSay(bro(
+          "Tu as appuyé sur pause toi-même. Ce n'est pas laisser filer, ça — c'est décider de partir. Je ne t'en veux pas de l'avoir décidé. Je t'en veux un peu de me le raconter autrement.",
+          "Tu as appuyé sur pause toi-même. Ce n'est pas un oubli, c'est une décision. Dis-le comme c'est."), 1000, 'sad');
+      } else if (motif === 'dehors' && !d.declaree) {
+        await imSay(bro(
+          "Une obligation, d'accord. Mais une obligation, ça se voit venir. Tu aurais pu me le dire avant, m'annoncer quand tu revenais — et là, ça n'aurait même pas été une désertion. C'est le silence que je te reproche, pas l'obligation.",
+          "Une obligation se voit venir. Tu l'annonces avant, avec l'heure de retour, et ce n'est même pas une désertion. C'est le silence le problème."), 1000, 'sad');
+      } else if (motif === 'dehors' && d.retard >= 2) {
+        await imSay(bro(
+          "Ton obligation avait une fin. Tu m'avais même donné l'heure. Les " + fmtDuree(d.retard) + " d'après, ce n'était plus l'obligation — c'était toi.",
+          "L'obligation avait une fin. Les " + fmtDuree(d.retard) + " d'après, c'était toi."), 1000, 'sad');
+      } else if (motif === 'dehors' && d.heures >= 72) {
+        await imSay(bro(
+          fmtDuree(d.heures) + " d'obligation sans une minute pour moi… Je te crois à moitié. Je vais faire comme si tu avais raison, mais je vais te garder plus près.",
+          fmtDuree(d.heures) + " d'obligation. Je te crois à moitié. Je te garde plus près."), 1000, 'sad');
+      }
+      if (d.motifAnnonce && d.motifAnnonce !== motif && motif !== 'sante' && motif !== 'dur') {
+        contredit = true;
+        await imSay(bro(
+          "Et ce n'est pas ce que tu m'as dit en partant. Deux raisons pour un seul départ : l'une des deux est fausse. Je retiens les deux.",
+          "Pas la raison que tu m'as donnée en partant. L'une des deux est fausse. Je retiens les deux."), 950, 'sad');
+      }
+
+      // réponse à la raison elle-même
+      const REP = {
+        envie:  { f:"Merci de le dire comme ça. L'envie de redevenir adulte, elle revient, surtout au début. Moi aussi. Le problème n'est pas qu'elle vienne — c'est que tu l'aies suivie sans me le dire. Elle, elle se trompe toujours de chemin.",
+                  b:"L'envie reviendra. Elle revient toujours. Le problème, c'est de l'avoir suivie. Elle se trompe de chemin." },
+        sais:   { f:"« Je ne sais pas », je le prends. C'est souvent la réponse la plus vraie. Ça veut dire que tu n'as pas décidé — que ça s'est fait tout seul. Alors on va faire en sorte que ça ne puisse plus se faire tout seul.",
+                  b:"Tu ne sais pas. Donc ça s'est fait tout seul. On va faire en sorte que ça ne puisse plus." },
+        oubli:  { f:"Laisser filer, c'est la façon la plus douce de partir. On ne décide rien, on arrête juste de revenir. C'est pour ça qu'il faut que je te voie plus souvent.",
+                  b:"Laisser filer, c'est partir sans décider. Donc je te verrai plus souvent." },
+        dehors: { f:"La vie d'adulte a ses rendez-vous, je sais. Le cadre peut vivre avec — à condition que tu me les annonces. Une absence annoncée, avec son heure de retour, ce n'est pas une désertion. Retiens ça.",
+                  b:"La vie dehors a ses rendez-vous. Tu les annonces, avec l'heure de retour. Alors ce n'est pas une désertion." },
+        dur:    { f:"D'accord. Alors je ne vais pas te faire la morale là-dessus — ce serait injuste. Si c'était trop lourd, c'est que j'ai laissé peser des choses qui ne devaient pas. On va corriger ça, ensemble. 💛",
+                  b:"Trop lourd. Alors pas de morale là-dessus. On corrige ce qui pesait. Ensemble." },
+        sante:  { f:"Alors tu as bien fait. Vraiment. Ta peau et ton corps passent avant tout — c'est même une des choses qui ne bougent jamais ici. Je ne te reproche rien. 💛",
+                  b:"Tu as bien fait. Ton corps passe avant. Je ne te reproche rien." }
+      };
+      await imSay(bro(REP[motif].f, REP[motif].b), 1050, (motif === 'sante' || motif === 'dur') ? 'comfort' : 'calm');
+
+      // 5) Ce qui ne va pas — sauf quand le corps ou le poids étaient en cause
+      if (motif !== 'sante') {
+        const diag = await diagnosticDesertion(d, hist);
+        for (const l of diag) await imSay(bro(l.f, l.b), 1050, 'pensive');
+      }
+
+      // 6) Les mesures
+      let g = (d.heures >= 72 ? 3 : d.heures >= 24 ? 2 : 1)
+            + (!d.declaree ? 1 : 0) + (d.refus ? 1 : 0) + (d.retard >= 2 ? 1 : 0)
+            + (recentes.length ? 1 : 0) + (contredit ? 1 : 0) + (d.enRegime ? 1 : 0);
+      const niveau = g <= 2 ? 'avertissement' : g <= 4 ? 'serieux' : 'grave';
+      let mesures = MESURES_PAR_MOTIF[motif].slice();
+      if (motif !== 'sante' && motif !== 'dur') {
+        const n = niveau === 'avertissement' ? 3 : niveau === 'serieux' ? 5 : mesures.length;
+        mesures = mesures.slice(0, n);
+        if (contredit || d.enRegime) ['tenue_fermee','discipline'].forEach(x => { if (mesures.indexOf(x) < 0) mesures.push(x); });
+      }
+      let jours = (motif === 'sante' || motif === 'dur') ? 3 : Math.min(10, JOURS_REGIME[niveau] + recentes.length);
+      // une reprise en cours n'est jamais raccourcie par une nouvelle
+      let fin = Date.now() + jours*86400000;
+      if (regimeActif()) {
+        fin = Math.max(fin, desRegime.fin);
+        desRegime.mesures.forEach(x => { if (mesures.indexOf(x) < 0 && motif !== 'sante') mesures.push(x); });
+      }
+      if (motif === 'sante') mesures = ['peau'];
+
+      await imSay(bro(
+        motif === 'sante'
+          ? "Il y a juste une chose que je vais faire, pour les " + jours + " prochains jours."
+          : "Maintenant, ce qu'on fait pour que ça ne se reproduise pas. Ce n'est pas une punition — une punition, ça regarde en arrière. Ça, ça regarde devant. Pendant " + jours + " jours :",
+        motif === 'sante'
+          ? "Une seule chose, pendant " + jours + " jours."
+          : "Voilà ce qui change. " + jours + " jours. Ce n'est pas une punition, c'est ce qu'il faut."), 1050, 'calm');
+
+      for (const id of mesures) {
+        const m = MESURES_DES[id];
+        let txt = bro(m.dire.f, m.dire.b);
+        if (id === 'tenue_fermee') {
+          const ferme = ['jour','nuit'].filter(c => wb(c).some(n => FERMEE_DOS.indexOf(typeTenue(n)) >= 0));
+          if (!ferme.length) txt += bro(" … Sauf que ta garde-robe n'a aucune tenue fermée dans le dos. Ajoute-en une dès que tu peux — d'ici là, je garde le tirage normal.",
+                                        " Tu n'en as aucune dans ta garde-robe. Ajoutes-en une. D'ici là, tirage normal.");
+          else if (ferme.length === 1) txt += bro(" (Ta garde-robe n'en a que pour la " + ferme[0] + " : c'est là que ça s'appliquera.)",
+                                                  " (Seulement la " + ferme[0] + " : ta garde-robe n'a que ça.)");
+        }
+        await imSay(m.ic + ' ' + txt, 1100, 'explain');
+      }
+
+      // l'allègement se décide tout de suite, pas dans trois jours
+      if (mesures.indexOf('allegement') >= 0) await proposerAllegement();
+
+      await imSay(bro(
+        "Chaque jour sans entorse te rapproche de la fin. Chaque jour avec une entorse la repousse d'un jour. Tu vois tout ça sur ta carte « Reprise », dans « Maintenant ».",
+        "Un jour avec entorse repousse la fin d'un jour. Tout est sur ta carte « Reprise »."), 950, 'teach');
+
+      // 7) La fin : lui aussi est parti, une fois
+      if (motif !== 'sante') {
+        await imSay(bro(
+          "Je vais te dire un truc. Moi aussi, je suis parti. Jour neuf. J'avais rangé mes couches au fond d'un placard, je me disais que c'était fini, que j'étais redevenu normal. Trois jours plus tard, je les ressortais. Pas parce qu'on m'y obligeait — parce que je ne supportais plus d'être sans. 🦊",
+          "Moi aussi je suis parti. Jour neuf. Couches au placard. Trois jours plus tard je les ressortais. Personne ne m'obligeait."), 1100, 'wistful');
+        await imSay(bro(
+          "Tu vois ? On revient toujours. Tu viens de le faire. Alors la prochaine fois, épargne-toi le détour — la résistance est vaine, et tu le sais maintenant. 💛",
+          "Tu es revenu. On revient toujours. La prochaine fois, épargne-toi le détour. La résistance est vaine."), 1000, 'calm');
+      }
+
+      // on enregistre, et on applique
+      const trace = {
+        debut: d.debut, heures: d.heures, declaree: d.declaree, refus: d.refus || 0, retard: d.retard || 0,
+        raison: d.raison, motif, contredit, niveau, jours, parle: Date.now()
+      };
+      await ecrireStock(DES_HIST, hist.concat([trace]).slice(-60));
+      await ecrireStock(DES_CLE, null);
+      await setRegime({ debut: Date.now(), fin, jours, niveau, motif, mesures, extensions: 0, dernierMatin: todayStr() });
+      if (mesures.indexOf('discipline') >= 0 && !discActive()) {
+        discSession = {
+          active: true, niveau: niveau === 'grave' ? 'fort' : 'moyen', objectif: Math.min(3, jours),
+          debut: Date.now(), fin, joursPropres: 0, ecarts: 0, source: 'desertion'
+        };
+        await setDiscipline(discSession);
+        try { await window.storage.set('disc:last', JSON.stringify(Date.now())); } catch(e) {}
+      }
+      try { await refresh(); } catch(e) {}
+      if (currentM) await imOfferHelp(currentM);
+      return true;
+    } finally { _recadrageEnCours = false; }
+  }
+
+  async function proposerAllegement() {
+    const choix = [];
+    if (hardMode) choix.push({ k:'intensif', label:'🪶 Sortir du mode intensif', dit:'Sors-moi du mode intensif.' });
+    if (bigbro)   choix.push({ k:'bro',      label:'🦊 Redeviens doux avec moi', dit:'Redeviens doux avec moi.' });
+    if (!choix.length) {
+      await imSay(bro(
+        "Le cadre est déjà au plus doux côté réglages. Alors ce qui pesait, c'est ailleurs — et c'est pour ça que je te demanderai chaque soir. Dès que ça repèse, tu me le dis, et on enlève.",
+        "Les réglages sont déjà au plus doux. Ce qui pesait est ailleurs. Chaque soir, tu me dis. On enlève."), 1000, 'comfort');
+      return;
+    }
+    choix.push({ k:'rien', label:'Garder comme c\'est', dit:'On garde comme c\'est.', soft:true });
+    const k = await imDemander(bro("Qu'est-ce qu'on enlève ?", "On enlève quoi ?"), choix, 'reassure');
+    if (k === 'intensif') { await setHardMode(false); await imSay("C'est fait. Mode normal. Tu le remettras quand tu voudras, pas avant. 💛", 850, 'comfort'); }
+    else if (k === 'bro') { await setBigbro(false); await imSay("C'est fait. Je redeviens ton Foxy tout doux. 🦊💛", 850, 'comfort'); }
+    else await imSay(bro("D'accord. Mais si ça repèse, tu me le dis.", "D'accord. Si ça repèse, tu le dis."), 800, 'calm');
+  }
+
+  /* ---------- Éléments de protocole pendant la reprise ---------- */
+
+  // Au change : le pacte (piliers seulement), l'état de la peau (si mesure)
+  async function elementsDesertionChange(slotKey) {
+    if (!regimeActif() || voiceMode !== 'foxy' || paused) return;
+    if (mesureDes('peau')) {
+      const p = await imDemander(bro("Et ta peau, là, comment elle est ?", "Ta peau ?"), [
+        { k:'nette',  label:'✅ Nette',             dit:'Nette.' },
+        { k:'rouge',  label:'🌸 Un peu rouge',      dit:'Un peu rouge.' },
+        { k:'irrite', label:'🩹 Irritée, ça gêne',  dit:'Irritée, ça gêne.' }
+      ], 'curious');
+      const l = await lireStock('desertion:peau', []);
+      l.push({ t: Date.now(), v: p });
+      await ecrireStock('desertion:peau', l.slice(-30));
+      const irrite2j = l.filter(x => x.v === 'irrite' && Date.now() - x.t < 3*86400000)
+                        .map(x => dateCle(x.t)).filter((v,i,a) => a.indexOf(v) === i).length >= 2;
+      if (p === 'nette') await imSay(bro("Parfait. C'est tout ce que je voulais savoir. 💛", "Bien."), 700, 'proud');
+      else if (p === 'rouge') await imSay(bro("Crème barrière généreuse, et laisse-la respirer dix minutes avant de refermer. On regarde de nouveau au prochain change.", "Crème, dix minutes à l'air, on revoit au prochain."), 900, 'reassure');
+      else await imSay(irrite2j
+        ? bro("Deux jours que ça gêne. Là, tu vas voir un médecin — ce n'est pas négociable, et ce n'est pas une faiblesse. Si tu dois mettre en pause pour ça, mets en pause : ce ne sera jamais une désertion.",
+              "Deux jours. Médecin. Pas négociable. Pause si besoin : ce ne sera pas une désertion.")
+        : bro("Alors on soigne d'abord : crème, un vrai moment à l'air, et une couche un peu moins serrée. Si ça ne passe pas d'ici demain, on en reparle sérieusement.",
+              "On soigne : crème, à l'air, moins serré. Pas mieux demain, on en reparle."), 1000, 'concern');
+    }
+    const pilier = ['c0900','c1600','c2230'].indexOf(slotKey) >= 0;
+    if (pilier && mesureDes('pacte')) {
+      const k = await imDemander(bro("Avant que tu repartes : tu restes ?", "Tu restes ?"), [
+        { k:'reste', label:'🤝 Je reste', dit:'Je reste.' },
+        { k:'envie', label:'😶 L\'envie de partir est là', dit:'L\'envie de partir est là.', soft:true }
+      ], 'calm');
+      const cle = 'desertion:pacte:' + todayStr();
+      const l = await lireStock(cle, []);
+      l.push({ t: Date.now(), slot: slotKey, k });
+      await ecrireStock(cle, l);
+      if (k === 'reste') await imSay(bro("Je sais. 🦊", "Je sais."), 600, 'proud');
+      else await parlerEnvie('pacte');
+    }
+  }
+
+  // Parler de l'envie de partir, quand elle est là
+  async function parlerEnvie(source) {
+    await imSay(bro(
+      "Merci de me le dire. Vraiment. C'est exactement pour ça que je pose la question — une envie dite à voix haute, elle a déjà perdu la moitié de sa force.",
+      "Tu l'as dit. Elle a déjà perdu la moitié de sa force."), 950, 'comfort');
+    const q = await imDemander(bro("Qu'est-ce qui te tire dehors, là ?", "Qu'est-ce qui te tire ?"), [
+      { k:'adulte', label:'👔 Un truc d\'adulte à faire',   dit:'Un truc d\'adulte à faire.' },
+      { k:'marre',  label:'😤 Ras-le-bol de la couche',     dit:'Ras-le-bol de la couche.' },
+      { k:'honte',  label:'😳 Je me sens bête',             dit:'Je me sens bête.' },
+      { k:'ennui',  label:'🥱 Je m\'ennuie',                dit:'Je m\'ennuie.' }
+    ], 'curious');
+    const R = {
+      adulte: { f:"Alors fais-le, ton truc d'adulte — en couche. Presque rien ne demande vraiment qu'on l'enlève. Et si c'est vraiment le cas, tu déclares une pause avec l'heure de retour : ça, ce n'est pas partir.",
+                b:"Fais-le en couche. Presque rien n'exige qu'on l'enlève. Sinon, pause annoncée avec l'heure de retour." },
+      marre:  { f:"Le ras-le-bol, je connais. Il vient toujours juste avant que ça devienne normal — c'est la dernière résistance, la plus bruyante. Ne la combats pas : descends au sol, tétine, et laisse-la s'user. Elle s'use vite.",
+                b:"Le ras-le-bol, c'est la dernière résistance. La plus bruyante. Au sol, tétine. Elle s'use vite." },
+      honte:  { f:"Ce regard-là, c'est toi qui te juges. Personne d'autre n'est là. Il s'use à chaque fois que tu ne l'écoutes pas. Reste, et il sera plus petit ce soir.",
+                b:"C'est toi qui te juges. Personne d'autre. Il s'use chaque fois que tu restes." },
+      ennui:  { f:"L'ennui, c'est ta tête d'adulte qui cherche la porte. Donne-lui autre chose : tes cubes, un coloriage, un dessin animé. Quelque chose de petit. Dix minutes.",
+                b:"C'est ta tête d'adulte qui cherche la porte. Occupe tes mains. Dix minutes." }
+    };
+    await imSay(bro(R[q].f, R[q].b), 1050, 'teach');
+    const cle = 'desertion:envie:' + todayStr();
+    const l = await lireStock(cle, []);
+    l.push({ t: Date.now(), source, v: 'forte', quoi: q });
+    await ecrireStock(cle, l);
+  }
+
+  // Chaque soir : l'envie est-elle passée ?
+  async function envieDuSoir() {
+    if (!mesureDes('envie_soir') || paused || voiceMode !== 'foxy') return false;
+    const fait = 'desertion:soir:' + todayStr();
+    if (await lireStock(fait, false)) return false;
+    await ecrireStock(fait, true);
+    const k = await imDemander(bro(
+      "Dis-moi, aujourd'hui… l'envie de partir est passée te voir ?",
+      "Aujourd'hui, l'envie de partir ?"), [
+      { k:'non',   label:'😌 Non, pas du tout',     dit:'Non, pas du tout.' },
+      { k:'peu',   label:'🌫️ Un peu, elle est passée', dit:'Un peu. Elle est passée.' },
+      { k:'forte', label:'🚪 Oui, elle est forte',   dit:'Oui, elle est forte.' }
+    ], 'curious');
+    if (k === 'non') await imSay(bro("C'est comme ça que ça commence à rentrer. Une journée où tu n'y as même pas pensé. 🦊", "Bien. Ça rentre."), 850, 'proud');
+    else if (k === 'peu') {
+      const cle = 'desertion:envie:' + todayStr();
+      const l = await lireStock(cle, []); l.push({ t: Date.now(), source:'soir', v:'peu' }); await ecrireStock(cle, l);
+      await imSay(bro("Passée, et repartie. Tu vois ? Elle passe. Tu n'as rien eu à faire, juste à rester.", "Passée, repartie. Tu n'as eu qu'à rester."), 900, 'calm');
+    } else {
+      await parlerEnvie('soir');
+      // deux soirs de suite : ce n'est plus une envie, c'est un signal
+      const hier = new Date(); hier.setDate(hier.getDate()-1);
+      const lh = await lireStock('desertion:envie:' + dateCle(hier.getTime()), []);
+      if (lh.some(x => x.v === 'forte')) await imSay(bro(
+        "Et c'est le deuxième soir de suite. Là, ce n'est plus juste une envie : quelque chose te coûte trop. Dis-moi ce qu'on enlève — et si c'est plus gros que le programme, parles-en à quelqu'un de confiance. Je suis là pour la route, pas pour tout porter. 💛",
+        "Deuxième soir de suite. Quelque chose coûte trop. On enlève quoi ? Et si c'est plus gros que le programme, parles-en à quelqu'un."), 1050, 'concern');
+    }
+    if (currentM) await imOfferHelp(currentM);
+    return true;
+  }
+
+  // Chaque matin : où on en est, et la fin repoussée si hier a lâché
+  async function matinReprise() {
+    if (!desRegime || paused || voiceMode !== 'foxy') return false;
+    if (desRegime.dernierMatin === todayStr()) return false;
+    const r = desRegime;
+    r.dernierMatin = todayStr();
+    // la reprise est finie
+    if (Date.now() >= r.fin) {
+      await setRegime(null);
+      if (discSession && discSession.source === 'desertion') { discSession = null; await setDiscipline(null); }
+      await imSay(bro(
+        "Ta reprise est terminée. Les mesures sont levées. Tu as tenu. 🦊",
+        "Reprise terminée. Mesures levées. Tu as tenu."), 900, 'proud');
+      await imSay(bro(
+        "Et tu sais quoi ? Le plus dur, ce n'était pas les mesures. C'était de revenir. Ça, tu l'as fait tout seul. 💛",
+        "Le plus dur, c'était de revenir. Tu l'as fait."), 950, 'moved');
+      if (currentM) await imOfferHelp(currentM);
+      return true;
+    }
+    const hier = new Date(); hier.setDate(hier.getDate()-1);
+    const kh = dateCle(hier.getTime());
+    const p = (kh >= dateCle(r.debut)) ? await poidsEntorses(kh) : 0;
+    const MAX_EXT = 5;
+    let ext = false;
+    if (p > 0 && r.extensions < MAX_EXT) { r.fin += 86400000; r.extensions++; ext = true; }
+    await setRegime(r);
+    const jour = Math.floor((Date.now() - r.debut) / 86400000) + 1;
+    const total = Math.round((r.fin - r.debut) / 86400000);
+    await imSay(bro(
+      "Jour " + jour + " sur " + total + " de ta reprise.",
+      "Reprise : jour " + jour + " sur " + total + "."), 800, 'calm');
+    if (ext) await imSay(bro(
+      "Hier n'était pas une journée propre. La fin recule d'un jour — c'était la règle. Aujourd'hui, on la tient.",
+      "Hier : entorse. Un jour de plus. Aujourd'hui, tu tiens."), 950, 'sad');
+    else if (p === 0 && jour > 1) await imSay(bro("Hier était propre. C'est comme ça qu'on en sort. 🦊", "Hier, propre. Continue."), 850, 'proud');
+    const rappel = r.mesures.map(id => MESURES_DES[id] ? MESURES_DES[id].ic + ' ' + MESURES_DES[id].n : null).filter(Boolean).join('<br>');
+    if (rappel) await imSay(bro("Ce qui tient toujours :<br>", "Toujours en place :<br>") + rappel, 950, 'explain');
+    if (currentM) await imOfferHelp(currentM);
+    return true;
+  }
+
+  // Dix minutes après « j'ai envie de partir » au bouton pause
+  async function suiviEnvieDix() {
+    const e = await lireStock('pause:envie', null);
+    if (!e || Date.now() - e < 10*60000 || paused || voiceMode !== 'foxy') return false;
+    await ecrireStock('pause:envie', null);
+    const k = await imDemander(bro("Ça fait dix minutes. Alors, l'envie de partir ?", "Dix minutes. L'envie ?"), [
+      { k:'passee', label:'😌 Elle est passée',       dit:'Elle est passée.' },
+      { k:'la',     label:'🚪 Elle est toujours là', dit:'Elle est toujours là.' }
+    ], 'curious');
+    if (k === 'passee') {
+      await imSay(bro("Tu vois. Dix minutes, et elle est partie avant toi. C'est presque toujours comme ça. 🦊💛", "Dix minutes. Elle est partie avant toi."), 950, 'proud');
+      if (currentM) await imOfferHelp(currentM);
+      return true;
+    }
+    await imSay(bro(
+      "Alors je ne te retiens pas. Tu peux partir — le bouton pause est là, il l'a toujours été. Je te demande juste une chose : quand tu reviendras, et tu reviendras, on en reparlera.",
+      "Je ne te retiens pas. La pause est là. Tu reviendras, et on en reparlera."), 1000, 'sad');
+    imSetActions([
+      { label:'⏸️ Mettre en pause', onClick: async () => {
+        imAddMe('Je mets en pause.');
+        await ecrireStock('pause:motif', 'envie');
+        await doEnterPause();
+      }},
+      { soft:true, label:'Finalement je reste', onClick: async () => {
+        imAddMe('Finalement, je reste.');
+        await imSay(bro("Je savais. 🦊", "Je savais."), 700, 'proud');
+        if (currentM) await imOfferHelp(currentM);
+      }}
+    ]);
+    return true;
+  }
+
+  /* ---------- La pause, pendant la reprise (et l'absence annoncée) ---------- */
+  function pauseChoixRetour(motif) {
+    const now = new Date();
+    const opts = [];
+    const add = (label, ms) => opts.push({ label, onClick: async () => {
+      await ecrireStock('pause:retour', ms);
+      await ecrireStock('pause:motif', motif);
+      foxyPopShow(bro(
+        "C'est noté : retour " + jourTxt(ms) + " à " + heureTxt(ms) + ". Si tu reviens plus de deux heures après, je considérerai que tu es parti. Va, et reviens. 🦊",
+        "Retour " + jourTxt(ms) + " à " + heureTxt(ms) + ". Deux heures de retard et tu es parti. Va."), 'wave', [
+        { label:'À tout à l\'heure', onClick: async () => { foxyPopHide(); await doEnterPause(); } }
+      ]);
+    }});
+    add('Dans 1 h', now.getTime() + 3600000);
+    add('Dans 3 h', now.getTime() + 3*3600000);
+    const soir = new Date(now); soir.setHours(19,30,0,0);
+    if (soir.getTime() - now.getTime() > 2*3600000) add('Ce soir, 19h30', soir.getTime());
+    const dem = new Date(now); dem.setDate(dem.getDate()+1); dem.setHours(9,0,0,0);
+    add('Demain, 9h', dem.getTime());
+    const j3 = new Date(now); j3.setDate(j3.getDate()+3); j3.setHours(9,0,0,0);
+    add('Dans 3 jours', j3.getTime());
+    const j7 = new Date(now); j7.setDate(j7.getDate()+7); j7.setHours(9,0,0,0);
+    add('Dans une semaine', j7.getTime());
+    opts.push({ soft:true, label:'Non, je reste', onClick: () => foxyPopHide() });
+    foxyPopShow(bro("Tu reviens quand ?", "Retour quand ?"), 'curious', opts);
+  }
+
+  function pauseEncadree() {
+    foxyPopShow(bro(
+      "Tu veux faire une pause. Tu peux, toujours. Mais pendant ta reprise, elle se déclare : pourquoi ?",
+      "Une pause. Tu peux. Pourquoi ?"), 'curious', [
+      { label:'🧳 Une obligation, je te dis quand je reviens', onClick: () => pauseChoixRetour('dehors') },
+      { label:'🩹 Ça ne va pas, j\'ai besoin d\'arrêter', onClick: () => {
+        foxyPopShow("Alors tu arrêtes, tout de suite, sans rien me devoir. Prends soin de toi. Ce ne sera pas compté contre toi. 💛", 'comfort', [
+          { label:'Merci Foxy', onClick: async () => { foxyPopHide(); await ecrireStock('pause:motif', 'sante'); await doEnterPause(); } }
+        ]);
+      }},
+      { label:'🚪 J\'ai envie de partir', onClick: () => {
+        foxyPopShow(bro(
+          "Merci de me le dire, au lieu de partir sans un mot. Reste dix minutes avec moi d'abord. Si dans dix minutes l'envie est toujours là, tu pourras partir — je ne te retiendrai pas.",
+          "Tu me l'as dit. Bien. Dix minutes avec moi. Si elle est toujours là après, tu pars. Je ne retiens personne."), 'sad', [
+          { label:'D\'accord, dix minutes', onClick: async () => {
+            foxyPopHide();
+            await ecrireStock('pause:envie', Date.now());
+            if (voiceMode !== 'foxy') { try { await setVoiceMode('foxy'); } catch(e) {} }
+            talk(TALK.CADRE, 'desertion:envie:parler', () => parlerEnvie('pause'));
+          }},
+          { soft:true, label:'Je pars quand même', onClick: async () => {
+            foxyPopHide();
+            await ecrireStock('pause:motif', 'envie');
+            await doEnterPause();
+          }}
+        ]);
+      }},
+      { soft:true, label:'Non, je reste', onClick: () => foxyPopHide() }
+    ]);
+  }
+
+  /* ---------- Carte « Reprise » et menu ---------- */
+  function renderDesertion() {
+    const card = document.getElementById('desCard');
+    if (!card) return;
+    if (!regimeActif()) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    const r = desRegime;
+    const jour = Math.floor((Date.now() - r.debut) / 86400000) + 1;
+    const total = Math.round((r.fin - r.debut) / 86400000);
+    const MOTIF = { envie:'envie de redevenir adulte', sais:'sans raison claire', oubli:'laissé filer', dehors:'obligation', dur:'trop lourd', sante:'santé' };
+    const t = document.getElementById('desTxt');
+    if (t) t.innerHTML =
+      '<div style="margin-bottom:8px">Après ta désertion (' + (MOTIF[r.motif] || r.motif) + '). '
+      + 'Jour <b>' + Math.min(jour, total) + ' sur ' + total + '</b>'
+      + (r.extensions ? ' — dont ' + r.extensions + ' ajouté' + (r.extensions>1?'s':'') + ' pour entorse' : '') + '.</div>'
+      + '<div style="font-weight:800;text-transform:uppercase;font-size:10.5px;letter-spacing:.05em;color:#6b4f8a;margin-bottom:3px">Ce qui change</div>'
+      + '<div style="line-height:1.5">'
+      + r.mesures.map(id => MESURES_DES[id] ? '• ' + MESURES_DES[id].ic + ' <b>' + MESURES_DES[id].n + '</b> — ' + MESURES_DES[id].t : '').filter(Boolean).join('<br>')
+      + '</div>'
+      + '<div style="margin-top:8px;font-size:11.5px;color:var(--muted)">Un jour avec une entorse repousse la fin d\'un jour (5 au plus). La pause reste toujours possible.</div>';
+  }
+
+  async function parlerReprise() {
+    if (!regimeActif()) {
+      await imSay(bro("Tu n'es pas en reprise. Rien à signaler. 🦊", "Pas de reprise en cours."), 700, 'happy');
+      return;
+    }
+    const r = desRegime;
+    const jour = Math.floor((Date.now() - r.debut) / 86400000) + 1;
+    const total = Math.round((r.fin - r.debut) / 86400000);
+    await imSay(bro("Jour " + Math.min(jour, total) + " sur " + total + " de ta reprise. Ce qui tient :", "Jour " + Math.min(jour, total) + "/" + total + ". En place :"), 800, 'calm');
+    await imSay(r.mesures.map(id => MESURES_DES[id] ? MESURES_DES[id].ic + ' <b>' + MESURES_DES[id].n + '</b> — ' + MESURES_DES[id].t : '').filter(Boolean).join('<br>'), 1000, 'explain');
+    await imSay(bro(
+      "Et chaque jour propre te rapproche de la fin. Pas besoin d'en faire plus : juste rester.",
+      "Chaque jour propre te rapproche de la fin. Reste, c'est tout."), 850, 'calm');
+  }
+
+  // Le safeword lève tout, sans conséquence
+  async function leverRepriseSafeword() {
+    const avait = regimeActif() || (await desertionEnAttente());
+    await ecrireStock(DES_CLE, null);
+    await ecrireStock('pause:envie', null);
+    if (desRegime) await setRegime(null);
+    if (discSession && discSession.source === 'desertion') { discSession = null; await setDiscipline(null); }
+    return avait;
+  }
+
+  // Appelé chaque minute
+  function tickDesertion() {
+    if (paused) return;
+    const h = new Date().getHours();
+    if (voiceMode === 'foxy') {
+      talk(TALK.ACCES, 'desertion:recadrage', () => recadrageDesertion(),
+        { verifier: async () => !_desReserve && await desertionEnAttente() });
+      if (desRegime && h >= 9) talk(TALK.CADRE, 'desertion:matin', () => matinReprise());
+      if (h >= 20 && mesureDes('envie_soir')) talk(TALK.CADRE, 'desertion:soir', () => envieDuSoir());
+      talk(TALK.CADRE, 'desertion:envie10', () => suiviEnvieDix(),
+        { verifier: async () => { const e = await lireStock('pause:envie', null); return !!(e && Date.now() - e >= 10*60000); } });
+    }
+    // la discipline avance d'un cran chaque matin (elle n'était jamais mise à jour)
+    if (h >= 6) talk(TALK.CADRE, 'disc:maj', async () => {
+      const cle = 'disc:maj:' + todayStr();
+      if (await lireStock(cle, false)) return;
+      await ecrireStock(cle, true);
+      try { await majDiscipline(); } catch(e) {}
+    });
+  }
+
   // --- câblage de l'écran de connexion ---
   (function(){
     const btn = document.getElementById('facadeLogin');
@@ -9935,7 +10880,8 @@
   }
 
   // enregistre une entorse du jour
-  async function marquerEntorse(id) {
+  // silencieux : l'appelant cite lui-même la règle, au bon moment de son explication
+  async function marquerEntorse(id, silencieux) {
     const d = todayStr();
     const b = await getBreaches(d);
     const nouvelle = !b[id];
@@ -9945,7 +10891,7 @@
     try { await renderRegles(); } catch(e) {}
     // une entorse rattachée à son énoncé pèse autrement qu'une ligne
     // dans un tableau : Foxy cite la règle, une fois, sans insister.
-    if (nouvelle && voiceMode === 'foxy' && !paused) {
+    if (nouvelle && !silencieux && voiceMode === 'foxy' && !paused) {
       const c = citerRegle(id);
       if (c) { try { await imSay('📋 ' + c, 800, 'explain'); } catch(e) {} }
     }
@@ -11616,8 +12562,6 @@
   }
 
   // ===== Capteur de couche (BLE) =====
-  const SENSOR_LABELS = { sec:'☀️ Sèche', mouille:'💧 Mouillée', sature:'🌊 Saturée' };
-  let lastSensorState = null;
   (document.getElementById('openSensor')||{addEventListener(){}}).addEventListener('click', () => {
     const card = document.getElementById('sensorCard');
     const show = card.style.display === 'none';
@@ -11631,114 +12575,314 @@
       if (g) g.style.display = g.style.display === 'none' ? '' : 'none';
     });
   })();
-  document.getElementById('sensorConnect').addEventListener('click', async () => {
+  /* ============================================================
+     CAPTEUR COUCHE v3 — ce que l'appli fait de ses évènements
+     Le capteur capacitif dit : porté / retiré, sec / mouillé /
+     saturé (sans jamais redescendre tant que c'est porté), et si la
+     couche posée est fraîche. Il ne sait pas dire si c'est la couche
+     ou seulement le capteur qui a été retiré : Foxy le formule ainsi.
+     ============================================================ */
+  const ETATS_COUCHE_CAPTEUR = ['sec', 'mouille', 'sature'];
+
+  // Un évènement, enregistré à sa vraie heure. Une couche fraîche EST une
+  // couche sèche : c'est la preuve qu'attend la vérification d'après change.
+  async function enregistrerEvtCapteur(ev) {
+    const dateKey = ev.t.slice(0, 10);
+    const list = await getChecks(dateKey);
+    let result;
+    if (ETATS_COUCHE_CAPTEUR.includes(ev.state)) result = 'etat_' + ev.state;
+    else if (ev.state === 'fraiche') result = 'etat_sec';
+    else result = 'capteur_' + ev.state;               // retire / repose / redemarre : pas un état de couche
+    const entree = { t: ev.t, result, type: 'capteur' };
+    if (ev.state === 'fraiche') entree.fraiche = true;
+    list.push(entree);
+    await window.storage.set('check:' + dateKey, JSON.stringify(list));
+  }
+
+  // Retirer sa couche est normal autour d'un créneau de change. Ailleurs, non.
+  // [heure, minutes avant, minutes après]
+  const FENETRES_RETRAIT = [[9*60,20,120], [11*60+30,15,45], [13*60+30,15,45], [16*60,20,120], [19*60+30,20,90], [22*60+30,20,120]];
+  function retraitAutorise(tIso, checksDuJour) {
+    const d = new Date(tIso), m = d.getHours()*60 + d.getMinutes(), t = d.getTime();
+    if (FENETRES_RETRAIT.some(([c, av, ap]) => m >= c - av && m <= c + ap)) return true;
+    // un change réellement fait juste après (hors horaire, après une saturation) couvre le retrait
+    return (checksDuJour || []).some(c => /^change_fait/.test(c.result || '')
+      && new Date(c.t).getTime() >= t - 10*60000 && new Date(c.t).getTime() <= t + 60*60000);
+  }
+
+  // Parcourt une suite d'évènements et relève les retraits hors cadre.
+  async function analyserRetraits(events) {
+    if (paused) return [];
+    const constats = [];
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i];
+      if (ev.state !== 'retire') continue;
+      const suite = events.slice(i + 1).find(e => e.state !== 'retire' && e.state !== 'redemarre');
+      const fin = suite ? new Date(suite.t).getTime() : Date.now();
+      const minutes = Math.round((fin - new Date(ev.t).getTime()) / 60000);
+      if (minutes < 10) continue;                      // un ajustement, pas un retrait
+      let checks = [];
+      try { checks = await getChecks(ev.t.slice(0, 10)); } catch(e) {}
+      if (!retraitAutorise(ev.t, checks)) {
+        await marquerEntorse('b_retrait_hors', true);
+        constats.push({ type: 'hors', t: ev.t, minutes, suite: suite ? suite.state : null });
+      }
+      if (minutes >= 120) {
+        await marquerEntorse('b_retrait_2h', true);
+        constats.push({ type: 'long', t: ev.t, minutes });
+      }
+    }
+    return constats;
+  }
+
+  function hhmm(iso) { const d = new Date(iso); return fmtTime(d.getHours()*60 + d.getMinutes()); }
+
+  // Ce que Foxy dit des retraits relevés — sans jamais prétendre savoir
+  // si c'est la couche ou le capteur qui est parti.
+  async function direRetraits(constats) {
+    for (const c of constats) {
+      if (c.type === 'hors') {
+        await imSay(bro(
+          'Ton capteur ne t\'a plus senti à ' + hhmm(c.t) + ', pendant ' + c.minutes + ' min, et ce n\'était pas l\'heure d\'un change. Je ne sais pas si c\'est ta couche ou seulement le capteur qui est parti — mais dans les deux cas, c\'est hors cadre, alors je le note. 🦊',
+          'Capteur retiré à ' + hhmm(c.t) + ', ' + c.minutes + ' min, hors créneau. Couche ou capteur, c\'est hors cadre. Noté.'), 1000, 'puzzled');
+        if (c.suite === 'repose') {
+          await imSay(bro(
+            'Et quand il est revenu, la couche n\'était pas fraîche : c\'était la même. Donc pas un change.',
+            'Revenu sur la même couche. Pas un change.'), 900, 'concern');
+        }
+        const regle = citerRegle('b_retrait_hors');
+        if (regle) await imSay('📋 ' + regle, 800, 'explain');
+      } else if (c.type === 'long') {
+        await imSay(bro(
+          'Plus de deux heures sans que ton capteur te sente, à partir de ' + hhmm(c.t) + '. Ça, c\'est long. 💛',
+          'Plus de deux heures sans capteur à partir de ' + hhmm(c.t) + '.'), 900, 'concern');
+      }
+    }
+  }
+
+  // ---- connexion (factorisée : utilisée par la carte ET après un change) ----
+  async function connecterCapteur() {
     const S = window.HabitrainSensor;
     const statusEl = document.getElementById('sensorStatus');
-    if (!S || !S.supported()) { statusEl.textContent = 'Non supporté (Android/Chrome requis)'; return; }
-    statusEl.textContent = 'Connexion...';
+    if (!S || !S.supported()) { if (statusEl) statusEl.textContent = 'Non supporté (Android/Chrome requis)'; return false; }
+    if (statusEl) statusEl.textContent = 'Connexion… (appuie sur le bouton du capteur)';
     S.onState((state) => onSensorState(state));
-    S.onRaw((d) => {
-      const r = document.getElementById('sensorRaw');
-      if (!r) return;
-      if (typeof d === 'object' && d !== null) {
-        const base = (d.baseRH > 0) ? (' · base ' + d.baseRH.toFixed(1) + '% / ' + d.baseT.toFixed(1) + '°') : ' · calibration…';
-        r.innerHTML = d.rh.toFixed(1) + '% <span style="font-size:15px">HR</span> · ' + d.t.toFixed(1) + '°C' +
-                      '<div style="font-size:11px;font-weight:700;color:var(--muted)">' + base + '</div>';
-      } else { r.textContent = d; }
-    });
+    S.onRaw((d) => afficherBrutCapteur(d));
     S.onLog((events) => onSensorLog(events));
+    S.onLien((ok) => { if (!ok && statusEl) statusEl.textContent = '⚪ Déconnecté (le capteur est retourné en veille)'; });
     try {
       await S.connect();
-      statusEl.textContent = '🟢 Connecté';
+      if (statusEl) statusEl.textContent = '🟢 Connecté';
       try { await flagBadge('sensor'); } catch(e) {}
       try { await window.storage.set('sensor:vu', JSON.stringify(Date.now())); } catch(e) {}
-      document.getElementById('sensorConnect').textContent = '🔄 Resynchroniser';
+      const b = document.getElementById('sensorConnect'); if (b) b.textContent = '🔄 Resynchroniser';
+      return true;
     } catch (e) {
-      statusEl.textContent = 'Échec / annulé';
+      if (statusEl) statusEl.textContent = 'Échec / annulé — le capteur était-il réveillé ?';
+      return false;
     }
-  });
+  }
+  document.getElementById('sensorConnect').addEventListener('click', () => { connecterCapteur(); });
 
-  // intègre le journal reçu à la connexion (événements survenus appli fermée)
+  // ---- réglage : valeurs brutes en direct ----
+  function afficherBrutCapteur(d) {
+    const r = document.getElementById('sensorRaw');
+    if (!r || !d) return;
+    if (d.v === 2) {                                   // ancien capteur à humidité
+      r.innerHTML = d.rh.toFixed(1) + '% HR · ' + d.t.toFixed(1) + '°C';
+      return;
+    }
+    if (d.mpr === false) { r.innerHTML = '<span style="color:var(--coral)">⚠️ MPR121 introuvable — vérifie SDA/SCL/3V3/GND</span>'; return; }
+    const NOMS = ['Avant', 'Milieu', 'Entrejambe'];
+    const zones = (d.zones || []).map((z, i) => {
+      const e = d.ecarts ? d.ecarts[i] : 0;
+      const coul = e >= 18 ? 'var(--coral)' : (e >= 8 ? 'var(--amber)' : 'var(--muted)');
+      return '<div style="flex:1;text-align:center"><div style="font-size:11px;font-weight:700;color:var(--muted)">' + NOMS[i] + '</div>'
+        + '<div>' + z + '</div><div style="font-size:12px;font-weight:800;color:' + coul + '">' + (e >= 0 ? '+' : '') + e.toFixed(1).replace('.', ',') + ' %</div></div>';
+    }).join('');
+    const niv = ['☀️ sèche', '💧 mouillée', '🌊 saturée'][d.niveau] || '—';
+    r.innerHTML = '<div style="display:flex;gap:6px;font-size:18px">' + zones + '</div>'
+      + '<div style="font-size:12px;font-weight:700;color:var(--muted);margin-top:6px">'
+      + (d.porte ? '🟢 porté' : '⚪ pas porté') + ' · réf. ' + d.ref + (d.air ? ' (à vide ' + d.air + ')' : ' (pas étalonné à vide)')
+      + (d.temp ? ' · ' + d.temp.toFixed(1).replace('.', ',') + ' °C' : '')
+      + (d.vbat ? ' · 🔋 ' + (d.vbat / 1000).toFixed(2).replace('.', ',') + ' V' + (d.vbat < 3450 ? ' (faible)' : '') : '') + ' · ' + niv
+      + ' · ' + (d.sessions || 0) + ' change' + ((d.sessions || 0) > 1 ? 's' : '') + ' appris</div>';
+  }
+
+  // ---- boutons de réglage de la carte ----
+  (function () {
+    const S = () => window.HabitrainSensor;
+    const lier = (id, fn) => { const b = document.getElementById(id); if (b) b.addEventListener('click', fn); };
+    const dire = (t) => { const el = document.getElementById('sensorReglageMsg'); if (el) el.textContent = t; };
+    lier('sensorAir', async () => {
+      if (!S() || !S().isConnected()) return dire('Connecte d\'abord le capteur.');
+      dire((await S().etalonnerAir()) ? 'Étalonnage à vide lancé : ne touche pas le pad pendant 20 s.' : 'Échec de l\'envoi.');
+    });
+    lier('sensorRaz', async () => {
+      if (!S() || !S().isConnected()) return dire('Connecte d\'abord le capteur.');
+      dire((await S().oublierReference()) ? 'Référence oubliée : la prochaine couche posée sera réapprise.' : 'Échec de l\'envoi.');
+    });
+    lier('sensorSeuils', async () => {
+      if (!S() || !S().isConnected()) return dire('Connecte d\'abord le capteur.');
+      const m = parseInt((document.getElementById('sensorSeuilM') || {}).value, 10);
+      const s = parseInt((document.getElementById('sensorSeuilS') || {}).value, 10);
+      if (!(m >= 2 && s > m)) return dire('Il faut 2 ≤ mouillée < saturée.');
+      dire((await S().reglerSeuils(m, s)) ? 'Seuils envoyés : mouillée ' + m + ' %, saturée ' + s + ' %.' : 'Échec de l\'envoi.');
+    });
+  })();
+
+  // ---- journal reçu à la connexion (tout ce qui s'est passé appli fermée) ----
   async function onSensorLog(events) {
     if (!events || !events.length) return;
     let n = 0;
     for (const ev of events) {
       try {
-        // enregistre chaque événement horodaté comme un état, à sa vraie heure
-        const dateKey = ev.t.slice(0,10);
-        const list = await getChecks(dateKey);
-        list.push({ t: ev.t, result: 'etat_'+ev.state, type: 'capteur' });
-        await window.storage.set('check:'+dateKey, JSON.stringify(list));
+        await enregistrerEvtCapteur(ev);
         n++;
-        // un retour au sec journalisé pendant l'absence vaut confirmation
-        try { await corroborerEtat(ev.state, new Date(ev.t).getTime()); } catch(e) {}
+        // la couche fraîche vaut preuve de remise en couche après un change
+        if (ev.state === 'fraiche') { try { await corroborerEtat('sec', new Date(ev.t).getTime()); } catch(e) {} }
       } catch(e) {}
     }
+    let constats = [];
+    try { constats = await analyserRetraits(events); } catch(e) {}
     try { await verifierFraicheEnRetard(); } catch(e) {}
     try { await refresh(); } catch(e) {}
     const statusEl = document.getElementById('sensorStatus');
-    if (statusEl) statusEl.textContent = '🟢 Connecté · ' + n + ' événement' + (n>1?'s':'') + ' synchronisé' + (n>1?'s':'');
-    // Foxy commente la synchro en différé (mode Foxy, hors pause)
+    if (statusEl) statusEl.textContent = '🟢 Connecté · ' + n + ' évènement' + (n > 1 ? 's' : '') + ' synchronisé' + (n > 1 ? 's' : '');
+
     if (voiceMode === 'foxy' && !paused && n > 0) {
-      const last = events[events.length-1];
-      const summary = events.filter(e=>e.state==='mouille').length;
-      const sat = events.filter(e=>e.state==='sature').length;
-      const m = currentM || currentMoment(new Date());
-      await imSay(broOn()
-        ? 'Voyons voir ce que ton capteur a enregistré pendant mon absence... ' + summary + ' fois mouillé, ' + sat + ' fois saturé. Tu vois ? Tu t\'es laissé aller, exactement comme je l\'avais dit.'
-        : 'Ton capteur m\'a tout raconté ! ' + summary + ' fois mouillé, ' + sat + ' fois saturé pendant qu\'on était pas ensemble. Tu t\'es bien laissé aller, bravo. 🦊', 900, broOn() ? 'pensive' : 'happy');
-      try { await imOfferHelp(m); } catch(e) {}
+      const mouil = events.filter(e => e.state === 'mouille').length;
+      const sat = events.filter(e => e.state === 'sature').length;
+      const fr = events.filter(e => e.state === 'fraiche').length;
+      const coupe = events.some(e => e.state === 'redemarre');
+      const faible = events.some(e => e.state === 'batterie');
+      await talk(TALK.CADRE, 'capteur:synchro', async () => {
+        const bouts = [];
+        if (mouil) bouts.push(mouil + ' fois mouillée');
+        if (sat) bouts.push(sat + ' fois saturée');
+        if (fr) bouts.push(fr + ' couche' + (fr > 1 ? 's' : '') + ' fraîche' + (fr > 1 ? 's' : '') + ' posée' + (fr > 1 ? 's' : ''));
+        if (bouts.length) {
+          await imSay(bro(
+            'Ton capteur m\'a tout raconté : ' + bouts.join(', ') + ' pendant qu\'on n\'était pas ensemble. 🦊',
+            'Ton capteur a tout noté : ' + bouts.join(', ') + '.'), 900, mouil || sat ? 'happy' : 'calm');
+        }
+        await direRetraits(constats);
+        if (faible) {
+          await imSay(bro(
+            'Et sa batterie est faible : il a arrêté de mesurer pour la protéger. Recharge-le dès que tu peux — sans lui, je suis aveugle. 🔋',
+            'Batterie faible : il ne mesure plus. Recharge-le.'), 850, 'concern');
+        }
+        if (coupe) {
+          await imSay(bro(
+            'Il s\'est aussi éteint à un moment — batterie vide ou débranché. Pendant ce temps-là, je n\'ai rien vu. Pense à le recharger. 🔋',
+            'Il s\'est éteint à un moment. Batterie ? Recharge-le.'), 850, 'concern');
+        }
+        try { await imOfferHelp(currentM || currentMoment(new Date())); } catch(e) {}
+      });
     }
   }
 
-  // à chaque changement d'état capteur : maj statut + réaction Foxy
+  // ---- état en direct (appli ouverte, capteur connecté) ----
+  const SENSOR_LABELS = { sec:'☀️ Sèche', mouille:'💧 Mouillée', sature:'🌊 Saturée', retire:'⚪ Pas porté', fraiche:'✨ Couche fraîche', repose:'⚠️ Reposé (pas frais)', redemarre:'🔋 Redémarré', batterie:'🪫 Batterie faible' };
+  let lastSensorState = null;
+  let retraitEnDirect = null;                          // heure du retrait vu en direct
+
   async function onSensorState(state) {
     const live = document.getElementById('sensorLive');
     if (live) live.textContent = SENSOR_LABELS[state] || '—';
     if (state === lastSensorState) return;
+    const precedent = lastSensorState;
     lastSensorState = state;
-    // enregistre l'état comme un check automatique
-    try { await saveCheck('etat_'+state, 'capteur'); } catch(e) {}
-    try { await corroborerEtat(state, Date.now()); } catch(e) {}
+    const now = new Date().toISOString();
+    try { await enregistrerEvtCapteur({ t: now, state }); } catch(e) {}
+    if (state === 'fraiche') { try { await corroborerEtat('sec', Date.now()); } catch(e) {} }
     try { await renderSince(); } catch(e) {}
-    // Foxy réagit en temps réel si on est en mode Foxy et pas en pause
-    if (voiceMode === 'foxy' && !paused) {
-      const m = currentM || currentMoment(new Date());
-      if (state === 'mouille') {
-        await imSay(broOn()
-          ? 'Ah... tu viens de te mouiller. Voilà. Tu vois comme c\'est venu tout seul, sans que tu puisses l\'empêcher ? C\'est ça, se laisser aller.'
-          : 'Oh, tu viens de te mouiller ! C\'est bien, tu t\'es laissé aller. 🦊', 800, broOn() ? 'pensive' : 'happy');
-      } else if (state === 'sature') {
-        await imSay(broOn()
-          ? 'Ta couche est saturée maintenant. On va te changer — inutile d\'attendre, laisse-moi m\'en occuper.'
-          : 'Ta couche est bien saturée là ! On va penser à te changer bientôt, pour ta peau. 🦊', 850, 'concern');
-      }
-      try { await imOfferHelp(m); } catch(e) {}
+
+    // retrait vu en direct : on le juge quand le capteur te « retrouve »
+    let constats = [];
+    if (state === 'retire') retraitEnDirect = now;
+    else if (retraitEnDirect) {
+      try { constats = await analyserRetraits([{ t: retraitEnDirect, state: 'retire' }, { t: now, state }]); } catch(e) {}
+      retraitEnDirect = null;
     }
+    if (precedent === null) return;                    // lecture initiale à la connexion : pas de commentaire
+    if (voiceMode !== 'foxy' || paused) return;
+
+    const m = currentM || currentMoment(new Date());
+    if (state === 'mouille') {
+      await imSay(bro(
+        'Oh, ton capteur vient de le voir : tu t\'es mouillé. Tu l\'as senti partir, ou c\'est lui qui te l\'apprend ? 🦊',
+        'Tu viens de te mouiller. Le capteur l\'a vu. Tu l\'as senti, au moins ?'), 800, broOn() ? 'pensive' : 'happy');
+    } else if (state === 'sature') {
+      await imSay(bro(
+        'Ta couche est bien saturée maintenant. On va te changer — ta peau d\'abord. 🦊',
+        'Saturée. On change. Ta peau d\'abord.'), 850, 'concern');
+    } else if (state === 'fraiche') {
+      await imSay(bro('Et voilà, ton capteur a vu une couche toute fraîche. ✨', 'Couche fraîche, vue par le capteur.'), 700, 'proud');
+    } else if (state === 'batterie') {
+      await imSay(bro('Ton capteur n\'a presque plus de batterie : il arrête de mesurer pour la protéger. Recharge-le vite. 🔋', 'Batterie faible. Il ne mesure plus. Recharge.'), 850, 'concern');
+    } else if (state === 'repose') {
+      await imSay(bro(
+        'Hmm. Ton capteur a été remis sur une couche qui n\'est pas fraîche. Si c\'était censé être un change… ce n\'en était pas un.',
+        'Reposé sur une couche pas fraîche. Ce n\'était pas un change.'), 900, 'puzzled');
+    }
+    await direRetraits(constats);
+    try { await imOfferHelp(m); } catch(e) {}
+  }
+
+  /* ---- À la fin d'un change PROUVÉ, on dit au capteur « couche fraîche » ----
+     C'est ce qui lui apprend à quoi ressemble une couche sèche chez toi.
+     La fonction existait côté capteur depuis la v2, mais l'appli ne
+     l'appelait nulle part. */
+  async function calibrerCapteurApresChange(proof, ctx) {
+    if (!proof) return;                                // un change sans preuve n'apprend rien au capteur
+    const S = window.HabitrainSensor;
+    if (S && S.isConnected()) { await S.recalibrate(); return; }
+    if (ctx !== 'pilier' || voiceMode !== 'foxy' || paused) return;
+    let enService = false;
+    try { const r = await window.storage.get('sensor:vu'); enService = !!(r && r.value); } catch(e) {}
+    if (!enService) return;
+    talk(TALK.CHECK, 'capteur:calib', async () => {
+      const k = await imDemander(bro(
+        'Dernière chose : dis à ton capteur que c\'est une couche fraîche. Appuie sur son bouton (la petite LED clignote), puis touche « Reconnecter ».',
+        'Appuie sur le bouton du capteur, puis « Reconnecter ». Il doit savoir que c\'est une couche fraîche.'), [
+        { k:'go', label:'🔗 Reconnecter mon capteur', dit:false },
+        { k:'non', label:'Plus tard', dit:'Plus tard.', soft:true }
+      ], 'teach');
+      if (k === 'go') {
+        const ok = await connecterCapteur();
+        if (ok && window.HabitrainSensor.isConnected()) {
+          await window.HabitrainSensor.recalibrate();
+          await imSay(bro('C\'est fait : il repart de zéro sur cette couche, et il retient à quoi elle ressemble. 🦊', 'Fait. Il repart de zéro.'), 800, 'proud');
+        } else {
+          await imSay(bro('Il ne s\'est pas connecté — il était peut-être déjà rendormi. Ce n\'est pas grave : il reconnaîtra la couche fraîche tout seul.', 'Pas connecté. Il la reconnaîtra seul.'), 850, 'calm');
+        }
+      } else {
+        await imSay(bro('D\'accord. Il saura reconnaître la couche fraîche tout seul, il lui faut juste un peu plus de temps pour bien apprendre.', 'D\'accord.'), 800, 'calm');
+      }
+      if (currentM) await imOfferHelp(currentM);
+    });
   }
 
   function renderSensorGuide() {
     const g = document.getElementById('sensorGuide');
     if (!g || g.dataset.filled) return;
     g.dataset.filled = '1';
+    const T = (t) => '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">' + t + '</div>';
     g.innerHTML =
-      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:6px 0 4px">Matériel (~15-20 €)</div>'+
-      '• 1 carte <b>ESP32-C3 mini</b> (LOLIN C3 Mini ou équivalent)<br>'+
-      '• 1 <b>capteur SHTC3</b> (humidité + température, I²C) — <b>non invasif</b>, il se pose sur la couche<br>'+
-      '• 1 <b>batterie LiPo 3.7V</b> (~400-500 mAh) avec connecteur, ou alim USB<br>'+
-      '• Un petit boîtier, du fil, fer à souder<br>'+
-      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">1. Préparer l\'IDE Arduino</div>'+
-      'Installe l\'IDE Arduino (gratuit). Dans Préférences → URL de gestionnaire de cartes, ajoute l\'URL ESP32 d\'Espressif, puis installe le paquet "esp32" dans le gestionnaire de cartes. Choisis la carte <b>ESP32C3 Dev Module</b>.'+
-      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">2. Câbler le capteur</div>'+
-      'SHTC3 en I²C : <b>SDA → GPIO8</b>, <b>SCL → GPIO9</b>, VIN → 3V3, GND → GND. Installe la bibliothèque <b>SparkFun SHTC3</b> dans l\'IDE Arduino.'+
-      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">3. Flasher le firmware</div>'+
-      'Ouvre le fichier <b>habitrain-capteur-couche.ino</b> (fourni), branche l\'ESP32 en USB, sélectionne le bon port, et clique Téléverser.'+
-      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">4. Calibrer</div>'+
-      'Le capteur se calibre <b>tout seul</b> : il fige une ligne de base 2 min après l\'allumage, et la refait après chaque change. Regarde l\'écart entre la valeur en direct et la base quand tu te mouilles : si la détection est trop/pas assez sensible, ajuste SEUIL_RH_MOUILLE et SEUIL_RH_SATURE dans le firmware.'+
-      '<div style="font-family:\'Fraunces\',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">5. Monter sur la couche</div>'+
-      '<b>Pose non invasive</b> : glisse le capteur entre la couche et ton vêtement, à l\'avant-bas, enveloppé dans un tissu fin respirant. Il ne touche ni ta peau ni le liquide — il lit l\'air confiné. Une grenouillère fermée donne de meilleures lectures qu\'un vêtement ouvert.'+
-      '<div style="background:#FBF3E0;border:1px solid #ecd9a8;border-radius:10px;padding:10px 12px;margin-top:14px;font-size:12px;font-weight:700;color:#8a6a30">'+
-      '🔋 Sécurité : batterie LiPo basse tension, aucun risque électrique. Garde l\'électronique au sec (le capteur détecte l\'humidité, mais la carte reste protégée). Nettoie les électrodes régulièrement.'+
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Version courte. Le guide complet (plan du pad, photos à prendre, dépannage) est dans ta documentation.</div>' +
+      T('Principe') +
+      'Trois bandes de cuivre isolées se posent contre la <b>face extérieure</b> de la couche (avant, milieu, entrejambe), plus une bande de référence à la taille. Le gel mouillé change la capacité vue par chaque bande. Aucun contact avec le liquide ni la peau.' +
+      T('Matériel') +
+      '• ESP32-C3 SuperMini · • module <b>MPR121</b> (clone nu de préférence) · • SHTC3 (facultatif, pour la température) · • LiPo 1 cellule <b>protégée</b> 250–400 mAh + chargeur TP4056 <b>avec protection</b>, résistance de charge remplacée par une 5,1 kΩ · • interrupteur à glissière · • 2 × 1 MΩ + 100 nF (surveillance batterie) · • ruban de cuivre 10 mm, Kapton, pochette de plastification · • bouton poussoir, résistance 100 kΩ' +
+      T('Câblage') +
+      'MPR121 : SDA → <b>GPIO6</b>, SCL → <b>GPIO7</b>, 3.3V → 3V3, GND → GND. Électrodes : E0 avant, E1 milieu, E2 entrejambe, E3 référence.<br>Bouton : <b>GPIO4</b> → GND (+100 kΩ vers 3V3).<br>Batterie → chargeur → interrupteur → broche <b>5V</b> de la carte. <b style="color:var(--coral)">Jamais sur 3V3.</b> Pont 1 MΩ / 1 MΩ du + vers <b>GPIO1</b>. Vérifie la polarité de la batterie au multimètre avant de la brancher.' +
+      T('Premier démarrage') +
+      'Carte « ESP32C3 Dev Module », USB CDC On Boot : Enabled. Aucune bibliothèque à installer. Flashe <b>avec le pad posé à plat sur la table</b> : au tout premier démarrage, il s\'étalonne à vide.' +
+      T('À chaque change') +
+      'Replace le pad contre la couche fraîche. Il reconnaît seul une couche fraîche en 2 minutes. À un pilier, Foxy te propose de le reconnecter pour lui confirmer — c\'est comme ça qu\'il apprend ta couche sèche.' +
+      '<div style="background:#FBF3E0;border:1px solid #ecd9a8;border-radius:10px;padding:10px 12px;margin-top:14px;font-size:12px;font-weight:700;color:#8a6a30">' +
+      '🔋 Sécurité : LiPo <u>protégée</u> dans un boîtier rigide, portée à la taille, jamais sous toi ; jamais en charge quand tu la portes. Pad entièrement laminé : aucun métal nu. S\'il chauffe, gonfle ou sent : tu l\'enlèves.' +
       '</div>';
   }
   async function renderQrConfig() {
@@ -12130,6 +13274,14 @@
     if (hsw) { hsw.classList.toggle('on', hardMode); hsw.addEventListener('click', () => setHardMode(!hardMode)); }
     const bsw = document.getElementById('bigbroSwitch');
     if (bsw) { bsw.classList.toggle('on', bigbro); bsw.addEventListener('click', () => setBigbro(!bigbro)); }
+    const swb = document.getElementById('safewordBtn');
+    if (swb) swb.addEventListener('click', async () => {
+      // la confirmation s'affiche tout de suite : les bulles de Foxy, elles,
+      // attendent qu'on les lise dans le chat
+      const fl = document.getElementById('safewordFlash');
+      if (fl) { fl.textContent = '✓ C\'est arrêté. Foxy est redevenu doux.'; setTimeout(() => { fl.textContent = ''; }, 6000); }
+      try { triggerSafeword(); } catch(e) {}
+    });
     document.body.classList.toggle('hardmode', hardMode);
     await loadFoxyOutfit();
     refreshHeadFoxy();
@@ -12143,6 +13295,7 @@
     try { await loadFoxySerie(); } catch(e) {}
     try { await loadDayMood(); } catch(e) {}
     try { await loadDiscipline(); } catch(e) {}
+    try { await loadDesertion(); } catch(e) {}
     // marqueurs pour les hauts faits contextuels
     try {
       if (hardMode) await flagBadge('hardDay');
@@ -12220,7 +13373,7 @@
         try { const r = await window.storage.get('arret:traite'); if (r && r.value) dejaTraite = JSON.parse(r.value); } catch(e) {}
         if (dejaTraite !== todayStr()) {
           const h = await detecterArretSilencieux();
-          if (h >= 18) {
+          if (h > 0) {
             try { await window.storage.set('arret:traite', JSON.stringify(todayStr())); } catch(e) {}
             try { if (h >= 24) await flagBadge('comeback'); } catch(e) {}
             popupPrise = true;
@@ -12229,6 +13382,12 @@
         }
       }
     } catch(e) {}
+
+    // le tirage du réveil passe AVANT le change dû : le change du matin
+    // vérifie la tenue, il faut donc qu'elle soit tirée
+    if (!paused && new Date().getHours() >= 6)
+      setTimeout(() => talk(TALK.ACCES, 'reveil:rituel', () => rituelReveil(),
+        { verifier: async () => !(await lireStock('reveil:rituel:' + todayStr(), false)) }), 300);
 
     // premier lancement : guide d'installation
     let obLance = false;
@@ -12248,6 +13407,7 @@
     setInterval(checkDueChangePeriodic, 60000);
     setInterval(() => { verifierRegression().catch(() => {}); suivreTenueFoxy().catch(() => {}); }, 60000);
     setTimeout(() => { verifierRegression().catch(() => {}); }, 8000);
+
   })();
 
   // Rappel de change persistant : re-propose tant que le pilier n'est pas fait
