@@ -897,3 +897,29 @@ body.qrsheet-on #qrSheet { display: block; }
   letter-spacing: .06em; color: rgba(255,255,255,.35);
 }
 .facade-ver { color: rgba(0,0,0,.28); margin-top: 14px; }
+
+/* ===== Installation avec Foxy : saisies ===== */
+.ob-input {
+  width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 13px;
+  border: 1.5px solid rgba(255,210,170,.45); background: rgba(255,255,255,.1);
+  color: #fff; font-family: inherit; font-size: 15px; font-weight: 700; outline: none;
+}
+.ob-input::placeholder { color: rgba(255,255,255,.45); }
+.ob-input:focus { border-color: #ffd9b0; background: rgba(255,255,255,.14); }
+.ob-list > .ob-input { margin-bottom: 4px; }
+.ob-ajout { display: flex; gap: 7px; align-items: center; margin-top: 10px; }
+.ob-ajout .ob-input { flex: 1; min-width: 0; }
+.ob-ajout button {
+  flex: none; width: 46px; height: 46px; border: none; border-radius: 13px; cursor: pointer;
+  background: linear-gradient(135deg,#e8894a,#d9743a); color: #fff; font-size: 20px; font-weight: 800;
+}
+.ob-mini {
+  flex: none; padding: 7px 6px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25);
+  background: rgba(0,0,0,.2); color: #fff; font-family: inherit; font-size: 12.5px; font-weight: 700;
+}
+.ob-mini option { color: #1c1c1e; }
+.ob-qty { width: 58px; text-align: center; }
+.ob-couche { align-items: center; flex-wrap: wrap; }
+.ob-item .mark[title], .ob-couche .mark { opacity: .7; }
+/* les preuves et fenêtres de Foxy passent au-dessus de l'installation */
+body.onboarding .foxypop-overlay { z-index: 10150; }

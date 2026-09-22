@@ -51,7 +51,7 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '20.4';
+  const APP_VERSION = '20.5';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -966,6 +966,8 @@
   // s'installait — d'où la phrase aperçue une seconde avant l'écran de connexion.
   function ecranVerrouille() {
     const l = document.getElementById('qrLock');
+    // l'installation avec Foxy occupe tout l'écran : le reste attend qu'elle se ferme
+    if (document.body.classList.contains('onboarding')) return true;
     return !!(l && l.style.display && l.style.display !== 'none');
   }
 
@@ -2028,7 +2030,7 @@
       await saveCheck(ok ? 'coucher_fait' : 'coucher_sanspreuve', 'coucher');
       await imSay(broOn()
         ? 'Bonne nuit. Tu gardes ta couche, évidemment. Je veille.'
-        : 'Bonne nuit alors ! Ta couche de nuit va bien s\'occuper de toi. À demain. 🦊💛', 950, 'sleep');
+        : 'Bonne nuit' + (nomOu(null) ? ', ' + nomOu(null) : ' alors') + ' ! Ta couche de nuit va bien s\'occuper de toi. À demain. 🦊💛', 950, 'sleep');
     }}),
     changer: (m) => ({ soft:true, label:'🍼 Me changer maintenant',
       onClick: () => startChange(m && (m.key==='reveil'||m.key==='soir') ? 'pilier' : 'check') }),
@@ -8783,7 +8785,7 @@
     if (!sup) {
       if (chat) {
         await imSay(bro(
-          'Bonjour, toi. 🦊 Avant que je tire ta journée, une seule question.',
+          'Bonjour, ' + nomOu('toi') + '. 🦊 Avant que je tire ta journée, une seule question.',
           'Debout. Une question, et je tire ta journée.'), 850, 'wave');
         const k = await imDemander(bro('Un superviseur sera présent aujourd\'hui ?', 'Superviseur présent aujourd\'hui ?'), [
           { k:'supervise', label:'👥 Oui, il sera là', dit:'Oui, il sera là.' },
@@ -8792,7 +8794,7 @@
         sup = k;
       } else {
         sup = await new Promise(res => {
-          foxyPopShow('Bonjour ! 🦊 Avant que je tire ta journée : un superviseur sera présent aujourd\'hui ?', 'wave', [
+          foxyPopShow('Bonjour' + (nomOu(null) ? ', ' + nomOu(null) : '') + ' ! 🦊 Avant que je tire ta journée : un superviseur sera présent aujourd\'hui ?', 'wave', [
             { label:'👥 Oui, il sera là', onClick: () => res('supervise') },
             { label:'🧍 Non, je suis seul', onClick: () => res('solo') }
           ]);
@@ -8955,7 +8957,7 @@
     try { await window.storage.set('pref:bigbro', JSON.stringify(false)); } catch(e) {}
     const sw = document.getElementById('bigbroSwitch'); if (sw) sw.classList.remove('on');
     try { imClear(); } catch(e) {}
-    await imSay('*doux, immédiatement* Hé, je suis là. On arrête tout, d\'accord ? C\'est bon, tu es en sécurité.', 700, 'concern');
+    await imSay('*doux, immédiatement* Hé' + (nomOu(null) ? ', ' + nomOu(null) : '') + ', je suis là. On arrête tout, d\'accord ? C\'est bon, tu es en sécurité.', 700, 'concern');
     await imSay('Reprends ton souffle. Je redeviens ton Foxy tout doux. Tu as très bien fait de me le dire. On va à ton rythme, tranquille. 🦊💛', 900, 'happy');
     try {
       if (await leverRepriseSafeword()) {
@@ -9726,7 +9728,7 @@
       'Respire. Tu es rentré. Ta vie d\'adulte reste à la porte, elle t\'attendra bien.',
       'Ici, tu n\'as plus de décisions à prendre. C\'est moi qui m\'occupe de tout. Laisse-toi aller.'
     ] : [
-      'Te revoilàààà ! 🦊💛 Bienvenue à la maison, tu m\'as tellement manqué !',
+      'Te revoilàààà' + (nomOu(null) ? ', ' + nomOu(null) : '') + ' ! 🦊💛 Bienvenue à la maison, tu m\'as tellement manqué !',
       'Ahhh, ça fait du bien de te retrouver ! Allez, pose tout ça : ici tu peux laisser ta vie d\'adulte dehors.',
       'Tu es rentré ! Ici, pas de responsabilités, pas de pression — juste toi, moi, et plein de douceur. 💛'
     ];
@@ -10132,7 +10134,7 @@
 
       // 1) Ouverture : la couche est remise, maintenant on parle
       await imSay(bro(
-        "Bon. Tu es remis, tu es au propre, c'est bien. Maintenant, assieds-toi. Il faut qu'on parle de ce qui s'est passé. 🦊",
+        "Bon" + (nomOu(null) ? ", " + nomOu(null) : "") + ". Tu es remis, tu es au propre, c'est bien. Maintenant, assieds-toi. Il faut qu'on parle de ce qui s'est passé. 🦊",
         "Tu es remis. Bien. Maintenant on parle de ce qui s'est passé. Assieds-toi."), 1000, 'sad');
 
       // 2) Les faits
@@ -10663,12 +10665,7 @@
 
   (function(){
     const b0 = document.getElementById('obRestart');
-    if (b0) b0.addEventListener('click', async () => {
-      try { await window.storage.delete('ob:done'); } catch(e) {}
-      obIndex = 0;
-      document.body.classList.add('onboarding');
-      await renderOnboard();
-    });
+    if (b0) b0.addEventListener('click', async () => { await ouvrirInstallation(true); });
   })();
 
   (function(){
@@ -11208,190 +11205,644 @@
   })();
 
   /* ============================================================
-     ONBOARDING — guide du premier lancement
-     Foxy accueille, explique, et vérifie que tout est en place.
+     INSTALLATION AVEC FOXY — premier lancement
+     Foxy se présente, puis règle tout avec toi, en conversation :
+     ton nom, ton profil (et le niveau de discipline qui en découle),
+     ton matériel, tes couches, tes tenues, tes accessoires, tes
+     étiquettes (imprimées PUIS vérifiées au scan), ta sécurité.
+     Tout ce qui est fait est gardé : tu peux t'arrêter à n'importe
+     quel moment et reprendre plus tard, là où tu en étais.
      ============================================================ */
-  let obIndex = 0;
+  const SETUP_CLE = 'setup:etat';
+  const CHAPITRES = [
+    { id:'accueil',     t:'Faire connaissance',        ic:'🦊' },
+    { id:'nom',         t:'Ton prénom',                ic:'👋' },
+    { id:'profil',      t:'Ton profil et ta discipline', ic:'🧭' },
+    { id:'materiel',    t:'Le matériel de base',       ic:'🧴' },
+    { id:'couches',     t:'Tes couches',               ic:'🍼' },
+    { id:'tenues',      t:'Tes tenues',                ic:'👕' },
+    { id:'accessoires', t:'Les accessoires',           ic:'🔒' },
+    { id:'etiquettes',  t:'Les étiquettes',            ic:'🏷️' },
+    { id:'securite',    t:'Sécurité et sauvegarde',    ic:'🛟' },
+    { id:'fin',         t:'On est prêts',              ic:'🌱' }
+  ];
+  let setupEtat = null;
+  let profilNom = null;          // { prenom, surnom, appel }
+  const SETUP_QUIT = { quit: true };
 
-  // Vérifications automatiques : ce que l'appli peut constater seule
-  async function obChecks() {
-    const out = {};
-    // notifications autorisées
-    out.notif = (notifPermState() === 'granted');
-    // stock de couches renseigné
-    try {
-      if (window.HabitrainWardrobe) {
-        const st = await window.HabitrainWardrobe.categoryStatus();
-        out.stock = (st.jour.total > 0 || st.nuit.total > 0);
-      }
-    } catch(e) { out.stock = false; }
-    // garde-robe personnalisée (au moins une tenue)
-    try {
-      if (window.HabitrainWardrobe) {
-        const w = await window.HabitrainWardrobe.getWardrobe();
-        out.wardrobe = ((w.jour||[]).length > 0 && (w.nuit||[]).length > 0);
-      }
-    } catch(e) { out.wardrobe = false; }
-    // mot de passe de pause défini
-    try { out.pass = !!(await getPausePass()); } catch(e) { out.pass = false; }
-    // export de sauvegarde déjà fait
-    try { const r = await window.storage.get('ob:exported'); out.export = !!(r && r.value); } catch(e) { out.export = false; }
-    // QR générés au moins une fois
-    try { const r = await window.storage.get('ob:qrdone'); out.qr = !!(r && r.value); } catch(e) { out.qr = false; }
-    // niveau de missions choisi
-    try { if (window.HabitrainMissions) { const st = await window.HabitrainMissions.getState(); out.missions = !!st.level; } } catch(e) { out.missions = false; }
-    return out;
+  async function loadProfilNom() { profilNom = await lireStock('profil:nom', null); }
+  // le nom par lequel Foxy t'appelle (ou le repli donné)
+  function nomOu(repli) {
+    const p = profilNom;
+    if (!p) return repli;
+    if (p.appel === 'surnom' && p.surnom) return p.surnom;
+    if (p.appel === 'alterne' && p.prenom && p.surnom) return (new Date().getHours() % 2) ? p.surnom : p.prenom;
+    return p.prenom || p.surnom || repli;
   }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c])); }
 
-  // Étapes de l'onboarding
-  function obSteps() {
-    return [
-      {
-        expr:'comfort', titre:'Bienvenue à la maison 🦊',
-        texte:'Salut ! Moi c\'est Foxy, je serai ton compagnon tout au long de ton programme. Avant qu\'on commence, on va vérifier ensemble que tout est bien en place. Ça prend deux minutes.',
-        items:null, suivant:'On y va !'
-      },
-      {
-        expr:'explain', titre:'Ce que je fais pour toi',
-        texte:'Je te rappelle tes changes, je suis ta peau et ton hydratation, je te propose des missions, et je suis là pour discuter. Tu peux me parler librement, ou utiliser les boutons.',
-        items:null, suivant:'Compris'
-      },
-      {
-        expr:'curious', titre:'L\'essentiel à configurer',
-        texte:'Voici ce qu\'il faut mettre en place. Je coche tout seul ce qui est déjà fait — tape sur une ligne pour aller la régler.',
-        items:[
-          { k:'notif',    t:'Autoriser les notifications', s:'Sinon je ne pourrai pas te rappeler tes créneaux', go:'settingsCard' },
-          { k:'wardrobe', t:'Vérifier ta garde-robe',      s:'Paramètres → Garde-robe & stock',                 go:'wardrobeCard' },
-          { k:'stock',    t:'Renseigner ton stock de couches', s:'Quantités par modèle, jour et nuit',          go:'wardrobeCard' },
-          { k:'missions', t:'Choisir ton niveau de missions', s:'De Doux à Intense',                            go:'missionsCard' }
-        ],
-        suivant:'Suite'
-      },
-      {
-        expr:'calm', titre:'Sécurité et sauvegarde',
-        texte:'Deux choses à ne pas négliger — elles t\'éviteront de gros ennuis.',
-        items:[
-          { k:'pass',   t:'Définir un mot de passe de pause', s:'Pour déverrouiller l\'écran de connexion', go:'settingsCard' },
-          { k:'export', t:'Faire un premier export',          s:'Tes données ne vivent que sur ce téléphone', go:'saveCard' }
-        ],
-        suivant:'Suite'
-      },
-      {
-        expr:'proud', titre:'Options avancées',
-        texte:'Ces éléments sont facultatifs. Tu peux les activer maintenant ou plus tard, quand tu auras le matériel.',
-        items:[
-          { k:'qr', t:'Générer et coller tes QR codes', s:'Tapis de change, frigo, porte, bracelet', go:'qrCard' }
-        ],
-        suivant:'Suite'
-      },
-      {
-        expr:'reassure', titre:'Trois réflexes à garder',
-        texte:'⚠️ Garde une capture de tes QR si tu actives le bracelet bloquant.\n\n⚠️ Le secours anti-blocage : 3 tapes rapides sur le logo de l\'écran de connexion.\n\n⚠️ Refais un export de sauvegarde de temps en temps.',
-        items:null, suivant:'C\'est noté'
-      },
-      {
-        expr:'cheer', titre:'On est prêts !',
-        texte:'Voilà, tout est en place. Je serai là à chaque moment de ta journée. Prends soin de toi, et laisse-toi porter — je m\'occupe du reste. 💛',
-        items:null, suivant:'Commencer mon programme'
-      }
-    ];
+  async function lireSetup() {
+    setupEtat = await lireStock(SETUP_CLE, null) || { fait: {}, rep: {}, debut: Date.now() };
+    return setupEtat;
   }
+  async function ecrireSetup() { await ecrireStock(SETUP_CLE, setupEtat); }
+  async function chapitreFait(id) { setupEtat.fait[id] = Date.now(); await ecrireSetup(); }
+  async function repondre(k, v) { setupEtat.rep[k] = v; await ecrireSetup(); }
+  const rep = k => setupEtat.rep[k];
 
-  async function renderOnboard() {
-    const steps = obSteps();
-    const st = steps[obIndex];
-    if (!st) { await finishOnboard(); return; }
-    try { await loadFoxyOutfit(); } catch(e) {}
-    try { positionFoxyCell(document.getElementById('obFoxy'), st.expr, 130); } catch(e) {}
-    document.getElementById('obStep').textContent = 'Étape ' + (obIndex+1) + ' / ' + steps.length;
-    document.getElementById('obTitle').textContent = st.titre;
-    document.getElementById('obText').textContent = st.texte;
-
-    const list = document.getElementById('obList');
-    list.innerHTML = '';
-    if (st.items) {
-      const checks = await obChecks();
-      st.items.forEach(it => {
-        const fait = !!checks[it.k];
-        const d = document.createElement('div');
-        d.className = 'ob-item' + (fait ? ' ok' : '');
-        d.innerHTML = '<span class="mark">' + (fait ? '✅' : '⬜') + '</span>' +
-          '<span class="lbl"><b>' + it.t + '</b><span class="sub">' + it.s + '</span></span>';
-        d.addEventListener('click', async () => {
-          // ferme l'onboarding et ouvre l'écran concerné
-          document.body.classList.remove('onboarding');
-          const card = document.getElementById(it.go);
-          if (card) {
-            if (it.go !== 'settingsCard' && it.go !== 'missionsCard') {
-              const sc = document.getElementById('settingsCard');
-              if (sc) { sc.style.display = ''; renderSettings(); }
-            }
-            card.style.display = '';
-            if (SETTINGS_RENDER && SETTINGS_RENDER[it.go]) { try { await SETTINGS_RENDER[it.go](); } catch(e) {} }
-            if (it.go === 'missionsCard') { try { await renderMissions(); } catch(e) {} }
-            if (it.go === 'saveCard') { /* rien à rendre */ }
-            card.scrollIntoView({behavior:'smooth', block:'start'});
-          }
-          // bouton de retour à l'onboarding
-          showObResume();
-        });
-        list.appendChild(d);
-      });
-    }
-
-    const acts = document.getElementById('obActs');
-    acts.innerHTML = '';
+  /* ---------- Le petit moteur de conversation (écran d'installation) ---------- */
+  let _chapCourant = null;
+  function sEcran(texte, expr, titre) {
+    try { positionFoxyCell(document.getElementById('obFoxy'), expr || 'happy', 130); } catch(e) {}
+    const i = CHAPITRES.findIndex(c => c.id === _chapCourant);
+    document.getElementById('obStep').textContent = i >= 0 ? (CHAPITRES[i].ic + ' ' + (i + 1) + ' / ' + CHAPITRES.length + ' · ' + CHAPITRES[i].t) : 'Installation';
+    document.getElementById('obTitle').textContent = titre || '';
+    document.getElementById('obTitle').style.display = titre ? '' : 'none';
+    document.getElementById('obText').innerHTML = texte;
+    document.getElementById('obList').innerHTML = '';
+    document.getElementById('obActs').innerHTML = '';
+  }
+  function sBouton(label, soft, onClick) {
     const b = document.createElement('button');
-    b.textContent = st.suivant;
-    b.addEventListener('click', async () => { obIndex++; await renderOnboard(); });
-    acts.appendChild(b);
-    if (obIndex > 0) {
-      const p = document.createElement('button');
-      p.className = 'soft'; p.textContent = 'Retour';
-      p.addEventListener('click', async () => { obIndex = Math.max(0, obIndex-1); await renderOnboard(); });
-      acts.appendChild(p);
-    }
-    if (obIndex < steps.length - 1) {
-      const sk = document.createElement('button');
-      sk.className = 'soft'; sk.textContent = 'Passer le guide';
-      sk.addEventListener('click', async () => { await finishOnboard(); });
-      acts.appendChild(sk);
-    }
+    if (soft) b.className = 'soft';
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    document.getElementById('obActs').appendChild(b);
+    return b;
   }
-
-  // petit bouton flottant pour revenir au guide après être allé régler quelque chose
-  function showObResume() {
-    if (document.getElementById('obResume')) return;
-    const b = document.createElement('button');
-    b.id = 'obResume';
-    b.textContent = '🦊 Reprendre le guide';
-    b.style.cssText = 'position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:9000;' +
-      'padding:13px 20px;border:none;border-radius:16px;font-family:inherit;font-size:14.5px;font-weight:800;' +
-      'background:#d9743a;color:#fff;box-shadow:0 6px 20px rgba(217,116,58,.45);cursor:pointer';
-    b.addEventListener('click', async () => {
-      b.remove();
-      document.body.classList.add('onboarding');
-      await renderOnboard();
+  // « Plus tard » : toujours là, garde tout, ferme l'écran
+  function sPlusTard(reject) {
+    sBouton('⏸ On reprendra plus tard', true, () => reject(SETUP_QUIT));
+  }
+  function sDire(texte, expr, suivant, titre) {
+    return new Promise((res, rej) => {
+      sEcran(texte, expr, titre);
+      sBouton(suivant || 'Suite', false, () => res(true));
+      sPlusTard(rej);
     });
-    document.body.appendChild(b);
+  }
+  function sChoix(texte, options, expr, titre) {
+    return new Promise((res, rej) => {
+      sEcran(texte, expr, titre);
+      options.forEach(o => sBouton(o.label, !!o.soft, () => res(o.k)));
+      sPlusTard(rej);
+    });
+  }
+  function sSaisie(texte, opt, expr) {
+    opt = opt || {};
+    return new Promise((res, rej) => {
+      sEcran(texte, expr);
+      const inp = document.createElement('input');
+      inp.className = 'ob-input';
+      inp.type = opt.type || 'text';
+      inp.placeholder = opt.placeholder || '';
+      inp.value = opt.valeur || '';
+      document.getElementById('obList').appendChild(inp);
+      const ok = () => { const v = inp.value.trim(); if (!v && !opt.facultatif) { inp.focus(); return; } res(v || null); };
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') ok(); });
+      sBouton(opt.valider || 'Valider', false, ok);
+      if (opt.facultatif) sBouton(opt.passer || 'Passer', true, () => res(null));
+      sPlusTard(rej);
+      setTimeout(() => { try { inp.focus(); } catch(e) {} }, 60);
+    });
+  }
+  // une liste qu'on complète : chaque ajout / retrait est enregistré aussitôt
+  function sListe(texte, opt, expr) {
+    return new Promise((res, rej) => {
+      sEcran(texte, expr);
+      const box = document.getElementById('obList');
+      const liste = document.createElement('div');
+      box.appendChild(liste);
+      const dessiner = async () => {
+        const items = await opt.lire();
+        liste.innerHTML = '';
+        if (!items.length) {
+          const v = document.createElement('div'); v.className = 'ob-item'; v.style.cursor = 'default';
+          v.textContent = opt.vide || 'Rien pour l\'instant.';
+          liste.appendChild(v);
+        }
+        items.forEach(n => {
+          const d = document.createElement('div'); d.className = 'ob-item ok'; d.style.cursor = 'default';
+          const l = document.createElement('span'); l.className = 'lbl'; l.style.flex = '1'; l.textContent = n;
+          const x = document.createElement('span'); x.className = 'mark'; x.textContent = '✕'; x.style.cursor = 'pointer';
+          x.title = 'Retirer';
+          x.addEventListener('click', async () => { await opt.retirer(n); await dessiner(); });
+          d.appendChild(l); d.appendChild(x); liste.appendChild(d);
+        });
+      };
+      const ligne = document.createElement('div'); ligne.className = 'ob-ajout';
+      const inp = document.createElement('input'); inp.className = 'ob-input'; inp.placeholder = opt.placeholder || 'Ajouter…';
+      const plus = document.createElement('button'); plus.textContent = '＋';
+      const ajouter = async () => { const v = inp.value.trim(); if (!v) return; await opt.ajouter(v); inp.value = ''; await dessiner(); inp.focus(); };
+      plus.addEventListener('click', ajouter);
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') ajouter(); });
+      ligne.appendChild(inp); ligne.appendChild(plus); box.appendChild(ligne);
+      dessiner();
+      sBouton(opt.fini || 'C\'est bon', false, () => res(true));
+      sPlusTard(rej);
+    });
+  }
+  // cases à cocher : renvoie { id: true/false }
+  function sCoches(texte, items, deja, expr) {
+    return new Promise((res, rej) => {
+      sEcran(texte, expr);
+      const etat = Object.assign({}, deja || {});
+      const box = document.getElementById('obList');
+      items.forEach(it => {
+        const d = document.createElement('div');
+        const maj = () => {
+          d.className = 'ob-item' + (etat[it.id] ? ' ok' : '');
+          d.innerHTML = '<span class="mark">' + (etat[it.id] ? '✅' : '⬜') + '</span><span class="lbl"><b>' + esc(it.n) + '</b>'
+            + (it.s ? '<span class="sub">' + esc(it.s) + '</span>' : '') + '</span>';
+        };
+        d.addEventListener('click', () => { etat[it.id] = !etat[it.id]; maj(); });
+        maj(); box.appendChild(d);
+      });
+      sBouton('C\'est bon', false, () => res(etat));
+      sPlusTard(rej);
+    });
+  }
+  // ouvre le scanner et rend le code lu (ou null si annulé)
+  function scannerUnCode() {
+    return new Promise(res => {
+      const QR = window.HabitrainQR;
+      if (!QR) return res(null);
+      let fini = false;
+      const ov = document.getElementById('qrScanOverlay');
+      const iv = setInterval(() => {
+        if (!fini && ov && ov.style.display === 'none') { fini = true; clearInterval(iv); res(null); }
+      }, 400);
+      QR.startScan(null, k => { if (fini) return; fini = true; clearInterval(iv); res(k); });
+    });
   }
 
-  async function finishOnboard() {
+  /* ---------- Les chapitres ---------- */
+  const SETUP_CHAP = {};
+
+  SETUP_CHAP.accueil = async () => {
+    const j = foxyJournee(), d = foxyDecrit(j);
+    await sDire('Salut. Moi, c\'est <b>Foxy</b>. 🦊', 'wave', 'Salut Foxy', 'Bienvenue à la maison');
+    await sDire('Je suis un renard qui a fait exactement le programme que tu t\'apprêtes à faire. Un mois. Au début, je comptais les heures, je vérifiais ma couche toutes les dix minutes, je me retenais sans même m\'en rendre compte.<br><br>Et je l\'ai bouclé.', 'wistful');
+    await sDire('Aujourd\'hui, je vis mes journées en couche, pour de vrai. Personne ne me l\'impose : c\'est juste devenu ma vie.<br><br>' + esc(d.tenue) + ' ' + esc(d.couche), 'proud', 'Et toi, tu fais quoi ?');
+    await sDire('Moi, je fais le chemin avec toi. Je suis celui qui est passé avant.<br><br>Je te rappelle tes changes, je tire ta tenue chaque matin, je te propose des moments pour décrocher, et je suis là pour parler quand ça pèse.', 'explain', 'D\'accord');
+    await sDire('Et je vérifie. Je ne te crois pas sur parole — pas parce que je te prends pour un menteur, mais parce que tu m\'as demandé de ne pas le faire. Chaque change se prouve par un code, et tes capteurs me disent le reste.<br><br>Quand tu voudras t\'échapper, je serai là. La résistance est vaine. Tu verras, c\'est reposant. 💛', 'calm', 'Compris');
+    await sDire('Maintenant, on installe tout ensemble : ton profil, ton matériel, tes couches, tes tenues, tes étiquettes. Ça prend un moment.<br><br>Tu peux t\'arrêter quand tu veux — je garde en mémoire tout ce qu\'on a fait, et on reprendra exactement là.', 'happy', 'On y va');
+  };
+
+  SETUP_CHAP.nom = async () => {
+    const p = Object.assign({}, profilNom || {});
+    const prenom = await sSaisie('Comment tu t\'appelles ?', { placeholder:'Ton prénom', valeur: p.prenom || '', facultatif:true, passer:'Je préfère ne pas le dire' }, 'curious');
+    p.prenom = prenom || null;
+    const surnom = await sSaisie((prenom ? 'Enchanté, <b>' + esc(prenom) + '</b>. ' : 'D\'accord, pas de souci. ') + 'Et un surnom ? Un petit nom, que j\'aurais le droit d\'utiliser — entre nous.',
+      { placeholder:'Ton surnom', valeur: p.surnom || '', facultatif:true, passer:'Pas de surnom' }, 'happy');
+    p.surnom = surnom || null;
+    p.appel = p.surnom && !p.prenom ? 'surnom' : 'prenom';
+    if (p.prenom && p.surnom) {
+      p.appel = await sChoix('Je t\'appelle comment ?', [
+        { k:'prenom',  label:'Par mon prénom : ' + p.prenom },
+        { k:'surnom',  label:'Par mon surnom : ' + p.surnom },
+        { k:'alterne', label:'Les deux, selon le moment' }
+      ], 'curious');
+    }
+    profilNom = p;
+    await ecrireStock('profil:nom', p);
+    const n = nomOu(null);
+    await sDire(n ? 'Alors ce sera <b>' + esc(n) + '</b>. Ça me va bien. 🦊' : 'Alors je t\'appellerai « toi ». Ça marche aussi, tu sais.', 'proud', 'Suite');
+  };
+
+  // ---- Profil et niveau de discipline ----
+  const NIVEAUX_DISC = [
+    { id:'doux',    nom:'Doux',    missions:'doux',    intensif:false, bro:false, bracelet:false,
+      pourquoi:'Tu cherches surtout de la douceur, et tu tiens tes engagements. Je te guide, je propose, je vérifie — sans serrer.' },
+    { id:'normal',  nom:'Normal',  missions:'normal',  intensif:false, bro:false, bracelet:false,
+      pourquoi:'Un cadre net, des preuves à chaque change, mais de la place pour respirer. C\'est là que la plupart des gens tiennent le mieux.' },
+    { id:'soutenu', nom:'Soutenu', missions:'soutenu', intensif:true,  bro:false, bracelet:true,
+      pourquoi:'Tu as besoin que le cadre tienne même quand toi tu lâches. Mode intensif : je m\'inquiète à 5 minutes de retard, les pauses se méritent.' },
+    { id:'intense', nom:'Intense', missions:'intense', intensif:true,  bro:true,  bracelet:true,
+      pourquoi:'Tu veux qu\'on ne te laisse plus d\'échappatoire. Mode intensif, et moi en grand frère : plus direct, moins de portes. La résistance est vaine.' }
+  ];
+
+  SETUP_CHAP.profil = async () => {
+    await sDire('Maintenant, je vais te poser quelques questions sur toi. Pas pour te juger : pour savoir comment te tenir. Trop lâche, tu t\'ennuies et tu pars. Trop serré, tu étouffes et tu pars aussi.', 'curious', 'Vas-y');
+    const Q = [
+      { k:'exp', q:'Les couches, tu en es où ?', o:[
+        { k:0, label:'🌱 Je n\'ai jamais porté 24h sur 24' },
+        { k:1, label:'🌿 Quelques jours d\'affilée, déjà' },
+        { k:2, label:'🌳 Régulièrement, depuis un moment' },
+        { k:3, label:'🏔️ Longtemps, c\'est ma normalité' } ] },
+      { k:'cherche', q:'Qu\'est-ce que tu viens chercher ici, surtout ?', o:[
+        { k:0, label:'🧸 De la douceur, du réconfort' },
+        { k:1, label:'📏 Un cadre, une structure' },
+        { k:2, label:'🔒 Être tenu — ne plus avoir le choix' } ] },
+      { k:'tenue', q:'Honnêtement : quand personne ne regarde, tu tiens ?', o:[
+        { k:0, label:'✅ Oui, je tiens mes engagements' },
+        { k:2, label:'🫣 Je lâche quand personne ne vérifie' },
+        { k:3, label:'🚪 J\'ai déjà abandonné des programmes' } ] },
+      { k:'insiste', q:'Quand je te dis de faire quelque chose, tu veux que je…', o:[
+        { k:0, label:'💬 …propose, et que je te laisse décider' },
+        { k:1, label:'🗣️ …insiste si tu traînes' },
+        { k:2, label:'🧱 …ne te laisse pas d\'échappatoire' } ] },
+      { k:'journee', q:'Tes journées, elles ressemblent à quoi ?', o:[
+        { k:0, label:'🏠 Surtout à la maison' },
+        { k:1, label:'🚶 Des sorties régulières' },
+        { k:2, label:'🏢 Je travaille à l\'extérieur' } ] },
+      { k:'sup', q:'Et quelqu\'un est-il là pour t\'accompagner ?', o:[
+        { k:0, label:'🧍 Je suis seul' },
+        { k:1, label:'👥 Un superviseur, parfois' },
+        { k:2, label:'🤝 Un superviseur, souvent' } ] }
+    ];
+    for (const q of Q) {
+      if (rep('p_' + q.k) !== undefined) continue;   // déjà répondu : on ne redemande pas
+      const r = await sChoix(q.q, q.o.map(o => ({ k:o.k, label:o.label })), 'curious');
+      await repondre('p_' + q.k, r);
+    }
+    const g = k => rep('p_' + k) || 0;
+    const score = g('cherche') * 2 + g('tenue') * 1.5 + g('insiste') * 2 + (g('exp') >= 2 ? 1 : 0) - g('journee');
+    let i = score <= 2 ? 0 : score <= 5 ? 1 : score <= 8 ? 2 : 3;
+    const debutant = g('exp') === 0 && i > 1;
+    if (debutant) i = 1;
+
+    const dire = async (i) => {
+      const n = NIVEAUX_DISC[i];
+      let t = 'Je te vois bien au niveau <b>' + n.nom + '</b>.<br><br>' + n.pourquoi;
+      t += '<br><br><span style="opacity:.8">Missions : ' + n.missions + ' · Mode intensif : ' + (n.intensif ? 'oui' : 'non') + ' · Foxy grand frère : ' + (n.bro ? 'oui' : 'non') + '</span>';
+      if (debutant && i === 1) t += '<br><br>Tu m\'as dit que tu n\'as jamais porté 24h sur 24 : on commence là, même si le reste de tes réponses dit plus. Le premier mur, c\'est la durée. Une fois passé, on monte.';
+      if (g('tenue') >= 2) t += '<br><br>Et tu m\'as dit que tu lâches quand personne ne vérifie. Merci de l\'avoir dit. Alors je vérifierai.';
+      return sChoix(t, [
+        { k:'ok',    label:'Ça me va' },
+        { k:'moins', label:'Un cran plus doux', soft:true },
+        { k:'plus',  label:'Un cran plus strict', soft:true }
+      ], 'explain');
+    };
+    let choix;
+    while ((choix = await dire(i)) !== 'ok') {
+      if (choix === 'moins' && i > 0) i--;
+      else if (choix === 'plus' && i < 3) i++;
+      else break;
+    }
+    const n = NIVEAUX_DISC[i];
+    try { if (window.HabitrainMissions) await window.HabitrainMissions.setLevel(n.missions); } catch(e) {}
+    try { await setHardMode(n.intensif); } catch(e) {}
+    try { await setBigbro(n.bro); } catch(e) {}
+    await ecrireStock('profil:discipline', { niveau: n.id, score, date: Date.now() });
+    await repondre('niveau', n.id);
+    await sDire('C\'est réglé : niveau <b>' + n.nom + '</b>. Tu pourras toujours le changer dans les réglages — ou revenir sur ce chapitre.', 'proud');
+  };
+
+  SETUP_CHAP.materiel = async () => {
+    const ITEMS = [
+      { id:'tapis',     n:'Un tapis à langer',      s:'Indispensable : c\'est là que vit ton code de change' },
+      { id:'creme',     n:'De la crème barrière',   s:'Indispensable : ta peau passe avant tout' },
+      { id:'lingettes', n:'Des lingettes',          s:'Indispensable' },
+      { id:'biberon',   n:'Un biberon',             s:'Trois par jour : l\'hydratation fait la moitié du travail' },
+      { id:'tetine',    n:'Une tétine',             s:'Pour les régressions, la sieste, l\'endormissement' },
+      { id:'doudou',    n:'Un doudou',              s:'Pour les moments où tu décroches' },
+      { id:'poubelle',  n:'Une poubelle à couches', s:'Fermée, près du tapis' },
+      { id:'cache',     n:'Un cache-couche',        s:'Facultatif : pour sortir, ou par-dessus la nuit' }
+    ];
+    const r = await sCoches('Le matériel de base. Coche ce que tu as <b>déjà</b> — je note le reste.', ITEMS,
+      await lireStock('profil:materiel', null) || {}, 'curious');
+    await ecrireStock('profil:materiel', r);
+    const manque = ITEMS.filter(x => !r[x.id] && x.id !== 'cache');
+    const indisp = manque.filter(x => ['tapis','creme','lingettes'].includes(x.id));
+    await sDire(!manque.length
+      ? 'Tout y est. 🦊 On passe à tes couches.'
+      : (indisp.length
+          ? 'Il te manque de l\'indispensable : <b>' + indisp.map(x => x.n.toLowerCase()).join(', ') + '</b>. Procure-le toi avant de démarrer vraiment — je te le rappellerai à la fin.'
+          : 'Il te manque : ' + manque.map(x => x.n.toLowerCase()).join(', ') + '. Rien de bloquant, mais ça aide. Je le garde en tête.'),
+      indisp.length ? 'concern' : 'happy');
+  };
+
+  SETUP_CHAP.couches = async () => {
+    const WB = window.HabitrainWardrobe;
+    if (!WB) return;
+    await sDire('Tes couches. Je dois savoir quels modèles tu as, pour le jour ou la nuit, et combien. C\'est comme ça que je choisis celle de chaque change — et que je te préviens avant que le stock tombe à zéro.', 'explain');
+    await new Promise((res, rej) => {
+      sEcran('Voici ton stock. Corrige les quantités, retire ce que tu n\'as pas, ajoute ce qui manque.', 'curious');
+      const box = document.getElementById('obList');
+      const USAGE = { jour:'☀️ Jour', nuit:'🌙 Nuit', both:'🌗 Les deux' };
+      const dessiner = async () => {
+        const list = await WB.getStock();
+        box.innerHTML = '';
+        list.forEach(m => {
+          const d = document.createElement('div'); d.className = 'ob-item ob-couche' + (m.qty > 0 ? ' ok' : ''); d.style.cursor = 'default';
+          const nom = document.createElement('span'); nom.className = 'lbl'; nom.style.flex = '1'; nom.textContent = m.name;
+          const us = document.createElement('select'); us.className = 'ob-mini';
+          Object.keys(USAGE).forEach(k => { const o = document.createElement('option'); o.value = k; o.textContent = USAGE[k]; if (m.usage === k) o.selected = true; us.appendChild(o); });
+          us.addEventListener('change', async () => { await WB.updateModel(m.id, { usage: us.value }); });
+          const q = document.createElement('input'); q.type = 'number'; q.min = '0'; q.className = 'ob-mini ob-qty'; q.value = m.qty || 0;
+          q.addEventListener('change', async () => { await WB.updateModel(m.id, { qty: Math.max(0, parseInt(q.value, 10) || 0) }); await dessiner(); });
+          const x = document.createElement('span'); x.className = 'mark'; x.textContent = '✕'; x.style.cursor = 'pointer';
+          x.addEventListener('click', async () => { await WB.removeModel(m.id); await dessiner(); });
+          d.appendChild(nom); d.appendChild(us); d.appendChild(q); d.appendChild(x);
+          box.appendChild(d);
+        });
+        const aj = document.createElement('div'); aj.className = 'ob-ajout';
+        const n = document.createElement('input'); n.className = 'ob-input'; n.placeholder = 'Nouveau modèle (ex. ABU Space)';
+        const us = document.createElement('select'); us.className = 'ob-mini';
+        Object.keys(USAGE).forEach(k => { const o = document.createElement('option'); o.value = k; o.textContent = USAGE[k]; us.appendChild(o); });
+        const q = document.createElement('input'); q.type = 'number'; q.min = '0'; q.placeholder = 'Qté'; q.className = 'ob-mini ob-qty';
+        const plus = document.createElement('button'); plus.textContent = '＋';
+        plus.addEventListener('click', async () => {
+          const v = n.value.trim(); if (!v) { n.focus(); return; }
+          await WB.addModel(v, us.value, Math.max(0, parseInt(q.value, 10) || 0));
+          await dessiner();
+        });
+        aj.appendChild(n); aj.appendChild(us); aj.appendChild(q); aj.appendChild(plus);
+        box.appendChild(aj);
+      };
+      dessiner();
+      sBouton('C\'est mon stock', false, () => res(true));
+      sPlusTard(rej);
+    });
+    const st = await WB.categoryStatus();
+    const manque = [];
+    if (!st.jour.total) manque.push('de jour');
+    if (!st.nuit.total) manque.push('de nuit');
+    await sDire(manque.length
+      ? 'Attention : aucune couche ' + manque.join(' ni ') + ' en stock. Tant que c\'est le cas, je prendrai ce que tu as, même hors période. Pense à en commander.'
+      : 'Parfait. <b>' + st.jour.total + '</b> pour le jour, <b>' + st.nuit.total + '</b> pour la nuit. Je tourne entre tes modèles, jamais deux fois de suite le même.',
+      manque.length ? 'concern' : 'proud');
+  };
+
+  SETUP_CHAP.tenues = async () => {
+    const WB = window.HabitrainWardrobe;
+    if (!WB) return;
+    await sDire('Tes tenues. Chaque matin, je tire celle du jour et celle de la nuit — tu ne choisis pas. Pour ça, il me faut ta vraie garde-robe, pas une liste d\'exemple.', 'explain');
+    const CATS = [
+      { id:'jour',   q:'Tes tenues de <b>jour</b> : rompers, bodys, grenouillères…', conseil:'Précise la fermeture quand il y en a une (« fermeture dorsale », « fermeture devant ») : c\'est ce qui me dit ce que la tenue fait.', ph:'Ex. Romper marine (boutons pression)' },
+      { id:'nuit',   q:'Tes tenues de <b>nuit</b>.', conseil:'Une tenue fermée dans le dos, c\'est ce qui tient le mieux une nuit.', ph:'Ex. Grenouillère polaire (fermeture dorsale)' },
+      { id:'sieste', q:'Ce que tu peux mettre pour la <b>sieste</b> (souvent les mêmes que la nuit).', conseil:'Facultatif : sans rien ici, je reprends ta tenue de nuit.', ph:'Ex. Grenouillère légère' },
+      { id:'access', q:'Tes <b>accessoires</b> : tétine, doudou, biberon, cache-couche…', conseil:'Je m\'en sers dans les kits de chaque créneau.', ph:'Ex. Tétine NUK' },
+      { id:'contention', q:'Ta <b>contention</b>, si tu en as : harnais, mittens, combinaison…', conseil:'Ce qui se verrouille ne sortira qu\'avec un superviseur présent. Toujours.', ph:'Ex. Mittens' }
+    ];
+    for (const c of CATS) {
+      if (rep('tenues_' + c.id)) continue;
+      await sListe(c.q + '<br><span style="opacity:.75;font-size:13px">' + c.conseil + '</span>', {
+        lire: async () => ((await WB.getWardrobe())[c.id] || []),
+        ajouter: async v => { await WB.addItem(c.id, v); },
+        retirer: async v => { await WB.removeItem(c.id, v); },
+        placeholder: c.ph, vide: 'Rien pour l\'instant.', fini: 'Suite'
+      }, 'curious');
+      await repondre('tenues_' + c.id, true);
+    }
+    try { await loadLiveWardrobe(); } catch(e) {}
+    const w = await WB.getWardrobe();
+    const dos = ['jour','nuit'].reduce((s, k) => s + (w[k] || []).filter(n => FERMEE_DOS.indexOf(typeTenue(n)) >= 0).length, 0);
+    await sDire('C\'est noté : <b>' + (w.jour || []).length + '</b> tenues de jour, <b>' + (w.nuit || []).length + '</b> de nuit.'
+      + (dos ? ' Dont ' + dos + ' fermée' + (dos > 1 ? 's' : '') + ' dans le dos — celles-là, je les aime bien. 🦊' : ' Aucune fermée dans le dos : pense à en prendre une, pour les nuits.'), 'proud');
+  };
+
+  SETUP_CHAP.accessoires = async () => {
+    const niv = NIVEAUX_DISC.find(n => n.id === rep('niveau')) || NIVEAUX_DISC[1];
+    const acc = Object.assign({}, await lireStock('profil:accessoires', null) || {});
+    const sauver = () => ecrireStock('profil:accessoires', acc);
+
+    // bracelet
+    const b = await sChoix('Le <b>bracelet</b>. Un bracelet avec ton code : l\'appli ne s\'ouvre qu\'en le scannant. Tu ne peux plus « juste regarder » sans l\'avoir au poignet.'
+      + (niv.bracelet ? '<br><br>À ton niveau, <b>je te le conseille</b>.' : '<br><br>À ton niveau, c\'est facultatif.'),
+      [ { k:'oui', label:'⌚ Oui, je le porte' }, { k:'non', label:'Pas maintenant', soft:true } ], 'explain');
+    acc.bracelet = b === 'oui';
+    // le verrouillage n'est activé qu'une fois le bracelet imprimé ET lu au
+    // scan (chapitre des étiquettes) : sinon, au prochain lancement, tu
+    // serais bloqué devant un écran qui réclame un code que tu n'as pas.
+    if (!acc.bracelet) await activerBracelet(false);
+    await sauver();
+    if (acc.bracelet) await sDire('Je l\'active dès que ton bracelet est imprimé et que je l\'ai lu une fois — on fait ça aux étiquettes.<br><br>Retiens bien le secours : <b>trois tapes rapides sur le logo</b> de l\'écran de connexion. Toujours actif. L\'appli ne peut jamais t\'enfermer dehors.', 'calm', 'C\'est noté');
+
+    // capteur de couche
+    const c = await sChoix('Le <b>capteur de couche</b> : il me dit quand ta couche est mouillée, sans que tu aies à le déclarer. Tu en as un ?',
+      [ { k:'oui', label:'📡 Oui, on le connecte' }, { k:'plus_tard', label:'J\'en ai un, plus tard', soft:true }, { k:'non', label:'Non', soft:true } ], 'curious');
+    acc.capteur = c;
+    if (c === 'oui') {
+      const ok = await new Promise((res, rej) => {
+        sEcran('Réveille-le (appui sur son bouton), puis touche « Connecter ».', 'curious');
+        sBouton('📡 Connecter', false, async () => { res(await connecterCapteur()); });
+        sBouton('Plus tard', true, () => res(false));
+        sPlusTard(rej);
+      });
+      acc.capteur = ok ? 'connecte' : 'plus_tard';
+      await sDire(ok ? 'Je le vois. 🟢 Il me parlera tout seul maintenant.' : 'Pas de réponse. Ce n\'est pas grave : tu le connecteras depuis les réglages, menu 📡.', ok ? 'proud' : 'concern');
+    }
+    await sauver();
+
+    // module de tenue
+    const t = await sChoix('Le <b>module de tenue</b> : un petit aimant sur la fermeture de ta grenouillère. Il date chaque ouverture — tu n\'as plus rien à me déclarer. Tu en as un ?',
+      [ { k:'oui', label:'🔒 Oui, on le connecte' }, { k:'non', label:'Non', soft:true } ], 'curious');
+    acc.moduleTenue = t;
+    if (t === 'oui' && window.HabitrainTenueSensor && window.HabitrainTenueSensor.supported()) {
+      const ok = await new Promise((res, rej) => {
+        sEcran('Réveille-le, puis touche « Connecter ».', 'curious');
+        sBouton('🔒 Connecter', false, async () => { try { await window.HabitrainTenueSensor.connect(); res(true); } catch(e) { res(false); } });
+        sBouton('Plus tard', true, () => res(false));
+        sPlusTard(rej);
+      });
+      if (ok) { try { await marquerCapteurTenueVu(); } catch(e) {} }
+      acc.moduleTenue = ok ? 'connecte' : 'plus_tard';
+    }
+    await sauver();
+
+    // serrure et NFC
+    const s = await sChoix('Une <b>serrure connectée</b>, pour la contention ? Elle ne se fermera jamais sans un superviseur présent, éveillé et aux clés.',
+      [ { k:'oui', label:'Oui, j\'en ai une' }, { k:'non', label:'Non', soft:true } ], 'calm');
+    acc.serrure = s === 'oui';
+    const n = await sChoix('Des <b>tags NFC</b> ? Ils remplacent les QR : tu approches ton téléphone, c\'est tout. Facultatif.',
+      [ { k:'oui', label:'Oui, j\'en ai' }, { k:'non', label:'Non, les QR me vont', soft:true } ], 'curious');
+    acc.nfc = n === 'oui';
+    await sauver();
+    if (acc.serrure || acc.nfc) await sDire('Tu les régleras dans les réglages (' + [acc.serrure ? '🔐 serrure' : null, acc.nfc ? '📶 NFC' : null].filter(Boolean).join(', ') + ') — je ne fais pas tout d\'un coup.', 'happy');
+  };
+
+  async function activerBracelet(on) {
+    try {
+      if (!window.HabitrainQR) return;
+      const p = await window.HabitrainQR.getQrPrefs();
+      p.braceletRequired = !!on; if (on) p.unlock = true;
+      await window.HabitrainQR.saveQrPrefs(p);
+    } catch(e) {}
+  }
+
+  SETUP_CHAP.etiquettes = async () => {
+    const acc = await lireStock('profil:accessoires', null) || {};
+    await sDire('Les étiquettes. C\'est ce qui fait que je n\'ai pas à te croire sur parole : chaque geste se prouve par un code.<br><br>• 🍼 ton <b>tapis à langer</b> — chaque change<br>• 🥛 ton <b>biberon</b> — ou le frigo<br>• 🌙 la <b>porte de ta chambre</b> — le coucher<br>• 👕 chacune de tes <b>tenues</b> — au col ou à la ceinture'
+      + (acc.bracelet ? '<br>• ⌚ ton <b>bracelet</b>' : ''), 'explain', 'On les fabrique');
+    const g = await sChoix('Je te prépare la feuille : tous tes codes, prêts à imprimer (ou à télécharger). Tu la fermes quand c\'est fait, et je reviens.',
+      [ { k:'go', label:'🖨️ Ouvrir ma feuille de codes' }, { k:'deja', label:'Je les ai déjà imprimés', soft:true } ], 'curious');
+    if (g === 'go') {
+      document.body.classList.remove('onboarding');
+      try { await buildQrSheet(); } catch(e) {}
+      await new Promise(res => { const iv = setInterval(() => { if (!document.body.classList.contains('qrsheet-on')) { clearInterval(iv); res(); } }, 400); });
+      document.body.classList.add('onboarding');
+      try { await ecrireStock('ob:qrdone', true); } catch(e) {}
+    }
+    const colle = await sChoix('Maintenant, colle-les à leur place. Et ensuite, on vérifie : tu les scannes une par une, là où elles sont. Une étiquette qui ne se lit pas, c\'est un change que tu ne pourras pas prouver.',
+      [ { k:'go', label:'📷 Elles sont collées, on vérifie' }, { k:'plus_tard', label:'Pas encore collées', soft:true } ], 'teach');
+    if (colle !== 'go') { await repondre('etiquettes_verif', false); await sDire('D\'accord. Reviens sur ce chapitre quand elles sont en place — je garde la place.', 'calm'); return; }
+
+    const verifiees = Object.assign({}, rep('etiquettes_ok') || {});
+    const FIXES = [
+      { k:'change_pilier', n:'le code du tapis à langer', accepte: x => x === 'change_pilier' || x === 'change_tous' },
+      { k:'biberon',       n:'le code du biberon',         accepte: x => x === 'biberon' },
+      { k:'coucher',       n:'le code de la porte',        accepte: x => x === 'coucher' }
+    ];
+    if (acc.bracelet) FIXES.push({ k:'unlock', n:'le code de ton bracelet', accepte: x => x === 'unlock' });
+    for (const f of FIXES) {
+      while (!verifiees[f.k]) {
+        const a = await sChoix('Scanne <b>' + f.n + '</b>.', [ { k:'scan', label:'📷 Scanner' }, { k:'passe', label:'Passer', soft:true } ], 'curious');
+        if (a === 'passe') break;
+        document.body.classList.remove('onboarding');
+        const k = await scannerUnCode();
+        document.body.classList.add('onboarding');
+        if (k && f.accepte(k)) {
+          verifiees[f.k] = true; await repondre('etiquettes_ok', verifiees);
+          if (f.k === 'unlock') { await activerBracelet(true); await sDire('✅ Lu. Ton bracelet est actif : désormais, l\'appli s\'ouvre avec lui.', 'proud', 'Suivant'); }
+          else await sDire('✅ Lu. Parfait.', 'proud', 'Suivant');
+        }
+        else if (k) await sDire('Ça, ce n\'est pas ' + f.n + '. Vérifie que la bonne étiquette est au bon endroit.', 'concern', 'Je réessaie');
+        else await sDire('Rien lu. Plus de lumière, un peu plus loin, bien à plat — et on réessaie.', 'concern', 'Je réessaie');
+      }
+    }
+    // les tenues, une par une
+    const WB = window.HabitrainWardrobe;
+    if (WB) {
+      const w = await WB.getWardrobe();
+      const toutes = [...new Set(['jour','nuit','sieste'].flatMap(c => w[c] || []))];
+      const vus = new Set(rep('etiquettes_tenues') || []);
+      while (vus.size < toutes.length) {
+        const reste = toutes.filter(n => !vus.has(n));
+        const a = await sChoix('Tes tenues : scanne chaque étiquette, dans l\'ordre que tu veux.<br><br><b>' + vus.size + ' / ' + toutes.length + '</b> vérifiées. Reste : ' + reste.slice(0, 6).map(esc).join(', ') + (reste.length > 6 ? '…' : ''),
+          [ { k:'scan', label:'📷 Scanner une tenue' }, { k:'fin', label:'Je finirai plus tard', soft:true } ], 'curious');
+        if (a === 'fin') break;
+        document.body.classList.remove('onboarding');
+        const k = await scannerUnCode();
+        document.body.classList.add('onboarding');
+        let item = null;
+        try { if (k) item = await WB.findByItemId(k); } catch(e) {}
+        if (item) { vus.add(item.name); await repondre('etiquettes_tenues', [...vus]); await sDire('✅ ' + esc(item.name) + '.', 'proud', 'Suivante'); }
+        else await sDire(k ? 'Ce code n\'est pas une étiquette de tenue.' : 'Rien lu. On réessaie.', 'concern', 'D\'accord');
+      }
+    }
+    const nbF = FIXES.filter(f => verifiees[f.k]).length;
+    await repondre('etiquettes_verif', nbF === FIXES.length);
+    await sDire(nbF === FIXES.length ? 'Tout se lit. Maintenant, chaque change se prouve. 🦊' : 'Il reste des codes à vérifier. Je te le rappellerai à la fin.', nbF === FIXES.length ? 'proud' : 'concern');
+  };
+
+  SETUP_CHAP.securite = async () => {
+    const deja = await getPausePass();
+    const mdp = await sSaisie('Un <b>mot de passe de pause</b>. Quand tu mets le programme en pause, l\'appli se cache derrière un faux écran de connexion : c\'est ce mot de passe qui la rouvre.'
+      + (deja ? '<br><br>Tu en as déjà un : laisse vide pour le garder.' : ''),
+      { placeholder:'Mot de passe', type:'password', facultatif:true, passer: deja ? 'Garder l\'actuel' : 'Plus tard' }, 'calm');
+    if (mdp) await setPausePass(mdp);
+    await sDire('Trois choses qui ne bougeront jamais :<br><br>🛑 Le <b>safeword</b> : dans les réglages, ou « stop foxy » dans le chat. Tout s\'arrête, je redeviens doux, sans conséquence.<br><br>🔓 Le <b>secours</b> : trois tapes rapides sur le logo de l\'écran de connexion.<br><br>🧴 Ta <b>peau</b> passe avant l\'horaire. Toujours.', 'reassure', 'C\'est noté');
+    if (typeof Notification !== 'undefined' && notifPermState() !== 'granted') {
+      const n = await sChoix('Les <b>notifications</b> : sans elles, je ne peux pas te rappeler tes créneaux quand l\'appli est fermée.',
+        [ { k:'oui', label:'🔔 Autoriser' }, { k:'non', label:'Plus tard', soft:true } ], 'curious');
+      if (n === 'oui') { try { const r = await Notification.requestPermission(); updatePermBanner(); if (r === 'granted') scheduleNotifications(); } catch(e) {} }
+    }
+    const s = await sChoix('Et une <b>sauvegarde</b>. Tout ce qu\'on vient de faire vit seulement sur ce téléphone. Un fichier, et tu ne perds rien.',
+      [ { k:'oui', label:'💾 Faire ma sauvegarde' }, { k:'non', label:'Plus tard', soft:true } ], 'explain');
+    if (s === 'oui') { try { document.getElementById('saveExport').click(); } catch(e) {} await sDire('Fichier téléchargé. Garde-le quelque part hors du téléphone.', 'proud'); }
+  };
+
+  SETUP_CHAP.fin = async () => {
+    const reste = [];
+    const mat = await lireStock('profil:materiel', null) || {};
+    ['tapis','creme','lingettes'].forEach(k => { if (!mat[k]) reste.push({ tapis:'Un tapis à langer', creme:'De la crème barrière', lingettes:'Des lingettes' }[k] + ' — à te procurer'); });
+    try { const st = await window.HabitrainWardrobe.categoryStatus(); if (!st.jour.total || !st.nuit.total) reste.push('Du stock de couches ' + (!st.jour.total ? 'de jour' : 'de nuit')); } catch(e) {}
+    if (!rep('etiquettes_verif')) reste.push('Vérifier tes étiquettes au scan');
+    try { if (!(await getPausePass())) reste.push('Un mot de passe de pause'); } catch(e) {}
+    const acc = await lireStock('profil:accessoires', null) || {};
+    if (acc.capteur === 'plus_tard') reste.push('Connecter ton capteur de couche');
+    if (acc.bracelet && !(rep('etiquettes_ok') || {}).unlock) reste.push('Lire ton bracelet au scan — il s\'activera à ce moment-là');
+    if (acc.moduleTenue === 'plus_tard') reste.push('Connecter ton module de tenue');
+    const n = nomOu(null);
+    await sDire((reste.length
+      ? 'Presque tout est en place. Il reste :<br><br>' + reste.map(r => '⚠️ ' + esc(r)).join('<br>') + '<br><br>Tu peux revenir sur chaque chapitre dans <b>Réglages → Guide d\'installation</b>.'
+      : 'Tout est en place. Vraiment tout.'), reste.length ? 'curious' : 'proud', 'Suite', 'Le bilan');
+    await sDire('Alors voilà' + (n ? ', <b>' + esc(n) + '</b>' : '') + '. À partir de maintenant, je suis là à chaque moment de ta journée. Chaque matin, je te demande si ton superviseur est là, je tire ta tenue, et on y va.<br><br>Tu n\'as plus à décider grand-chose. C\'est un peu le principe. 💛', 'moved', 'Commencer mon programme');
+  };
+
+  /* ---------- Le déroulé, et la reprise ---------- */
+  async function lancerChapitre(id) {
+    _chapCourant = id;
+    await SETUP_CHAP[id]();
+    await chapitreFait(id);
+  }
+  async function derouler(depuisSommaire) {
+    try {
+      for (const c of CHAPITRES) {
+        if (setupEtat.fait[c.id]) continue;
+        await lancerChapitre(c.id);
+      }
+      await terminerInstallation();
+    } catch (e) {
+      if (e === SETUP_QUIT) { fermerInstallation(); return; }
+      console.error(e);
+      fermerInstallation();
+    }
+  }
+  async function terminerInstallation() {
+    setupEtat.termine = Date.now();
+    await ecrireSetup();
+    try { await ecrireStock('ob:done', true); } catch(e) {}
+    fermerInstallation();
+    try { await refresh(); } catch(e) {}
+    try { await renderOutfitCard(); } catch(e) {}
+    // et on enchaîne sur le premier réveil : superviseur, tenue du jour
+    if (new Date().getHours() >= 6)
+      setTimeout(() => talk(TALK.ACCES, 'reveil:rituel', () => rituelReveil(),
+        { verifier: async () => !(await lireStock('reveil:rituel:' + todayStr(), false)) }), 600);
+  }
+  function fermerInstallation() {
     document.body.classList.remove('onboarding');
     const r = document.getElementById('obResume'); if (r) r.remove();
-    try { await window.storage.set('ob:done', JSON.stringify(true)); } catch(e) {}
+  }
+  async function ouvrirInstallation(sommaire) {
+    await lireSetup();
+    try { await loadFoxyOutfit(); } catch(e) {}
+    document.body.classList.add('onboarding');
+    const commence = Object.keys(setupEtat.fait).length > 0;
+    if (!sommaire && !commence) return derouler();
+    return afficherSommaire(commence && !setupEtat.termine);
+  }
+  async function afficherSommaire(reprise) {
+    _chapCourant = null;
+    const prochain = CHAPITRES.find(c => !setupEtat.fait[c.id]);
+    sEcran(reprise
+      ? 'Te revoilà' + (nomOu(null) ? ', ' + esc(nomOu(null)) : '') + '. 🦊 On reprend là où on s\'était arrêtés' + (prochain ? ' : <b>' + prochain.t + '</b>' : '') + ' ?'
+      : 'Tu peux revenir sur n\'importe quel chapitre. Touche celui que tu veux refaire.', 'wave', 'Installation');
+    const box = document.getElementById('obList');
+    CHAPITRES.forEach(c => {
+      const d = document.createElement('div');
+      const f = !!setupEtat.fait[c.id];
+      d.className = 'ob-item' + (f ? ' ok' : '');
+      d.innerHTML = '<span class="mark">' + (f ? '✅' : '⬜') + '</span><span class="lbl"><b>' + c.ic + ' ' + c.t + '</b></span>';
+      d.addEventListener('click', async () => {
+        try {
+          // refaire un chapitre efface ses réponses intermédiaires
+          Object.keys(setupEtat.rep).forEach(k => {
+            if ((c.id === 'profil' && k.indexOf('p_') === 0) || (c.id === 'tenues' && k.indexOf('tenues_') === 0) || (c.id === 'etiquettes' && k.indexOf('etiquettes') === 0)) delete setupEtat.rep[k];
+          });
+          await lancerChapitre(c.id);
+          await afficherSommaire(false);
+        } catch (e) { fermerInstallation(); }
+      });
+      box.appendChild(d);
+    });
+    if (prochain) sBouton(reprise ? 'Reprendre' : 'Continuer l\'installation', false, () => derouler());
+    else if (!setupEtat.termine) sBouton('Terminer l\'installation', false, () => terminerInstallation());
+    sBouton(prochain ? '⏸ Plus tard' : 'Fermer', true, () => fermerInstallation());
   }
 
   async function maybeStartOnboard() {
     try {
-      const r = await window.storage.get('ob:done');
-      if (r && r.value) return false;
-      obIndex = 0;
-      document.body.classList.add('onboarding');
-      await renderOnboard();
+      await lireSetup();
+      if (setupEtat.termine) return false;
+      await ouvrirInstallation(false);
       return true;
     } catch(e) { return false; }
   }
+
 
   /* ============================================================
      DÉTECTION AUTOMATIQUE DES ENTORSES
@@ -13296,6 +13747,7 @@
     try { await loadDayMood(); } catch(e) {}
     try { await loadDiscipline(); } catch(e) {}
     try { await loadDesertion(); } catch(e) {}
+    try { await loadProfilNom(); } catch(e) {}
     // marqueurs pour les hauts faits contextuels
     try {
       if (hardMode) await flagBadge('hardDay');
