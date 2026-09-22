@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '21.2';
+  const APP_VERSION = '21.4';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -8523,7 +8523,7 @@
   // pas, et « la tenue du jour » devenait une fiction.
   function wb(cat) {
     if (liveWardrobe && Array.isArray(liveWardrobe[cat])) return liveWardrobe[cat];
-    return WARDROBE[cat] || [];
+    return [];
   }
   function gardeRobeRenseignee() {
     return !!(liveWardrobe && ['nuit','jour','sieste'].some(c => Array.isArray(liveWardrobe[c]) && liveWardrobe[c].length));
@@ -8626,7 +8626,7 @@
     cards.forEach(c => {
       const row = document.createElement('div');
       row.className = 'outfit-row' + (c.active ? ' now-block' : '');
-      row.innerHTML = '<div class="ic">'+c.ic+'</div><div class="body"><div class="moment">'+c.moment+(c.active?' · maintenant':'')+'</div><div class="wear">'+c.wear+'</div></div>';
+      row.innerHTML = '<div class="ic">'+c.ic+'</div><div class="body"><div class="moment">'+c.moment+(c.active?' · maintenant':'')+'</div><div class="wear">'+(c.wear || '<span style="opacity:.6">Aucune tenue dans ta garde-robe pour ce moment-là</span>')+'</div></div>';
       list.appendChild(row);
     });
     // note sieste
@@ -8787,7 +8787,13 @@
   }
   async function tirerTenue() {
     const o = await getOutfit(todayStr());
-    if (o) return { o, deja: true };
+    if (o) {
+      // une catégorie vide au tirage, remplie depuis : on complète sans retirer le reste
+      const n = drawOutfit(); let maj = false;
+      ['jour','nuit','sieste'].forEach(k => { if (!o[k] && n[k]) { o[k] = n[k]; maj = true; } });
+      if (maj) await saveOutfit(todayStr(), o);
+      return { o, deja: true };
+    }
     const n = drawOutfit();
     await saveOutfit(todayStr(), n);
     return { o: n, deja: false };
@@ -11251,7 +11257,7 @@
     { id:'accueil',     t:'Bienvenue',                 ic:'🦊' },
     { id:'nom',         t:'Ton prénom',                ic:'👋' },
     { id:'profil',      t:'Ton profil et ta discipline', ic:'🧭' },
-    { id:'materiel',    t:'Le matériel de base',       ic:'🧴' },
+    { id:'materiel',    t:'Ton trousseau',             ic:'🧴' },
     { id:'couches',     t:'Tes couches',               ic:'🍼' },
     { id:'tenues',      t:'Tes tenues',                ic:'👕' },
     { id:'accessoires', t:'Les accessoires',           ic:'🔒' },
@@ -11302,6 +11308,7 @@
     document.getElementById('obText').innerHTML = texte;
     document.getElementById('obList').innerHTML = '';
     document.getElementById('obActs').innerHTML = '';
+    document.querySelectorAll('#onboard .ob-alerte').forEach(e => e.remove());
   }
   function sBouton(label, soft, onClick) {
     const b = document.createElement('button');
@@ -11354,9 +11361,10 @@
       const box = document.getElementById('obList');
       const liste = document.createElement('div');
       box.appendChild(liste);
-      const dessiner = async () => {
+      let dessiner = async () => {
         const items = await opt.lire();
         liste.innerHTML = '';
+        if (items.length) document.querySelectorAll('#onboard .ob-alerte').forEach(e => e.remove());
         if (!items.length) {
           const v = document.createElement('div'); v.className = 'ob-item'; v.style.cursor = 'default';
           v.textContent = opt.vide || 'Rien pour l\'instant.';
@@ -11378,8 +11386,36 @@
       plus.addEventListener('click', ajouter);
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') ajouter(); });
       ligne.appendChild(inp); ligne.appendChild(plus); box.appendChild(ligne);
+      // des idées à ajouter d'un tap
+      const idees = document.createElement('div'); idees.className = 'ob-idees';
+      if (opt.suggestions && opt.suggestions.length) box.appendChild(idees);
+      const dessinerIdees = async () => {
+        if (!opt.suggestions) return;
+        const deja = (await opt.lire()).map(x => x.toLowerCase());
+        idees.innerHTML = '';
+        const reste = opt.suggestions.filter(x => deja.indexOf(x.toLowerCase()) < 0);
+        if (!reste.length) { idees.style.display = 'none'; return; }
+        idees.style.display = '';
+        const t = document.createElement('div'); t.className = 'ob-idees-t'; t.textContent = 'Des idées :'; idees.appendChild(t);
+        reste.forEach(x => {
+          const c = document.createElement('button'); c.className = 'ob-chip'; c.textContent = '＋ ' + x;
+          c.addEventListener('click', async () => { await opt.ajouter(x); await dessiner(); });
+          idees.appendChild(c);
+        });
+      };
+      const dessinerBase = dessiner;
+      dessiner = async () => { await dessinerBase(); await dessinerIdees(); };
       dessiner();
-      sBouton(opt.fini || 'C\'est bon', false, () => res(true));
+      const alerte = document.createElement('div'); alerte.className = 'ob-alerte';
+      sBouton(opt.fini || 'C\'est bon', false, async () => {
+        if (opt.obligatoire && !(await opt.lire()).length) {
+          alerte.innerHTML = opt.obligatoire;
+          if (!alerte.parentNode) box.parentNode.insertBefore(alerte, document.getElementById('obActs'));
+          try { positionFoxyCell(document.getElementById('obFoxy'), 'concern', 130); } catch(e) {}
+          return;
+        }
+        res(true);
+      });
       sPlusTard(rej);
     });
   }
@@ -11655,6 +11691,7 @@
 
   SETUP_CHAP.materiel = async () => {
     const ITEMS = [
+      { id:'couches',   n:'Des couches',            s:'Indispensable : pour le jour et pour la nuit. Sans elles, le programme ne peut pas commencer' },
       { id:'tapis',     n:'Un tapis à langer',      s:'Indispensable : c\'est là que vit ton code de change' },
       { id:'creme',     n:'De la crème barrière',   s:'Indispensable : ta peau passe avant tout' },
       { id:'lingettes', n:'Des lingettes',          s:'Indispensable' },
@@ -11664,15 +11701,16 @@
       { id:'poubelle',  n:'Une poubelle à couches', s:'Fermée, près du tapis' },
       { id:'cache',     n:'Un cache-couche',        s:'Facultatif : pour sortir, ou par-dessus la nuit' }
     ];
-    const r = await sCoches('Le matériel de base. Coche ce que tu as <b>déjà</b> — je note le reste.', ITEMS,
+    const r = await sCoches('Ton <b>trousseau</b> : tout ce qu\'il te faut pour vivre ici. Coche ce que tu as <b>déjà</b> — je note le reste.', ITEMS,
       await lireStock('profil:materiel', null) || {}, 'curious');
     await ecrireStock('profil:materiel', r);
     const manque = ITEMS.filter(x => !r[x.id] && x.id !== 'cache');
-    const indisp = manque.filter(x => ['tapis','creme','lingettes'].includes(x.id));
+    const indisp = manque.filter(x => ['couches','tapis','creme','lingettes'].includes(x.id));
     await sDire(!manque.length
       ? 'Tout y est. 🦊 On passe à tes couches.'
       : (indisp.length
           ? 'Il te manque de l\'indispensable : <b>' + indisp.map(x => x.n.toLowerCase()).join(', ') + '</b>. Procure-le toi avant de démarrer vraiment — je te le rappellerai à la fin.'
+            + (indisp.some(x => x.id === 'couches') ? '<br><br>Et les couches, surtout : sans elles, on ne peut pas commencer. Je te les demanderai juste après.' : '')
           : 'Il te manque : ' + manque.map(x => x.n.toLowerCase()).join(', ') + '. Rien de bloquant, mais ça aide. Je le garde en tête.'),
       indisp.length ? 'concern' : 'happy');
   };
@@ -11682,12 +11720,13 @@
     if (!WB) return;
     await sDire('Tes couches. Je dois savoir quels modèles tu as, pour le jour ou la nuit, et combien. C\'est comme ça que je choisis celle de chaque change — et que je te préviens avant que le stock tombe à zéro.', 'explain');
     await new Promise((res, rej) => {
-      sEcran('Voici ton stock. Corrige les quantités, retire ce que tu n\'as pas, ajoute ce qui manque.', 'curious');
+      sEcran('Dis-moi quelles couches tu as, et combien. Pour chacune : pour le jour, la nuit, ou les deux.', 'curious');
       const box = document.getElementById('obList');
       const USAGE = { jour:'☀️ Jour', nuit:'🌙 Nuit', both:'🌗 Les deux' };
       const dessiner = async () => {
         const list = await WB.getStock();
         box.innerHTML = '';
+        document.querySelectorAll('#onboard .ob-alerte').forEach(e => e.remove());
         list.forEach(m => {
           const d = document.createElement('div'); d.className = 'ob-item ob-couche' + (m.qty > 0 ? ' ok' : ''); d.style.cursor = 'default';
           const nom = document.createElement('span'); nom.className = 'lbl'; nom.style.flex = '1'; nom.textContent = m.name;
@@ -11714,19 +11753,55 @@
         });
         aj.appendChild(n); aj.appendChild(us); aj.appendChild(q); aj.appendChild(plus);
         box.appendChild(aj);
+        // des modèles courants, à ajouter d'un tap (tu mets ensuite la quantité)
+        const noms = list.map(m => m.name.toLowerCase());
+        const sug = (WB.SUGGESTIONS_COUCHES || []).filter(x => noms.indexOf(x.name.toLowerCase()) < 0);
+        if (sug.length) {
+          const idees = document.createElement('div'); idees.className = 'ob-idees';
+          const t = document.createElement('div'); t.className = 'ob-idees-t'; t.textContent = 'Des modèles courants :'; idees.appendChild(t);
+          sug.forEach(x => {
+            const c = document.createElement('button'); c.className = 'ob-chip'; c.textContent = '＋ ' + x.name;
+            c.addEventListener('click', async () => { await WB.addModel(x.name, x.usage, 0); await dessiner(); });
+            idees.appendChild(c);
+          });
+          box.appendChild(idees);
+        }
+        if (!list.length) {
+          const v = document.createElement('div'); v.className = 'ob-item'; v.style.cursor = 'default';
+          v.textContent = 'Aucun modèle pour l\'instant : écris le tien ci-dessous, ou touche un modèle courant.';
+          box.insertBefore(v, box.firstChild);
+        }
       };
       dessiner();
-      sBouton('C\'est mon stock', false, () => res(true));
+      const alerte = document.createElement('div');
+      alerte.className = 'ob-alerte';
+      sBouton('C\'est mon stock', false, async () => {
+        // le programme ne commence pas sans couches : il en faut pour le jour ET pour la nuit
+        const st = await WB.categoryStatus();
+        const manque = [];
+        if (!st.jour.total) manque.push('de jour');
+        if (!st.nuit.total) manque.push('de nuit');
+        if (manque.length) {
+          alerte.innerHTML = '🦊 Il me faut au moins une couche <b>' + manque.join('</b> et une <b>') + '</b> en stock. Sans couches, on ne peut pas commencer — c\'est le cœur de ton trousseau.'
+            + '<br><span style="opacity:.75">Mets la quantité en face d\'un modèle, ou ajoute-en un. « Les deux » compte pour le jour et la nuit.</span>';
+          if (!alerte.parentNode) box.parentNode.insertBefore(alerte, document.getElementById('obActs'));
+          try { positionFoxyCell(document.getElementById('obFoxy'), 'concern', 130); } catch(e) {}
+          return;
+        }
+        res(true);
+      });
       sPlusTard(rej);
     });
     const st = await WB.categoryStatus();
-    const manque = [];
-    if (!st.jour.total) manque.push('de jour');
-    if (!st.nuit.total) manque.push('de nuit');
-    await sDire(manque.length
-      ? 'Attention : aucune couche ' + manque.join(' ni ') + ' en stock. Tant que c\'est le cas, je prendrai ce que tu as, même hors période. Pense à en commander.'
-      : 'Parfait. <b>' + st.jour.total + '</b> pour le jour, <b>' + st.nuit.total + '</b> pour la nuit. Je tourne entre tes modèles, jamais deux fois de suite le même.',
-      manque.length ? 'concern' : 'proud');
+    const bas = [];
+    try {
+      const th = await WB.getThresholds();
+      if (st.jour.total <= th.jour) bas.push('de jour');
+      if (st.nuit.total <= th.nuit) bas.push('de nuit');
+    } catch(e) {}
+    await sDire('Parfait. <b>' + st.jour.total + '</b> pour le jour, <b>' + st.nuit.total + '</b> pour la nuit. Je tourne entre tes modèles, jamais deux fois de suite le même.'
+      + (bas.length ? '<br><br>Par contre, c\'est un peu juste ' + bas.join(' et ') + ' : pense à en recommander bientôt, je te préviendrai quand ça baisse.' : ''),
+      bas.length ? 'curious' : 'proud');
   };
 
   SETUP_CHAP.tenues = async () => {
@@ -11746,7 +11821,11 @@
         lire: async () => ((await WB.getWardrobe())[c.id] || []),
         ajouter: async v => { await WB.addItem(c.id, v); },
         retirer: async v => { await WB.removeItem(c.id, v); },
-        placeholder: c.ph, vide: 'Rien pour l\'instant.', fini: 'Suite'
+        placeholder: c.ph, vide: 'Rien pour l\'instant.', fini: 'Suite',
+        suggestions: (WB.SUGGESTIONS || {})[c.id],
+        obligatoire: (c.id === 'jour' || c.id === 'nuit')
+          ? '🦊 Il me faut au moins une tenue ' + (c.id === 'jour' ? 'de jour' : 'de nuit') + '. C\'est ton uniforme, ici : sans elle, je n\'ai rien à tirer pour toi.<br><span style="opacity:.75">Écris la tienne, ou touche une idée.</span>'
+          : null
       }, 'curious');
       await repondre('tenues_' + c.id, true);
     }
@@ -11925,6 +12004,13 @@
     const acc = await lireStock('profil:accessoires', null) || {};
     const etiquettes = !!rep('etiquettes_verif');
 
+    if (!modele) {
+      // stock vidé entre-temps : on renvoie au stock, le programme ne démarre pas sans couche
+      await sDire('Attends… je ne trouve plus aucune couche ' + (nuit ? 'de nuit' : 'de jour') + ' dans ton stock. Sans couche, on ne peut pas commencer. On retourne le remplir.', 'concern', 'D\'accord');
+      await SETUP_CHAP.couches();
+      try { modele = await modeleProchain(periode); } catch(e) {}
+      if (!modele) throw SETUP_QUIT;
+    }
     await sDire('Il reste une chose, ' + toi + '. La plus importante.<br><br>Là, tu es encore habillé comme dehors. Et ici, on ne vit pas comme dehors.', 'calm', 'Je sais…', 'Ta première préparation');
     await sDire('Tu sais, ici, c\'est un peu comme entrer dans une maison qui a ses habitudes. Il y a une tenue, et tout le monde la porte. Moi aussi.<br><br>Alors on va te préparer. Ensemble. Je t\'explique tout, une chose après l\'autre — tu n\'as qu\'à suivre.', 'reassure', 'D\'accord, je te suis');
     if (nuit) await sDire('Vu l\'heure, on part directement sur ta tenue et ta couche de nuit. Pas la peine de faire les choses deux fois ce soir.', 'calm');
@@ -12140,7 +12226,6 @@
     const reste = [];
     const mat = await lireStock('profil:materiel', null) || {};
     ['tapis','creme','lingettes'].forEach(k => { if (!mat[k]) reste.push({ tapis:'Un tapis à langer', creme:'De la crème barrière', lingettes:'Des lingettes' }[k] + ' — à te procurer'); });
-    try { const st = await window.HabitrainWardrobe.categoryStatus(); if (!st.jour.total || !st.nuit.total) reste.push('Du stock de couches ' + (!st.jour.total ? 'de jour' : 'de nuit')); } catch(e) {}
     if (!rep('etiquettes_verif')) reste.push('Vérifier tes étiquettes au scan');
     try { if (!(await getPausePass())) reste.push('Un mot de passe de pause'); } catch(e) {}
     const acc = await lireStock('profil:accessoires', null) || {};
@@ -12299,7 +12384,7 @@
     if (!(await lireStock('profil:materiel', null))) {
       let acc = [];
       try { acc = ((await window.HabitrainWardrobe.getWardrobe()).access || []).join(' ').toLowerCase(); } catch(e) { acc = ''; }
-      await ecrireStock('profil:materiel', { tapis:true, creme:true, lingettes:true, poubelle:true,
+      await ecrireStock('profil:materiel', { couches:true, tapis:true, creme:true, lingettes:true, poubelle:true,
         biberon: true, tetine: /t[ée]tine/.test(acc), doudou: /doudou/.test(acc), cache: /cache/.test(acc) });
     }
     // accessoires : ce que l'appli sait déjà
@@ -12325,6 +12410,14 @@
     setupEtat.repris = true;
     await ecrireSetup();
     return true;
+  }
+
+  async function figerDonneesExistantes() {
+    if (enBacASable() || await lireStock('wardrobe:figee', false)) return;
+    let ancien = !!(await lireStock('ob:done', false)) || !!(await lireStock('setup:migre', false));
+    try { if (!ancien) ancien = (await window.storage.list('check:')).keys.length > 0; } catch(e) {}
+    if (ancien && window.HabitrainWardrobe) await window.HabitrainWardrobe.figerAnciensDefauts();
+    await ecrireStock('wardrobe:figee', true);
   }
 
   async function maybeStartOnboard() {
@@ -14242,6 +14335,7 @@
     try { await loadDiscipline(); } catch(e) {}
     try { await loadDesertion(); } catch(e) {}
     try { await loadProfilNom(); } catch(e) {}
+    try { await figerDonneesExistantes(); } catch(e) {}
     // marqueurs pour les hauts faits contextuels
     try {
       if (hardMode) await flagBadge('hardDay');

@@ -923,3 +923,15 @@ body.qrsheet-on #qrSheet { display: block; }
 .ob-item .mark[title], .ob-couche .mark { opacity: .7; }
 /* les preuves et fenêtres de Foxy passent au-dessus de l'installation */
 body.onboarding .foxypop-overlay { z-index: 10150; }
+.ob-alerte {
+  text-align: left; margin: -6px 0 16px; padding: 12px 14px; border-radius: 13px;
+  background: rgba(255,170,110,.16); border: 1px solid rgba(255,190,140,.55);
+  font-size: 13.5px; font-weight: 700; line-height: 1.5; color: #ffe2c8;
+}
+.ob-idees { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0 4px; text-align: left; }
+.ob-idees-t { width: 100%; font-size: 11.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: rgba(255,210,170,.7); }
+.ob-chip {
+  border: 1px dashed rgba(255,210,170,.55); background: rgba(255,255,255,.06); color: #ffe2c8;
+  border-radius: 20px; padding: 7px 12px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.ob-chip:active { background: rgba(255,255,255,.16); }

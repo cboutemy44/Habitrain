@@ -17,7 +17,11 @@
   ];
 
   // ---- Contenu par défaut (repris de ta garde-robe actuelle) ----
-  const DEFAULT_ITEMS = {
+  // Un nouvel utilisateur démarre à vide : c'est sa garde-robe qu'on veut, pas un exemple.
+  const DEFAULT_ITEMS = { nuit:[], jour:[], sieste:[], access:[], contention:[] };
+  // L'ancienne garde-robe par défaut (la garde-robe d'origine de l'appli). Elle sert
+  // UNE fois : figer les données d'un utilisateur existant qui ne l'avait jamais enregistrée.
+  const LEGACY_ITEMS = {
     nuit: [
       'Grenouillère polaire bleue (fermeture dorsale)',
       'Grenouillère blanche rayée jaune (fermeture devant)',
@@ -54,6 +58,15 @@
       'Culotte Segufix (supervisé uniquement)'
     ]
   };
+  // Des idées que Foxy propose pendant l'installation, à ajouter d'un tap.
+  const SUGGESTIONS = {
+    jour:   ['Romper à pressions', 'Body manches courtes', 'Body manches longues', 'Barboteuse', 'Salopette', 'Grenouillère (fermeture devant)'],
+    nuit:   ['Grenouillère (fermeture dorsale)', 'Grenouillère (fermeture devant)', 'Pyjama une pièce', 'Sleeper à pieds'],
+    sieste: ['Grenouillère légère', 'Body et cache-couche'],
+    access: ['Tétine', 'Doudou', 'Biberon', 'Bavoir', 'Cache-couche', 'Couverture'],
+    contention: ['Mittens', 'Harnais', 'Combinaison anti-arrachage']
+  };
+
 
   async function getWardrobe() {
     try {
@@ -109,12 +122,28 @@
       alertAt: 5                // seuil d'alerte stock bas
     };
   }
-  const DEFAULT_STOCK = [
+  const DEFAULT_STOCK = [];
+  const LEGACY_STOCK = [
     { id:'dp_crinklz', name:'Crinklz',            usage:'jour', qty:0, alertAt:5 },
     { id:'dp_safari',  name:'Rearz Safari',       usage:'nuit', qty:0, alertAt:3 },
     { id:'dp_kiddo',   name:'Kiddo Xtreme Night', usage:'nuit', qty:0, alertAt:3 },
     { id:'dp_kpn',     name:'Kiddo Premium Night',usage:'both', qty:0, alertAt:3 }
   ];
+  const SUGGESTIONS_COUCHES = [
+    { name:'ABU Simple Ultra',   usage:'jour' }, { name:'Crinklz',              usage:'jour' },
+    { name:'Rearz Safari',       usage:'nuit' }, { name:'Tena Slip Maxi',       usage:'nuit' },
+    { name:'Kiddo Premium Night', usage:'both' }, { name:'ABU Space',           usage:'both' }
+  ];
+
+  // Données d'un utilisateur existant qui reposaient encore sur les anciens défauts :
+  // on les enregistre telles quelles, pour qu'elles ne disparaissent pas.
+  async function figerAnciensDefauts() {
+    try {
+      if (!(await window.storage.get('wardrobe'))) await window.storage.set('wardrobe', JSON.stringify(JSON.parse(JSON.stringify(LEGACY_ITEMS))));
+      if (!(await window.storage.get('diaperstock'))) await window.storage.set('diaperstock', JSON.stringify(LEGACY_STOCK));
+    } catch (e) {}
+  }
+
 
   // ---- Seuils d'alerte PAR CATÉGORIE (jour / nuit) ----
   const DEFAULT_THRESHOLDS = { jour: 6, nuit: 4 };
@@ -250,6 +279,7 @@
     itemId, findByItemId, getWornLog, logWorn,
     CATEGORIES, getWardrobe, saveWardrobe, addItem, renameItem, removeItem,
     getStock, saveStock, addModel, updateModel, removeModel,
+    SUGGESTIONS, SUGGESTIONS_COUCHES, figerAnciensDefauts,
     modelsFor, consume, lowStock, getThresholds, setThresholds, totalFor, categoryStatus
   };
 })();
