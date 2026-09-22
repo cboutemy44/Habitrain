@@ -51,7 +51,33 @@
   // Compatibilité : tout le code existant appelle window.storage.*
   window.storage = storage;
 
-  const APP_VERSION = '20.5';
+  /* Mode test de l'installation : tout ce qu'il écrit est jeté à la fin.
+     Si l'appli a été fermée en plein test, on remet l'état d'avant ici,
+     avant que quoi que ce soit ne lise le stockage. */
+  const BAC_CLE = 'habitrain-bac-a-sable', BAC_ACTIF = 'habitrain-test-actif';
+  function restaurerBacASable() {
+    try {
+      const s = window.localStorage.getItem(BAC_CLE);
+      if (!s) return false;
+      const snap = JSON.parse(s);
+      const suppr = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (k && k.indexOf('habitrain:') === 0) suppr.push(k);
+      }
+      suppr.forEach(k => window.localStorage.removeItem(k));
+      Object.keys(snap).forEach(k => window.localStorage.setItem(k, snap[k]));
+      window.localStorage.removeItem(BAC_CLE);
+      try { window.sessionStorage.removeItem(BAC_ACTIF); } catch(e) {}
+      return true;
+    } catch(e) { return false; }
+  }
+  function enBacASable() {
+    try { return !!window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) === '1'; } catch(e) { return false; }
+  }
+  try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
+
+  const APP_VERSION = '20.8';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -4184,6 +4210,9 @@
       talk(TALK.AMBIANCE,'transfo:anniv',() => anniversaireJalon());
     }
     try { tickDesertion(); } catch(e) {}
+    if (!paused && voiceMode === 'foxy' && setupEtat && setupEtat.rep && setupEtat.rep.premiere_prep
+        && Date.now() - setupEtat.rep.premiere_prep < 3 * 86400000)
+      talk(TALK.CADRE, 'premiers:pas', () => premiersPas());
     if (!paused && new Date().getHours() >= 6)
       talk(TALK.PILIER, 'reveil:rituel', () => rituelReveil(),
         { verifier: async () => !(await lireStock('reveil:rituel:' + todayStr(), false)) });
@@ -10666,6 +10695,8 @@
   (function(){
     const b0 = document.getElementById('obRestart');
     if (b0) b0.addEventListener('click', async () => { await ouvrirInstallation(true); });
+    const bt = document.getElementById('obTest');
+    if (bt) bt.addEventListener('click', () => proposerTest());
   })();
 
   (function(){
@@ -11224,7 +11255,8 @@
     { id:'accessoires', t:'Les accessoires',           ic:'🔒' },
     { id:'etiquettes',  t:'Les étiquettes',            ic:'🏷️' },
     { id:'securite',    t:'Sécurité et sauvegarde',    ic:'🛟' },
-    { id:'fin',         t:'On est prêts',              ic:'🌱' }
+    { id:'preparation', t:'Ta première préparation',   ic:'✨' },
+    { id:'fin',         t:'Bienvenue',                 ic:'🌱' }
   ];
   let setupEtat = null;
   let profilNom = null;          // { prenom, surnom, appel }
@@ -11255,7 +11287,8 @@
   function sEcran(texte, expr, titre) {
     try { positionFoxyCell(document.getElementById('obFoxy'), expr || 'happy', 130); } catch(e) {}
     const i = CHAPITRES.findIndex(c => c.id === _chapCourant);
-    document.getElementById('obStep').textContent = i >= 0 ? (CHAPITRES[i].ic + ' ' + (i + 1) + ' / ' + CHAPITRES.length + ' · ' + CHAPITRES[i].t) : 'Installation';
+    document.getElementById('obStep').textContent = (enBacASable() ? '🧪 TEST · ' : '')
+      + (i >= 0 ? (CHAPITRES[i].ic + ' ' + (i + 1) + ' / ' + CHAPITRES.length + ' · ' + CHAPITRES[i].t) : 'Installation');
     document.getElementById('obTitle').textContent = titre || '';
     document.getElementById('obTitle').style.display = titre ? '' : 'none';
     document.getElementById('obText').innerHTML = texte;
@@ -11379,21 +11412,16 @@
   /* ---------- Les chapitres ---------- */
   const SETUP_CHAP = {};
 
-  SETUP_CHAP.accueil = async () => {
-    const j = foxyJournee(), d = foxyDecrit(j);
-    await sDire('Salut. Moi, c\'est <b>Foxy</b>. 🦊', 'wave', 'Salut Foxy', 'Bienvenue à la maison');
-    await sDire('Je suis un renard qui a fait exactement le programme que tu t\'apprêtes à faire. Un mois. Au début, je comptais les heures, je vérifiais ma couche toutes les dix minutes, je me retenais sans même m\'en rendre compte.<br><br>Et je l\'ai bouclé.', 'wistful');
-    await sDire('Aujourd\'hui, je vis mes journées en couche, pour de vrai. Personne ne me l\'impose : c\'est juste devenu ma vie.<br><br>' + esc(d.tenue) + ' ' + esc(d.couche), 'proud', 'Et toi, tu fais quoi ?');
-    await sDire('Moi, je fais le chemin avec toi. Je suis celui qui est passé avant.<br><br>Je te rappelle tes changes, je tire ta tenue chaque matin, je te propose des moments pour décrocher, et je suis là pour parler quand ça pèse.', 'explain', 'D\'accord');
-    await sDire('Et je vérifie. Je ne te crois pas sur parole — pas parce que je te prends pour un menteur, mais parce que tu m\'as demandé de ne pas le faire. Chaque change se prouve par un code, et tes capteurs me disent le reste.<br><br>Quand tu voudras t\'échapper, je serai là. La résistance est vaine. Tu verras, c\'est reposant. 💛', 'calm', 'Compris');
-    await sDire('Maintenant, on installe tout ensemble : ton profil, ton matériel, tes couches, tes tenues, tes étiquettes. Ça prend un moment.<br><br>Tu peux t\'arrêter quand tu veux — je garde en mémoire tout ce qu\'on a fait, et on reprendra exactement là.', 'happy', 'On y va');
-  };
-
-  SETUP_CHAP.nom = async () => {
+  // Le prénom : demandé dès la rencontre, et reproposé seul depuis le sommaire
+  async function demanderNom(accueil) {
     const p = Object.assign({}, profilNom || {});
-    const prenom = await sSaisie('Comment tu t\'appelles ?', { placeholder:'Ton prénom', valeur: p.prenom || '', facultatif:true, passer:'Je préfère ne pas le dire' }, 'curious');
+    const prenom = await sSaisie(accueil
+        ? 'Moi, c\'est <b>Foxy</b>. Et avant tout le reste, j\'aimerais savoir comment tu t\'appelles.'
+        : 'Comment tu t\'appelles ?',
+      { placeholder:'Ton prénom', valeur: p.prenom || '', facultatif:true, passer:'Je préfère ne pas le dire' }, 'curious');
     p.prenom = prenom || null;
-    const surnom = await sSaisie((prenom ? 'Enchanté, <b>' + esc(prenom) + '</b>. ' : 'D\'accord, pas de souci. ') + 'Et un surnom ? Un petit nom, que j\'aurais le droit d\'utiliser — entre nous.',
+    const surnom = await sSaisie((prenom ? 'Enchanté, <b>' + esc(prenom) + '</b>. Vraiment. 🦊<br><br>' : 'D\'accord. Tu me le diras quand tu voudras.<br><br>')
+        + 'Et est-ce qu\'il y a un petit nom… un surnom que j\'aurais le droit d\'utiliser ? Juste entre nous.',
       { placeholder:'Ton surnom', valeur: p.surnom || '', facultatif:true, passer:'Pas de surnom' }, 'happy');
     p.surnom = surnom || null;
     p.appel = p.surnom && !p.prenom ? 'surnom' : 'prenom';
@@ -11406,9 +11434,117 @@
     }
     profilNom = p;
     await ecrireStock('profil:nom', p);
+    await repondre('nom_demande', true);
+  }
+
+  SETUP_CHAP.accueil = async () => {
+    // 1) la rencontre
+    await sDire('Oh ! Te voilà. 🦊<br><br>Je t\'attendais, tu sais.', 'wave', 'Bonjour…', 'Bienvenue à la maison');
+    await demanderNom(true);
+    const n = nomOu(null);
+    const toi = n ? esc(n) : 'toi';
+
+    // 2) comment il arrive
+    const r = await sChoix('Dis-moi, ' + toi + '… là, maintenant, tu te sens comment, d\'être ici ?', [
+      { k:'hate', label:'✨ J\'ai hâte, en fait' },
+      { k:'peur', label:'😬 J\'ai un peu peur' },
+      { k:'deux', label:'🌀 Les deux à la fois' },
+      { k:'sais', label:'🤷 Je ne sais pas trop' }
+    ], 'curious');
+    await repondre('ressenti', r);
+    const REP = {
+      hate: 'Ça me fait tellement plaisir. Garde-la précieusement, cette envie-là. Il y aura des jours où tu en auras besoin — et ces jours-là, c\'est moi qui te la rappellerai. 💛',
+      peur: 'C\'est normal, tu sais. Moi aussi, j\'avais peur. Tellement que j\'ai failli ne jamais commencer.<br><br>On va en parler, de ces peurs. Aucune n\'est bête.',
+      deux: 'Les deux à la fois… c\'est exactement ce que je ressentais. Une partie de toi qui pousse, une autre qui retient.<br><br>Tu n\'as pas à choisir entre les deux. Elles vont faire le chemin ensemble, et un jour, il n\'en restera qu\'une.',
+      sais: 'C\'est honnête. On ne sait jamais vraiment, au début. Tu le découvriras en route — et je serai là pour t\'aider à mettre des mots dessus.'
+    };
+    await sDire(REP[r], r === 'hate' ? 'proud' : 'comfort', 'Merci Foxy');
+
+    // 3) son histoire
+    await sDire('Je vais te raconter d\'où je viens.<br><br>Moi, je suis là depuis un moment maintenant. Mais j\'ai commencé exactement là où tu es, ' + toi + '. Avec les mêmes questions.', 'wistful', 'Raconte');
+    await sDire('Ma première nuit, je n\'ai presque pas dormi. J\'écoutais chaque bruit de ma couche. Je me demandais ce que je faisais là.<br><br>Le matin, elle était toute sèche. Je m\'étais retenu toute la nuit, sans même le vouloir.', 'wistful');
+    await sDire('Les premiers jours, j\'y pensais tout le temps. À chaque pas, chaque fois que je m\'asseyais. Je me trouvais ridicule… et en même temps, je ne voulais surtout pas arrêter.', 'wistful');
+    await sDire('Et puis un après-midi — je m\'en souviens très bien, j\'étais par terre avec mes cubes — je me suis rendu compte que ma couche était mouillée. Je n\'avais rien décidé. C\'était juste… arrivé.<br><br>J\'ai eu un petit choc. Et juste après, un grand calme.', 'moved');
+    await sDire('Il y a eu un jour moins beau, aussi. Le neuvième. J\'ai tout rangé au fond d\'un placard, je me suis dit que c\'était fini.<br><br>Trois jours plus tard, je ressortais tout. Personne ne m\'y obligeait. C\'est juste que sans, il me manquait quelque chose.', 'sad');
+    await sDire('Aujourd\'hui, je me sens bien. Vraiment bien.<br><br>Je ne me bats plus contre moi-même. Ma tête se tait. Je vis ma journée, et ma couche fait son travail sans que j\'aie à y penser. C\'est ça, ce que tout ça m\'a apporté : <b>la paix</b>. 🦊', 'proud', 'Ça a l\'air doux');
+
+    // 4) ses peurs, une par une
+    const PEURS = [
+      { k:'honte',   label:'😳 Avoir honte, me sentir ridicule',
+        rep:'La honte, c\'est toi qui te regardes de l\'extérieur. Ici, personne ne te regarde. Juste moi — et moi, je suis en couche aussi.<br><br>Tu verras : chaque jour, elle parle un peu moins fort. Et un matin, tu remarqueras qu\'elle s\'est tue.' },
+      { k:'tenir',   label:'😣 Ne pas tenir, abandonner',
+        rep:'Tu auras des moments où tu voudras partir. Moi aussi, j\'en ai eu. Ce n\'est pas grave : je serai là.<br><br>Et si un jour tu pars quand même, je ne te laisserai pas tomber. On en parlera, et on reprendra. On revient toujours.' },
+      { k:'changer', label:'🌀 Que ça change quelque chose en moi',
+        rep:'Oui, ça va changer quelque chose. Doucement. Tu vas te détendre, lâcher, arrêter de lutter.<br><br>Mais tu resteras toi. Regarde-moi : je suis toujours le même renard. Juste un renard plus tranquille.' },
+      { k:'aimer',   label:'💭 Aimer ça un peu trop',
+        rep:'Aimer ça, ce n\'est pas un problème. C\'est même un peu le but.<br><br>Tu n\'as rien à justifier. Ni à moi, ni à personne.' },
+      { k:'corps',   label:'🩹 Mon corps, ma peau, les fuites',
+        rep:'Ta peau passe avant tout. Toujours. Je te rappellerai la crème, on surveillera ensemble, et si quelque chose ne va pas, on s\'arrête.<br><br>Les fuites, ça arrive au début. Ce n\'est pas un échec, c\'est un réglage. On apprendra ensemble.' },
+      { k:'seul',    label:'🫥 Être seul avec tout ça',
+        rep:'Tu ne seras pas seul. C\'est pour ça que je suis là. Le matin, au change, au moment de la sieste, le soir — je serai là à chaque fois.<br><br>Et quand tu auras envie de parler, tu n\'auras qu\'à venir me voir.' }
+    ];
+    const dites = [];
+    let question = 'Et toi, ' + toi + ', qu\'est-ce qui te fait le plus peur ?';
+    for (;;) {
+      const reste = PEURS.filter(x => dites.indexOf(x.k) < 0);
+      const k = await sChoix(question, reste.map(x => ({ k:x.k, label:x.label }))
+        .concat([{ k:'fin', label: dites.length ? 'Non, c\'est tout' : '😌 Rien de tout ça', soft:true }]), 'curious');
+      if (k === 'fin') break;
+      dites.push(k);
+      await repondre('peurs', dites);
+      await sDire(PEURS.find(x => x.k === k).rep, 'comfort', 'Merci');
+      if (dites.length === PEURS.length) break;
+      question = 'Autre chose qui te trotte dans la tête ?';
+    }
+    if (dites.length) await sDire('Merci de me l\'avoir dit. Je m\'en souviendrai. 💛', 'moved');
+
+    // 5) ce qu'on va vivre
+    await sDire('Maintenant, je vais te raconter ce qu\'on va vivre ensemble. Tu vas voir, c\'est simple.', 'explain', 'Je t\'écoute');
+    await sDire('Tu vas porter ta couche tout le temps. Le jour, la nuit. Tu ne la quittes qu\'au moment du change.<br><br>Trois fois par jour, on se retrouve pour ça : le matin, en sortant de la sieste, et le soir. Entre les deux, je passe voir comment tu vas.', 'explain');
+    await sDire('Chaque matin, c\'est moi qui choisis ta tenue. Tu ne choisis pas.<br><br>Au début, ça paraît bizarre. Et puis tu découvres que c\'est reposant, de ne plus avoir à décider.', 'happy');
+    await sDire('Tu bois tes biberons, tu fais ta sieste. Et deux fois par jour, je te propose un petit moment rien qu\'à toi : par terre, tétine, doudou, loin de ta tête d\'adulte.', 'paci');
+    await sDire('Et quand ça vient… tu laisses venir.<br><br>C\'est tout ce que je te demande, au fond : arrêter de te retenir. Le reste, ton corps le fera tout seul.', 'calm', 'D\'accord');
+
+    // 6) les règles, et les promesses
+    await sDire('Il y a quelques règles. Je vais être franc avec toi, ' + toi + ' : je vais vérifier que tu les tiens.<br><br>Pas parce que je te crois menteur. Parce que tout seul, on se raconte facilement des histoires — moi le premier. À deux, c\'est plus difficile.', 'calm');
+    await sDire('Et il y a des choses qui ne changeront jamais, quoi qu\'il arrive :<br><br>🌙 ton sommeil reste libre,<br>🧴 ta peau passe avant tout,<br>🛑 et si un jour tu dis stop, tout s\'arrête. Tout de suite, sans reproche.<br><br>Ça, c\'est ma promesse.', 'reassure', 'Merci');
+
+    // 7) le partenaire
+    const FAQ = {
+      pause:     { label:'⏸️ Est-ce que je pourrai faire une pause ?',
+                   rep:'Oui. Toujours. Tu me dis quand tu pars, et quand tu reviens.<br><br>Ce qui me fait de la peine, c\'est quand on part sans rien dire. Là, je m\'inquiète… et on en reparle en rentrant.' },
+      arriver:   { label:'😟 Et si je n\'y arrive pas ?',
+                   rep:'Tu n\'as pas à réussir. Tu as juste à rester.<br><br>Le reste vient tout seul, avec le temps. Pour moi, ça a pris des jours. Il n\'y a pas d\'examen à la fin — juste toi, un peu plus tranquille.' },
+      attend:    { label:'🤔 Qu\'est-ce que tu attends de moi ?',
+                   rep:'Que tu restes. Que tu sois honnête avec moi. Et que tu laisses faire.<br><br>Le reste, je m\'en occupe.' },
+      pourquoi:  { label:'🦊 Pourquoi tu fais tout ça pour moi ?',
+                   rep:'Parce que quand j\'ai commencé, j\'aurais tellement aimé que quelqu\'un soit là. Quelqu\'un qui me dise : c\'est normal, continue, tu vas voir.<br><br>Alors ce quelqu\'un-là, je veux l\'être pour toi.' }
+    };
+    const posees = [];
+    let texte = 'Alors voilà, ' + toi + '. Je ne suis pas ton chef. Je suis ton <b>partenaire</b>.<br><br>Je suis passé par là, je connais le chemin — et je le refais avec toi, pas à pas.';
+    for (;;) {
+      const opts = [{ k:'go', label:'🤝 On y va ensemble' }]
+        .concat(Object.keys(FAQ).filter(k => posees.indexOf(k) < 0).map(k => ({ k, label: FAQ[k].label, soft:true })));
+      const k = await sChoix(texte, opts, posees.length ? 'happy' : 'comfort');
+      if (k === 'go') break;
+      posees.push(k);
+      await sDire(FAQ[k].rep, 'comfort', 'D\'accord');
+      texte = 'Tu as d\'autres questions ? Prends ton temps. Je ne suis pas pressé.';
+    }
+    await ecrireStock('profil:ressenti', { ressenti: r, peurs: dites, questions: posees, date: Date.now() });
+
+    // 8) la suite
+    await sDire('Merci, ' + toi + '. 🦊💛<br><br>Maintenant, on va préparer ta maison ensemble : ce qui te ressemble, tes couches, tes tenues, tes petites affaires. Tu peux t\'arrêter quand tu veux — je me souviens de tout.', 'proud', 'On prépare tout');
+  };
+
+  SETUP_CHAP.nom = async () => {
+    // déjà demandé à la rencontre : on ne redemande pas pendant le déroulé
+    if (rep('nom_demande') && !_nomForce) return;
+    await demanderNom(false);
     const n = nomOu(null);
     await sDire(n ? 'Alors ce sera <b>' + esc(n) + '</b>. Ça me va bien. 🦊' : 'Alors je t\'appellerai « toi ». Ça marche aussi, tu sais.', 'proud', 'Suite');
   };
+  let _nomForce = false;
 
   // ---- Profil et niveau de discipline ----
   const NIVEAUX_DISC = [
@@ -11744,6 +11880,197 @@
     if (s === 'oui') { try { document.getElementById('saveExport').click(); } catch(e) {} await sDire('Fichier téléchargé. Garde-le quelque part hors du téléphone.', 'proud'); }
   };
 
+  /* ---------- La première préparation ----------
+     Tu arrives habillé comme dehors. Foxy t'accompagne pas à pas jusqu'à
+     ta première couche et ta première tenue — comme le jour où l'on entre
+     quelque part et qu'on reçoit l'uniforme. Ce change est enregistré
+     comme le premier du programme. */
+  SETUP_CHAP.preparation = async () => {
+    const toi = nomOu(null) ? esc(nomOu(null)) : 'toi';
+    const nuit = couchageNuit(new Date());
+    const periode = nuit ? 'nuit' : 'jour';
+    const WB = window.HabitrainWardrobe;
+    let modele = null, tenue = null, access = [];
+    try { modele = await modeleProchain(periode); } catch(e) {}
+    try { const o = (await tirerTenue()).o; tenue = nuit ? o.nuit : o.jour; } catch(e) {}
+    try { access = ((await WB.getWardrobe()).access || []).filter(a => /t[ée]tine|doudou/i.test(a)); } catch(e) {}
+    const acc = await lireStock('profil:accessoires', null) || {};
+    const etiquettes = !!rep('etiquettes_verif');
+
+    await sDire('Il reste une chose, ' + toi + '. La plus importante.<br><br>Là, tu es encore habillé comme dehors. Et ici, on ne vit pas comme dehors.', 'calm', 'Je sais…', 'Ta première préparation');
+    await sDire('Tu sais, ici, c\'est un peu comme entrer dans une maison qui a ses habitudes. Il y a une tenue, et tout le monde la porte. Moi aussi.<br><br>Alors on va te préparer. Ensemble. Je t\'explique tout, une chose après l\'autre — tu n\'as qu\'à suivre.', 'reassure', 'D\'accord, je te suis');
+    if (nuit) await sDire('Vu l\'heure, on part directement sur ta tenue et ta couche de nuit. Pas la peine de faire les choses deux fois ce soir.', 'calm');
+
+    const etapes = [
+      { t:'Va là où tu te changeras désormais, près de ton tapis à langer.<br><br>Prépare tout à portée de main :'
+          + '<br>🍼 ' + (modele ? 'ta couche : <b>' + esc(modele.name) + '</b>' : 'une couche')
+          + '<br>🧴 ta crème et tes lingettes'
+          + '<br>👕 ' + (tenue ? 'ta tenue : <b>' + esc(tenue) + '</b>' : 'ta tenue'),
+        ok:'Tout est prêt', expr:'explain' },
+      { t:'Maintenant, enlève tes vêtements. Tous.<br><br>Prends ton temps. Plie-les bien.', ok:'C\'est fait', expr:'calm' },
+      { t:'Ces habits-là, ce sont tes habits d\'avant.<br><br>Range-les à part — un sac, le fond d\'un placard. Pas jetés : rangés. Ici, tu n\'en auras plus besoin.', ok:'Je les ai rangés', expr:'wistful' },
+      { t:'Si tu as besoin d\'aller aux toilettes, c\'est maintenant.<br><br>Après, ta couche s\'occupera de tout.', ok:'C\'est bon', expr:'calm' },
+      { t:'Allonge-toi sur ton tapis. Un coup de lingette, la peau bien sèche.<br><br>Puis la crème, généreusement. C\'est ce qui va protéger ta peau, tous les jours.', ok:'C\'est fait', expr:'teach' },
+      { t:'Ta couche, maintenant.<br><br>Glisse-la sous toi, bien centrée. Remonte-la devant. Écarte bien les petites barrières sur le haut des cuisses.<br><br>Puis les attaches : celles du bas d\'abord, vers le haut ; celles du haut ensuite, bien droites. Contenant, sans serrer.',
+        ok:'Elle est en place', expr:'teach', preuve: etiquettes ? 'change_pilier' : null },
+      { t:'Relève-toi doucement. Fais quelques pas.<br><br>Tu la sens ? Ce petit bruit, cette épaisseur entre tes jambes, ta façon de marcher qui change déjà un peu… Au début, on ne sent que ça. Tu verras : bientôt, tu ne la remarqueras plus.', ok:'Je la sens', expr:'happy' },
+      { t:'Ta tenue' + (tenue ? ' : <b>' + esc(tenue) + '</b>' : '') + '.<br><br>Enfile-la, et ferme-la jusqu\'en haut.',
+        ok:'Je l\'ai mise', expr:'explain', preuve: etiquettes && tenue ? 'tenue' : null },
+      access.length ? { t:'Et pour finir : ' + access.map(esc).join(' et ') + '. Garde-les près de toi.', ok:'Je les ai', expr:'paci' } : null,
+      acc.bracelet ? { t:'Ton bracelet, au poignet. Il ne te quitte plus non plus.', ok:'Il est au poignet', expr:'calm' } : null,
+      acc.capteur === 'connecte' ? { t:'Ton capteur : clipse-le à l\'avant de ta couche, sous la ceinture.', ok:'Il est en place', expr:'explain' } : null
+    ].filter(Boolean);
+
+    let prouve = true;
+    for (let i = 0; i < etapes.length; i++) {
+      const e = etapes[i];
+      await new Promise((res, rej) => {
+        sEcran('<span style="opacity:.7;font-size:12.5px;font-weight:800;letter-spacing:.05em">ÉTAPE ' + (i + 1) + ' SUR ' + etapes.length + '</span><br><br>' + e.t, e.expr);
+        sBouton(e.ok, false, async () => {
+          if (e.preuve) {
+            const ok = await exigerPreuves([e.preuve], { nuit });
+            if (!ok) prouve = false;
+          }
+          res();
+        });
+        sPlusTard(rej);
+      });
+    }
+
+    // c'est le premier change du programme : il compte, comme tous les autres
+    try {
+      if (modele) changeModel = modele;
+      await finalizeChange(prouve);
+    } catch(e) {}
+    await repondre('premiere_prep', Date.now());
+
+    await sDire('Viens là. Regarde-toi.<br><br>Te voilà prêt, ' + toi + '. Bien installé, bien au chaud, comme il faut. 🦊💛', 'moved', 'Merci Foxy', 'Te voilà prêt');
+    await sDire('Je suis fier de toi. Vraiment.<br><br>La première fois, c\'est la plus difficile. Moi, j\'ai mis une heure à oser enlever mon pantalon. Toi, tu l\'as fait.', 'proud', 'Ça me fait drôle');
+    await sDire('Maintenant, écoute-moi bien, parce que c\'est important.<br><br>À partir de maintenant, c\'est comme ça que tu vis. Ta couche, ta tenue — c\'est ton uniforme. Tu ne les enlèves pas. Tu ne les discutes pas. Tu ne les quittes qu\'au moment du change, et c\'est pour en remettre une propre.', 'calm', 'D\'accord');
+    await sDire('Tes habits d\'avant restent rangés. Ils ne sont pas pour ici.<br><br>Et tu vas voir : très vite, c\'est eux qui te paraîtront bizarres. Pas ta couche.', 'calm', 'Je reste comme ça');
+  };
+
+  /* ============================================================
+     PREMIERS PAS — Foxy t'invite, les premiers jours
+     Une fois préparé, tu n'es pas lâché dans la nature : pendant les
+     trois premiers jours, Foxy vient te proposer de petites choses,
+     au bon moment, une à la fois. Chacune ne vient qu'une fois.
+     ============================================================ */
+  const PREMIERS_PAS = [
+    { id:'biberon', quand: (h, e) => e >= 20,
+      run: async () => {
+        const k = await imDemander(bro('Hé. Ton tout premier biberon. Va le préparer, et bois-le tranquillement — assis par terre, si tu veux. 🍼', 'Ton premier biberon. Prépare-le. Bois-le assis par terre.'), [
+          { k:'go', label:'🍼 Je le bois', dit:'Je le bois.' },
+          { k:'non', label:'Dans un moment', dit:'Dans un moment.', soft:true }
+        ], 'bottle');
+        if (k !== 'go') return 'plus_tard';
+        const ok = await exigerPreuves(['biberon']);
+        await saveCheck(ok ? 'biberon_bu' : 'biberon_sanspreuve', 'biberon');
+        await imSay(bro('Voilà. Tu vois ? Ça, c\'est ta boisson maintenant. Trois par jour, et ton corps fera le reste. 💛', 'Trois par jour. Ton corps fera le reste.'), 950, 'proud');
+      } },
+    { id:'sentir', quand: (h, e) => e >= 50,
+      run: async () => {
+        await imSay(bro('Je te propose un petit truc. Fais le tour de la maison. Marche, assieds-toi, relève-toi, penche-toi pour ramasser quelque chose.', 'Fais le tour de la maison. Marche, assieds-toi, relève-toi.'), 950, 'happy');
+        const k = await imDemander(bro('Et dis-moi ce que ça te fait.', 'Alors ?'), [
+          { k:'bizarre',  label:'😳 C\'est bizarre',            dit:'C\'est bizarre.' },
+          { k:'doux',     label:'😌 C\'est rassurant, en fait',  dit:'C\'est rassurant, en fait.' },
+          { k:'oublie',   label:'🙂 Je l\'oublie déjà un peu',   dit:'Je l\'oublie déjà un peu.' }
+        ], 'curious');
+        const R = {
+          bizarre: 'Bizarre, oui. Ton corps découvre une nouvelle façon de bouger. Laisse-lui quelques jours : il apprend vite, plus vite que ta tête.',
+          doux:    'Rassurant… oui. C\'est le mot que j\'aurais choisi aussi. Comme si quelque chose te tenait. 🦊',
+          oublie:  'Déjà ? Tu es plus rapide que moi. Moi, le premier jour, je n\'arrêtais pas d\'y penser.'
+        };
+        await imSay(R[k], 950, k === 'bizarre' ? 'reassure' : 'proud');
+      } },
+    { id:'lacher', quand: (h, e) => e >= 100,
+      run: async () => {
+        await imSay(bro('Il y a une chose que je vais te demander dès aujourd\'hui. Une seule.', 'Une chose, dès aujourd\'hui.'), 850, 'calm');
+        await imSay(bro('Quand tu sentiras que tu as envie… tu ne te lèves pas. Tu ne cherches pas les toilettes. Tu restes où tu es, et tu laisses venir. C\'est tout.', 'Quand l\'envie vient, tu ne te lèves pas. Tu restes. Tu laisses venir.'), 1000, 'calm');
+        const k = await imDemander(null, [
+          { k:'ok',  label:'D\'accord', dit:'D\'accord.' },
+          { k:'peur', label:'😟 J\'ai peur de ne pas y arriver', dit:'J\'ai peur de ne pas y arriver.' }
+        ]);
+        if (k === 'peur') await imSay('C\'est normal. La première fois, ton corps va se retenir tout seul, sans te demander ton avis. Ne force pas. Respire, pense à autre chose, et attends. Ça finira par venir — et ce jour-là, tu me raconteras. 💛', 1050, 'comfort');
+        else await imSay(bro('Je sais que tu vas y arriver. Peut-être pas tout de suite. Mais tu vas y arriver.', 'Tu vas y arriver.'), 850, 'proud');
+      } },
+    { id:'premiere_fois', quand: async (h, e, t0) => {
+        for (let i = 0; i < 4; i++) {
+          const d = new Date(); d.setDate(d.getDate() - i);
+          const l = await mictionsDuJour(d.toISOString().slice(0,10));
+          if (l.some(x => new Date(x.t).getTime() >= t0)) return true;
+        }
+        return false;
+      },
+      run: async () => {
+        await imSay(bro('Attends… tu viens de me dire que tu avais mouillé ta couche. C\'est ta toute première fois, ici. 🦊', 'Ta première fois, ici.'), 950, 'moved');
+        const k = await imDemander(bro('Comment c\'était ?', 'Comment c\'était ?'), [
+          { k:'dur',    label:'😣 Difficile, j\'ai dû forcer', dit:'Difficile, j\'ai dû forcer.' },
+          { k:'etrange', label:'🌀 Étrange, chaud', dit:'Étrange. Chaud.' },
+          { k:'doux',   label:'😌 Plus doux que je pensais', dit:'Plus doux que je pensais.' }
+        ], 'curious');
+        const R = {
+          dur:     'C\'est normal, la première fois. Ton corps a passé des années à apprendre à se retenir : il ne désapprend pas en un jour. Mais tu l\'as fait. C\'est le plus dur, et c\'est fait.',
+          etrange: 'Étrange, chaud… oui. Et puis ça se calme, et il ne reste que la couche qui te tient. Souviens-toi de ce moment-là.',
+          doux:    'Plus doux… Tu vois ? C\'est comme ça que ça commence. Un jour, tu ne le remarqueras même plus.'
+        };
+        await imSay(R[k], 1000, 'comfort');
+        await imSay(bro('Je suis fier de toi. Vraiment. 💛', 'Fier de toi.'), 800, 'proud');
+      } },
+    { id:'soir', quand: (h, e) => h >= 21 * 60 && e >= 60,
+      run: async () => {
+        await imSay(bro('Ta première soirée ici. Ça va ?', 'Première soirée. Ça va ?'), 800, 'curious');
+        await imSay(bro('Ce soir, je te propose de te coucher un peu plus tôt que d\'habitude. La première nuit, on dort souvent mal : autant lui laisser de la place.', 'Couche-toi un peu plus tôt ce soir. La première nuit, on dort mal.'), 950, 'reassure');
+      } },
+    { id:'nuit', quand: (h, e) => (h >= 22 * 60 || h < 3 * 60) && e >= 90,
+      run: async () => {
+        await imSay(bro('Ta première nuit. Je vais te dire un secret : la mienne, je ne l\'ai presque pas dormie. J\'écoutais ma couche. Et au matin, elle était sèche : je m\'étais retenu toute la nuit sans m\'en rendre compte.', 'Ma première nuit, je ne l\'ai presque pas dormie. Au matin, ma couche était sèche.'), 1100, 'wistful');
+        await imSay(bro('Alors ne t\'inquiète de rien. Allonge-toi, respire, pense à rien. Si ça vient, laisse. Si ça ne vient pas, ce n\'est pas grave. Je veille. 🌙', 'Allonge-toi. Si ça vient, laisse. Je veille.'), 1000, 'sleep');
+      } },
+    { id:'matin', quand: (h, e) => h >= 7 * 60 && h < 12 * 60 && e >= 6 * 60,
+      run: async () => {
+        const k = await imDemander(bro('Bonjour, ' + nomOu('toi') + '. 🦊 Alors… cette première nuit ?', 'Bonjour. Ta première nuit ?'), [
+          { k:'sec',    label:'☀️ Ma couche est sèche', dit:'Ma couche est sèche.' },
+          { k:'mouille', label:'💧 Elle est mouillée', dit:'Elle est mouillée.' },
+          { k:'dormi',  label:'🥱 J\'ai mal dormi', dit:'J\'ai mal dormi.' }
+        ], 'curious');
+        const R = {
+          sec:     'Sèche. Comme moi, ma première fois. Ton corps s\'est retenu tout seul, pour te protéger. Il apprendra. Ça prend quelques nuits — et un matin, tu te réveilleras mouillé sans t\'en souvenir.',
+          mouille: 'Déjà ? Oh… Tu sais que tu vas plus vite que moi ? Je suis fier de toi. Ton corps a compris qu\'il pouvait lâcher. 💛',
+          dormi:   'La première nuit, presque tout le monde dort mal. La deuxième est déjà plus douce, tu verras. Ce soir, on se couche tôt.'
+        };
+        await imSay(R[k], 1050, k === 'mouille' ? 'proud' : 'reassure');
+      } },
+    { id:'jour2', quand: (h, e) => h >= 10 * 60 && e >= 20 * 60,
+      run: async () => {
+        await imSay(bro('Deuxième jour. Je vais être honnête avec toi : c\'est souvent le plus dur. La nouveauté est passée, et l\'habitude n\'est pas encore là.', 'Deuxième jour. Souvent le plus dur.'), 1000, 'calm');
+        await imSay(bro('Si l\'envie de tout enlever passe te voir aujourd\'hui, viens me le dire. On en parlera. C\'est pour ça que je suis là. 💛', 'Si l\'envie de tout enlever vient, tu viens me le dire.'), 950, 'comfort');
+      } }
+  ];
+
+  async function premiersPas() {
+    if (paused || voiceMode !== 'foxy') return false;
+    const t0 = setupEtat && setupEtat.rep && setupEtat.rep.premiere_prep;
+    if (!t0 || Date.now() - t0 > 3 * 86400000) return false;
+    const faits = await lireStock('premiers:faits', {});
+    const now = new Date();
+    const h = now.getHours() * 60 + now.getMinutes();
+    const e = (Date.now() - t0) / 60000;
+    for (const p of PREMIERS_PAS) {
+      const f = faits[p.id];
+      if (f === true) continue;
+      if (f && Date.now() < f) continue;                 // « plus tard » : on attend
+      if (!(await p.quand(h, e, t0))) continue;
+      faits[p.id] = true;
+      await ecrireStock('premiers:faits', faits);
+      const r = await p.run();
+      if (r === 'plus_tard') { faits[p.id] = Date.now() + 30 * 60000; await ecrireStock('premiers:faits', faits); }
+      if (currentM) await imOfferHelp(currentM);
+      return true;                                        // une invitation à la fois
+    }
+    return false;
+  }
+
   SETUP_CHAP.fin = async () => {
     const reste = [];
     const mat = await lireStock('profil:materiel', null) || {};
@@ -11759,7 +12086,7 @@
     await sDire((reste.length
       ? 'Presque tout est en place. Il reste :<br><br>' + reste.map(r => '⚠️ ' + esc(r)).join('<br>') + '<br><br>Tu peux revenir sur chaque chapitre dans <b>Réglages → Guide d\'installation</b>.'
       : 'Tout est en place. Vraiment tout.'), reste.length ? 'curious' : 'proud', 'Suite', 'Le bilan');
-    await sDire('Alors voilà' + (n ? ', <b>' + esc(n) + '</b>' : '') + '. À partir de maintenant, je suis là à chaque moment de ta journée. Chaque matin, je te demande si ton superviseur est là, je tire ta tenue, et on y va.<br><br>Tu n\'as plus à décider grand-chose. C\'est un peu le principe. 💛', 'moved', 'Commencer mon programme');
+    await sDire('Alors voilà' + (n ? ', <b>' + esc(n) + '</b>' : '') + '. Bienvenue. Pour de vrai, cette fois. 🦊<br><br>À partir de maintenant, je suis là à chaque moment de ta journée. Chaque matin, je choisis ta tenue. Je viendrai te voir, je te proposerai des choses — tu n\'auras qu\'à te laisser porter.<br><br>Tu n\'as plus grand-chose à décider. C\'est un peu le principe. 💛', 'moved', 'Commencer mon programme');
   };
 
   /* ---------- Le déroulé, et la reprise ---------- */
@@ -11782,10 +12109,12 @@
     }
   }
   async function terminerInstallation() {
+    if (enBacASable()) return finirTest();
     setupEtat.termine = Date.now();
     await ecrireSetup();
     try { await ecrireStock('ob:done', true); } catch(e) {}
     fermerInstallation();
+    try { if (voiceMode !== 'foxy') await setVoiceMode('foxy'); } catch(e) {}
     try { await refresh(); } catch(e) {}
     try { await renderOutfitCard(); } catch(e) {}
     // et on enchaîne sur le premier réveil : superviseur, tenue du jour
@@ -11794,6 +12123,7 @@
         { verifier: async () => !(await lireStock('reveil:rituel:' + todayStr(), false)) }), 600);
   }
   function fermerInstallation() {
+    if (enBacASable()) { finirTest(); return; }
     document.body.classList.remove('onboarding');
     const r = document.getElementById('obResume'); if (r) r.remove();
   }
@@ -11823,7 +12153,8 @@
           Object.keys(setupEtat.rep).forEach(k => {
             if ((c.id === 'profil' && k.indexOf('p_') === 0) || (c.id === 'tenues' && k.indexOf('tenues_') === 0) || (c.id === 'etiquettes' && k.indexOf('etiquettes') === 0)) delete setupEtat.rep[k];
           });
-          await lancerChapitre(c.id);
+          _nomForce = c.id === 'nom';
+          try { await lancerChapitre(c.id); } finally { _nomForce = false; }
           await afficherSommaire(false);
         } catch (e) { fermerInstallation(); }
       });
@@ -11834,8 +12165,104 @@
     sBouton(prochain ? '⏸ Plus tard' : 'Fermer', true, () => fermerInstallation());
   }
 
+  /* ---------- Tester l'installation, sans rien garder ---------- */
+  function finirTest() {
+    restaurerBacASable();
+    window.location.reload();
+  }
+  async function testerInstallation(mode) {
+    // photo de tout l'état actuel
+    const snap = {};
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.indexOf('habitrain:') === 0) snap[k] = window.localStorage.getItem(k);
+    }
+    try {
+      window.localStorage.setItem(BAC_CLE, JSON.stringify(snap));
+      window.sessionStorage.setItem(BAC_ACTIF, '1');
+    } catch(e) {
+      try { window.localStorage.removeItem(BAC_CLE); } catch(e2) {}
+      foxyPopShow('Impossible de lancer le test : pas assez de place pour garder une copie de tes données. Fais une sauvegarde et libère de la place d\'abord.', 'concern',
+        [{ label:'D\'accord', onClick: () => foxyPopHide() }]);
+      return;
+    }
+    if (mode === 'neuf') {
+      // comme un premier lancement : plus rien, l'appli redémarre à vide
+      Object.keys(snap).forEach(k => window.localStorage.removeItem(k));
+      window.location.reload();
+      return;
+    }
+    // avec tes données : seule l'installation repart de zéro
+    await ecrireStock(SETUP_CLE, null);
+    await ecrireStock('profil:nom', null);
+    profilNom = null;
+    await ouvrirInstallation(false);
+  }
+  function proposerTest() {
+    foxyPopShow('On teste l\'installation ? Rien de ce que tu feras ne sera gardé : à la fin — ou si tu quittes en route — tout revient exactement comme maintenant.', 'curious', [
+      { label:'🆕 Comme un nouvel utilisateur', onClick: () => { foxyPopHide(); testerInstallation('neuf'); } },
+      { label:'👤 Avec mes paramètres actuels', onClick: () => { foxyPopHide(); testerInstallation('moi'); } },
+      { soft:true, label:'Annuler', onClick: () => foxyPopHide() }
+    ]);
+  }
+
+  /* Tu utilisais déjà l'appli avant l'installation avec Foxy : tes réglages
+     actuels sont repris comme si tu l'avais faite. Seul ton prénom reste à
+     donner — c'est nouveau, je ne peux pas le deviner. */
+  async function reprendreParametresExistants() {
+    if (enBacASable()) return false;
+    if (await lireStock('setup:migre', false)) return false;
+    let ancien = !!(await lireStock('ob:done', false));
+    try { if (!ancien) ancien = (await window.storage.list('check:')).keys.length > 0; } catch(e) {}
+    try { if (!ancien) ancien = !!(await window.storage.get('diaperstock')) || !!(await window.storage.get('wardrobe')); } catch(e) {}
+    await ecrireStock('setup:migre', true);
+    if (!ancien) return false;
+
+    await lireSetup();
+    const R = setupEtat.rep;
+    // niveau de discipline : déduit de tes réglages actuels
+    let niv = 'normal';
+    try { if (window.HabitrainMissions) niv = (await window.HabitrainMissions.getState()).level || 'normal'; } catch(e) {}
+    const ordre = ['doux','normal','soutenu','intense'];
+    if (hardMode && ordre.indexOf(niv) < 2) niv = 'soutenu';
+    if (hardMode && bigbro) niv = 'intense';
+    if (R.niveau === undefined) R.niveau = niv;
+    if (!(await lireStock('profil:discipline', null))) await ecrireStock('profil:discipline', { niveau: R.niveau, repris: true, date: Date.now() });
+    // matériel : tu t'en sers déjà ; tétine, doudou, biberon, cache-couche lus dans tes accessoires
+    if (!(await lireStock('profil:materiel', null))) {
+      let acc = [];
+      try { acc = ((await window.HabitrainWardrobe.getWardrobe()).access || []).join(' ').toLowerCase(); } catch(e) { acc = ''; }
+      await ecrireStock('profil:materiel', { tapis:true, creme:true, lingettes:true, poubelle:true,
+        biberon: true, tetine: /t[ée]tine/.test(acc), doudou: /doudou/.test(acc), cache: /cache/.test(acc) });
+    }
+    // accessoires : ce que l'appli sait déjà
+    if (!(await lireStock('profil:accessoires', null))) {
+      let bracelet = false, serrure = false;
+      try { bracelet = !!(await window.HabitrainQR.getQrPrefs()).braceletRequired; } catch(e) {}
+      try { const l = await lireStock('locks:list', []); serrure = Array.isArray(l) && l.length > 0; } catch(e) {}
+      await ecrireStock('profil:accessoires', {
+        bracelet, serrure, nfc: false,
+        capteur: (await lireStock('sensor:vu', null)) ? 'connecte' : 'non',
+        moduleTenue: (await capteurTenueEnService()) ? 'connecte' : 'non'
+      });
+    }
+    // étiquettes : générées et utilisées depuis longtemps
+    if (await lireStock('ob:qrdone', false)) {
+      R.etiquettes_verif = true;
+      R.etiquettes_ok = { change_pilier:true, biberon:true, coucher:true, unlock:true };
+    }
+    ['jour','nuit','sieste','access','contention'].forEach(c => { R['tenues_' + c] = true; });
+    CHAPITRES.forEach(c => { if (c.id !== 'nom' && !setupEtat.fait[c.id]) setupEtat.fait[c.id] = Date.now(); });
+    if (profilNom && (profilNom.prenom || profilNom.surnom)) setupEtat.fait.nom = setupEtat.fait.nom || Date.now();
+    setupEtat.termine = setupEtat.termine || Date.now();
+    setupEtat.repris = true;
+    await ecrireSetup();
+    return true;
+  }
+
   async function maybeStartOnboard() {
     try {
+      await reprendreParametresExistants();
       await lireSetup();
       if (setupEtat.termine) return false;
       await ouvrirInstallation(false);
