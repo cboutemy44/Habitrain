@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '21.9';
+  const APP_VERSION = '22.1';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -803,15 +803,33 @@
     // capteur voit une couche fraîche. On arme la vérification ici.
     try { await armerVerifFraiche(slotKey); } catch(e) {}
 
-    // ce qui vient d'être posé, pourquoi, et pour combien de temps
-    if (voiceMode === 'foxy' && !paused) { try { await expliquerCouche(); } catch(e) {} }
-    try { await elementsDesertionChange(slotKey); } catch(e) {}
-    try { await proposerRessentirApresChange(); } catch(e) {}
-    try { if (changeCtx === 'pilier' || slotKey) await corroborerPilier(slotKey); } catch(e) {}
+    /* Le change est ACTÉ ici, et la fenêtre se referme tout de suite.
+       Avant, Foxy enchaînait ses explications dans le chat pendant que la
+       fenêtre du change était encore par-dessus : il attendait un appui que
+       tu ne pouvais pas lui donner, et la validation n'aboutissait jamais. */
+    const ctxFait = changeCtx, slotFait = slotKey;
     activeSlotKey = null;
     closeCheck();
     try { await renderCheckStat(); } catch(e) {}
     try { await renderSince(); } catch(e) {}
+
+    // Change de nuit : le relevé du soir en fait partie. Il s'impose, donc il
+    // arrive en fenêtre, avant que Foxy ne reprenne la parole dans le chat.
+    if (releveSoirDu(slotFait)) {
+      // coupe : un relevé ne fait pas la queue derrière une causerie qui, elle,
+      // attend un appui. C'est un contrôle, il passe devant.
+      talk(TALK.CHECK, 'releve:soir:' + todayStr(), async () => {
+        try { await releveSoirFenetre(true); } catch(e) {}
+      }, { coupe: true });
+    }
+
+    // ce qui vient d'être posé, pourquoi, et pour combien de temps — une fois libre
+    talk(TALK.CADRE, 'change:apres:' + Date.now(), async () => {
+      if (voiceMode === 'foxy' && !paused) { try { await expliquerCouche(); } catch(e) {} }
+      try { await elementsDesertionChange(slotFait); } catch(e) {}
+      try { await proposerRessentirApresChange(); } catch(e) {}
+      try { if (ctxFait === 'pilier' || slotFait) await corroborerPilier(slotFait); } catch(e) {}
+    });
   }
   /* ============================================================
      PREUVES PAR SCAN — strictes et nommées
@@ -1224,7 +1242,9 @@
     // explicitement le droit d'interrompre le fait. Sans ça, un contrôle
     // périodique se déclarait prioritaire chaque minute, coupait une séquence
     // en cours, puis n'avait rien à dire — d'où le « Stop » suivi de rien.
-    if (prio < talkActive.prio && opt.coupe) {
+    // « coupe » l'emporte aussi à niveau égal : une discussion qu'on vient
+    // d'ouvrir soi-même ne doit pas attendre derrière une autre du même rang
+    if (opt.coupe && prio <= talkActive.prio) {
       talkCoupe(item);
       return Promise.resolve(true);
     }
@@ -2153,7 +2173,10 @@
           await saveMoment(m.key, opt.result);
           const reaction = react(opt.result);
           await imSay(reaction, 700, exprForResult(opt.result));
-          if (opt.openForm) { await imSay(voiceMode==='foxy'?'Allez, on remplit ton bilan du soir, je te montre où.':'On va faire ton bilan du soir ensemble, je te montre.', 700); toggleFormImmersive(); }
+          if (opt.openForm) {
+            await imSay(voiceMode==='foxy'?'Allez, on prend ton relevé du soir tout de suite.':'On fait ton relevé du soir ensemble.', 700);
+            try { await releveSoirFenetre(false); } catch(e) {}
+          }
           await imOfferHelp(m); // le caregiver reste disponible
         }});
       });
@@ -7532,50 +7555,12 @@
   /* Le rappel d'un créneau ouvrait une fenêtre par-dessus l'appli. En mode
      Foxy, il se vit maintenant dans la conversation, comme le reste : c'est
      lui qui te parle, tu lui réponds, et seule la pose garde son écran. */
+  /* Les contrôles s'imposent à toi : ils gardent leur fenêtre. C'est Foxy qui
+     parle dedans, mais on ne les mélange pas à la conversation, où c'est toi
+     qui mènes. */
   async function lancerRappelChange(slot) {
-    if (voiceMode !== 'foxy') { popChangeDue(slot); return attendreOverlay(); }
-    activeSlotKey = slot.key;
-    if (slot.ctx === 'pilier') {
-      const k = await imDemander(bro(
-        'Hé. C\'est l\'heure de ton ' + slot.label.toLowerCase() + '. Viens, on s\'en occupe ensemble. 🦊',
-        'C\'est l\'heure : ' + slot.label.toLowerCase() + '. On y va.'), [
-        { k:'go',   label:'🦊 On y va', dit:'On y va.' },
-        { k:'tard', label:'Pas tout de suite', dit:'Pas tout de suite.', soft:true }
-      ], 'wave');
-      if (k === 'go') { startChange('pilier'); return; }
-      dueSnooze[slot.key] = Date.now() + (hardMode || discActive() ? 5 : 10)*60000;
-      activeSlotKey = null;
-      await imSay(bro(
-        'D\'accord. Je te relance dans un petit moment — tu sais bien qu\'on finira par le faire. 🦊',
-        'Je te relance dans dix minutes. Ça se fera.'), 850, 'calm');
-      if (currentM) await imOfferHelp(currentM);
-      return;
-    }
-    // un check : l'état de la couche, et ce qu'on en fait
-    const k = await imDemander(bro(
-      'Petit check, ' + nomOu('toi') + ' : ta couche, elle en est où ? Touche par-dessus ta tenue.',
-      'Check. Ta couche en est où ?'), [
-      { k:'sec',     label:'🌵 Sèche — je laisse',      dit:'Encore sèche, je laisse.' },
-      { k:'mouille', label:'💧 Mouillée — je laisse',   dit:'Mouillée, je la garde.' },
-      { k:'change',  label:'🔄 Mouillée — je change',   dit:'Mouillée, je change.' },
-      { k:'sature',  label:'🌊 Saturée — je change',    dit:'Saturée, je change.' }
-    ], 'curious');
-    if (k === 'change' || k === 'sature') {
-      await saveCheck(k === 'sature' ? 'etat_sature' : 'etat_mouille', 'check_' + slot.key);
-      try { await declarerEtatCouche(k === 'sature' ? 'sature' : 'mouille', 'parole'); } catch(e) {}
-      startChange('check', true);
-      return;
-    }
-    await saveCheck(k === 'sec' ? 'etat_sec' : 'etat_mouille', 'check_' + slot.key);
-    try { await declarerEtatCouche(k === 'sec' ? 'sec' : 'mouille', 'parole'); } catch(e) {}
-    await markSlotDone(slot.key);
-    await imSay(k === 'sec'
-      ? bro('Encore sèche… tu te retiens un chouïa, non ? Laisse venir quand ça vient, c\'est comme ça qu\'on s\'habitue. 🦊',
-            'Encore sèche. Tu te retiens. Laisse venir.')
-      : bro('Bien mouillée — c\'est exactement ce qu\'on cherche. On la garde encore un peu, elle travaille pour toi. 💛',
-            'Mouillée. Bien. On la garde.'), 950, k === 'sec' ? 'curious' : 'proud');
-    try { await renderCheckStat(); } catch(e) {}
-    if (currentM) await imOfferHelp(currentM);
+    popChangeDue(slot);
+    return attendreOverlay();
   }
 
   function addBtn(container, cls, label, handler) {
@@ -7640,32 +7625,7 @@
       } catch(e) {}
     })();
 
-    // état de la couche avant retrait : dans la conversation quand Foxy est là
-    if (voiceMode === 'foxy') {
-      (async () => {
-        try {
-          const m = await etatMesure(90);
-          if (m) {
-            const LBL = { sec:'sèche', mouille:'bien mouillée', sature:'saturée' };
-            await imSay(bro(
-              'Ton capteur me la donne ' + (LBL[m.etat] || m.etat) + '. Pas besoin de me le dire, je sais. On y va. 🦊',
-              'Capteur : ' + (LBL[m.etat] || m.etat) + '. On y va.'), 900, 'calm');
-            await saveChangeState(m.etat);
-          } else {
-            const etat = await demanderEtatCouche(bro(
-              ctx === 'pilier' ? 'Avant qu\'on la retire : elle en est où ?' : 'Avant de la retirer, elle est comment ?',
-              'Avant de la retirer : elle en est où ?'));
-            if (etat) {
-              await saveChangeState(etat);
-              try { const { rc } = await declarerEtatCouche(etat, 'parole'); await confirmerEtat(etat, rc); } catch(e) {}
-            }
-          }
-        } catch(e) {}
-        ouvrirPose();
-      })();
-      return;
-    }
-
+    // l'état de la couche avant retrait est un contrôle : il garde sa fenêtre
     // écran 1 : état de la couche avant retrait.
     // Si le capteur a une mesure récente, on ne demande rien : on constate.
     // Ta parole ne sert que là où aucun capteur ne peut trancher.
@@ -9506,35 +9466,24 @@
     b.addEventListener('click', () => showTab(b.dataset.tabname));
   });
 
-  // Redirection auto vers le bilan du soir quand l'heure est venue (à partir de 22h30)
+  // Filet de rattrapage : passé 22h30, si le relevé n'a pas été pris avec le
+  // change de nuit, la fenêtre s'ouvre d'elle-même. (Avant, ce rattrapage ne
+  // servait qu'au mode reporting : en mode Foxy — devenu nominal — il ne se
+  // déclenchait jamais et le bilan pouvait passer à la trappe.)
   async function maybeRedirectBilan() {
     if (paused) return;
-    if (voiceMode !== 'report') return;
     const now = new Date();
     const nowMin = now.getHours()*60 + now.getMinutes();
-    if (nowMin < 22*60+30 || nowMin >= 24*60) return; // fenêtre du bilan : 22h30 → minuit
-    // déjà fait aujourd'hui ?
-    let alreadySaved = false, alreadyRedirected = false;
+    if (nowMin < 22*60+30 || nowMin >= 24*60) return; // fenêtre du relevé : 22h30 → minuit
+    let alreadySaved = false;
     try {
       const r = await window.storage.get('day:'+todayStr());
       if (r && r.value) { const e = JSON.parse(r.value); if (e && e.skin) alreadySaved = true; }
     } catch(e) {}
-    try {
-      const r2 = await window.storage.get('bilanredir:'+todayStr());
-      if (r2 && r2.value) alreadyRedirected = JSON.parse(r2.value);
-    } catch(e) {}
-    if (alreadySaved || alreadyRedirected) return;
-    // on redirige : onglet Suivi + ouverture du bilan
-    try { await window.storage.set('bilanredir:'+todayStr(), JSON.stringify(true)); } catch(e) {}
-    await showTab('suivi');
-    const formCard = document.getElementById('formCard');
-    if (formCard) {
-      formCard.style.display = '';
-      toggleForm(true);
-      const fs = document.getElementById('formSub');
-      if (fs) fs.textContent = 'C\'est l\'heure de ton bilan du soir ! Note ta peau et ta journée.';
-      setTimeout(() => formCard.scrollIntoView({ behavior:'smooth', block:'start' }), 200);
-    }
+    if (alreadySaved) return;
+    talk(TALK.CHECK, 'releve:soir:' + todayStr(), async () => {
+      try { await releveSoirFenetre(true); } catch(e) {}
+    }, { coupe: true });
   }
 
   (document.getElementById('openDebug')||{addEventListener(){}}).addEventListener('click', async () => {
@@ -9545,7 +9494,8 @@
   });
 
   // ==== Popup Foxy réutilisable (pause / reprise) ====
-  function foxyPopShow(text, expr, buttons) {
+  function foxyPopShow(text, expr, buttons, opts) {
+    opts = opts || {};
     const ov = document.getElementById('foxyPop');
     const portrait = document.getElementById('foxyPopPortrait');
     const txt = document.getElementById('foxyPopText');
@@ -9554,18 +9504,178 @@
     positionFoxyCell(portrait, expr || 'happy', 120);
     txt.textContent = text;
     acts.innerHTML = '';
+    // zone de saisie facultative (relevé du soir : la note libre)
+    let champ = null;
+    const vieux = document.getElementById('foxyPopInput');
+    if (vieux) vieux.remove();
+    if (opts.input) {
+      champ = document.createElement('textarea');
+      champ.id = 'foxyPopInput';
+      champ.className = 'foxypop-input';
+      champ.placeholder = opts.input.placeholder || '';
+      champ.value = opts.input.value || '';
+      acts.parentNode.insertBefore(champ, acts);
+    }
     (buttons || []).forEach(b => {
       const btn = document.createElement('button');
       if (b.soft) btn.className = 'soft';
       btn.textContent = b.label;
-      btn.addEventListener('click', () => b.onClick());
+      btn.addEventListener('click', () => b.onClick(champ ? champ.value.trim() : undefined));
       acts.appendChild(btn);
     });
     ov.style.display = 'flex';
+    if (champ) setTimeout(() => { try { champ.focus(); } catch(e) {} }, 120);
   }
   function foxyPopHide() {
     const ov = document.getElementById('foxyPop'); if (ov) ov.style.display = 'none';
+    const vieux = document.getElementById('foxyPopInput'); if (vieux) vieux.remove();
     setTimeout(() => allerAuChat(), 120);
+  }
+
+  /* ==== Relevé du soir — en fenêtre, après le change de nuit ====
+     C'est un contrôle : il s'impose à toi, donc il garde sa fenêtre au lieu
+     de se diluer dans la conversation. Le formulaire de l'onglet « Mon suivi »
+     reste là pour corriger ou rattraper un jour passé. */
+  let releveEnCours = false;
+  let releveSnooze = 0;
+
+  function qReleve(texte, expr, options, opts) {
+    return new Promise(res => {
+      foxyPopShow(texte, expr, (options || []).map(o => ({
+        label: o.label, soft: o.soft,
+        onClick: (saisie) => res(o.v !== undefined ? o.v : saisie)
+      })), opts);
+    });
+  }
+
+  async function releveSoirFenetre(auto) {
+    if (paused || releveEnCours) return false;
+    if (auto && releveSnooze && Date.now() < releveSnooze) return false;
+    const date = todayStr();
+    let deja = null;
+    try { const r = await window.storage.get('day:'+date); if (r && r.value) deja = JSON.parse(r.value); } catch(e) {}
+    if (auto && deja && deja.skin) return false;   // déjà relevé aujourd'hui
+
+    releveEnCours = true;
+    try {
+      let bibScannes = 0;
+      try { bibScannes = await biberonsDuJour(date); } catch(e) {}
+
+      // 1) on annonce : c'est le relevé, il fait partie du change de nuit
+      const ouverture = broOn()
+        ? 'Te voilà au sec pour la nuit. Reste ton relevé. Ce n\'est pas négociable, et c\'est court.'
+        : 'Voilà, tu es propre et au sec pour la nuit. 🦊 Il me reste ton relevé du soir — quatre petites questions, et je te laisse dormir.';
+      const go = await qReleve(ouverture, 'calm', hardMode
+        ? [{ label: '📝 On y va', v: 'go' }]
+        : [{ label: '📝 On y va', v: 'go' }, { label: 'Dans un instant', v: 'plus_tard', soft: true }]);
+      if (go === 'plus_tard') {
+        releveSnooze = Date.now() + 10 * 60000;
+        foxyPopHide();
+        talk(TALK.CADRE, 'releve:report:' + Date.now(), async () => {
+          await imSay(bro('D\'accord, je te relance dans dix minutes. 🦊',
+                          'Je te relance dans dix minutes. Tu ne coupes pas au relevé, tu le sais.'), 700, 'calm');
+        });
+        return false;
+      }
+
+      // 2) la peau — le champ clé
+      const skin = await qReleve(
+        bro('Ta peau, d\'abord — c\'est ce qui compte le plus. Tu as regardé pendant le change ? 🦊',
+            'Ta peau, après cette journée en couche. Regarde bien avant de répondre.'),
+        'curious',
+        [ { label: '🟢 Verte — tout va bien', v: 'verte' },
+          { label: '🟠 À surveiller', v: 'surveiller' },
+          { label: '🔴 À traiter', v: 'traiter' } ]);
+
+      // 3) les biberons (les scans font foi : on ne descend pas en dessous)
+      const bibOpts = [0,1,2,3].map(n => ({
+        label: '🍼 ' + n + (n === bibScannes && bibScannes ? ' (scannés)' : ''), v: n
+      }));
+      let bib = await qReleve(
+        bro('Et tes biberons ? Tu en as bu combien aujourd\'hui ?', 'Combien de biberons aujourd\'hui ?'),
+        'bottle', bibOpts);
+      bib = Math.max(Number(bib) || 0, bibScannes || 0);
+
+      // 4) la nuit précédente
+      const nuit = await qReleve(
+        bro('Et la nuit dernière, ta couche a tenu jusqu\'au matin ?',
+            'La nuit dernière : ta couche a tenu jusqu\'au matin ?'),
+        'sleep',
+        [ { label: '🌙 Au sec', v: 'ok' },
+          { label: '💧 Limite', v: 'limite' },
+          { label: '🌊 Fuite', v: 'fuite' } ]);
+
+      // 5) le type de journée
+      const type = await qReleve(
+        bro('Ta journée, c\'était solo ou avec ton superviseur ?', 'Journée solo ou supervisée ?'),
+        'explain',
+        [ { label: '🦊 Solo', v: 'solo' },
+          { label: '👤 Supervisée', v: 'supervise' } ]);
+
+      // 6) la note libre — facultative, mais proposée
+      const note = await qReleve(
+        bro('Tu veux me laisser un mot sur ta journée ? Ce qui a marché, ce qui a coincé. Sinon valide directement. 🦊',
+            'Un mot sur ta journée, si tu veux. Sinon, valide.'),
+        'moved',
+        [ { label: '✓ Enregistrer mon relevé', v: undefined },
+          { label: 'Sans note', v: '', soft: true } ],
+        { input: { placeholder: 'Ce qui a marché, ce qui a coincé…', value: (deja && deja.note) || '' } });
+
+      const entry = Object.assign({}, deja || {}, {
+        date, skin, bib, nuit, type, note: (note || '').trim()
+      });
+      let ok = true;
+      try { await window.storage.set('day:' + date, JSON.stringify(entry)); } catch(e) { ok = false; }
+
+      if (!ok) {
+        await qReleve('Je n\'ai pas réussi à enregistrer ton relevé. On réessaiera tout à l\'heure.', 'sad',
+          [{ label: 'D\'accord', v: 'x' }]);
+        foxyPopHide();
+        return false;
+      }
+
+      await qReleve(
+        skin === 'traiter'
+          ? bro('C\'est enregistré. 🦊 Ta peau d\'abord : crème bien épaisse ce soir, et demain matin je regarde avec toi.',
+                'Enregistré. Ta peau passe devant tout le reste : crème épaisse maintenant, et je vérifie demain.')
+          : bro('Voilà, ta journée est enregistrée. 🐾 Tu peux aller te coucher tranquille.',
+                'Enregistré. Journée bouclée, tu peux aller dormir.'),
+        skin === 'traiter' ? 'comfort' : 'proud',
+        [{ label: 'Bonne nuit 🌙', v: 'fin' }]);
+      foxyPopHide();
+
+      // remise à jour du suivi + du formulaire s'il est ouvert sur aujourd'hui
+      try { await refresh(); } catch(e) {}
+      try { await renderSupMode(); } catch(e) {}
+      try {
+        const di = document.getElementById('dateInput');
+        if (di && (!di.value || di.value === date)) { di.value = date; loadInto(entry); }
+      } catch(e) {}
+
+      // le mot de la fin, lui, revient dans la conversation
+      talk(TALK.CADRE, 'releve:fait:' + date, async () => {
+        if (voiceMode === 'foxy' && !paused) {
+          await imSay(skin === 'verte'
+            ? bro('Peau verte et relevé complet. Tu tiens ton cadre sans même y penser maintenant. 💛',
+                  'Peau verte, journée complète. C\'est exactement ce que j\'attends de toi.')
+            : bro('Merci pour ton relevé. On ajustera ce qu\'il faut, et demain on repart tranquillement. 🦊',
+                  'Relevé pris. On corrige ce qui doit l\'être, et on repart demain.'),
+            900, skin === 'verte' ? 'proud' : 'comfort');
+        }
+      });
+      return true;
+    } finally {
+      releveEnCours = false;
+    }
+  }
+
+  // Le relevé se déclenche avec le change de nuit ; ce filet le rattrape si le
+  // change n'a pas eu lieu par le flux guidé.
+  function releveSoirDu(slotKey) {
+    const h = new Date().getHours();
+    const tardif = h >= 19 || h < 4;
+    if (!tardif) return false;
+    return slotKey === 'c2230' || couchageNuit(new Date());
   }
 
   // ==== Mode pause (façade neutre, suspend tout, fige le suivi) ====
@@ -14527,7 +14637,8 @@
     window.scrollTo({ top: 0, behavior:'smooth' });
     if (voiceMode !== 'foxy' || paused) return;
     // clé unique : rouvrir la salle redonne la parole à Foxy, même s'il vient de parler
-    talk(TALK.GUIDE, 'salle:accueil:' + Date.now(), () => accueilSalle());
+    // tu viens d'ouvrir la porte : il te répond tout de suite, même s'il parlait d'autre chose
+    talk(TALK.CADRE, 'salle:accueil:' + Date.now(), () => accueilSalle(), { coupe: true });
   }
 
   async function accueilSalle() {
@@ -14580,7 +14691,7 @@
   // départ et retour
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { direAuRevoir(); marquerPresence(); return; }
-    talk(TALK.AMBIANCE, 'presence:retour:' + Date.now(), () => saluerRetour());
+    talk(TALK.CADRE, 'presence:retour:' + Date.now(), () => saluerRetour());
     marquerPresence();
   });
   window.addEventListener('pagehide', () => { direAuRevoir(); marquerPresence(); });
@@ -14787,7 +14898,7 @@
     } catch(e) {}
 
     // il te salue au lancement, selon l'heure et le temps passé
-    setTimeout(() => talk(TALK.AMBIANCE, 'presence:ouverture', () => saluerRetour()), 1400);
+    setTimeout(() => talk(TALK.CADRE, 'presence:ouverture', () => saluerRetour()), 1400);
 
     // le tirage du réveil passe AVANT le change dû : le change du matin
     // vérifie la tenue, il faut donc qu'elle soit tirée

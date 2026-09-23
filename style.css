@@ -188,6 +188,12 @@
     background:#d9743a; color:#fff;
   }
   .foxypop-acts button.soft { background:#FBEADB; color:#a8543b; border:1.5px solid #e0c0a0; }
+  .foxypop-input {
+    width:100%; box-sizing:border-box; font-family:inherit; font-size:14px; font-weight:600;
+    color:#5a3418; background:#FFF8F1; border:1.5px solid #e0c0a0; border-radius:12px;
+    padding:11px; min-height:76px; resize:vertical; margin-bottom:12px;
+  }
+  .foxypop-input:focus { outline:none; border-color:#d9743a; }
 
   /* ===== Façade neutre du mode pause ===== */
   #pauseFacade { display:none; position:fixed; inset:0; z-index:9999; background:#f7f7f8; }
