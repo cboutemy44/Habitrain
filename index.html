@@ -28,18 +28,6 @@
     </div>
   </div>
 
-  <div id="qrScanOverlay" style="display:none">
-    <video id="qrVideo"></video>
-    <canvas id="qrScanCanvas" style="display:none"></canvas>
-    <div class="qr-frame"></div>
-    <div id="qrScanHint">Vise le QR code...</div>
-    <div id="qrScanTools">
-      <button id="qrTorch" title="Lampe">🔦</button>
-      <input type="range" id="qrZoom" min="1" max="5" step="0.1" value="1" style="display:none">
-      <button id="qrFocus" title="Refaire la mise au point">🎯</button>
-    </div>
-    <button id="qrScanCancel">Annuler</button>
-  </div>
 
   <div id="qrLock" style="display:none">
     <div class="qrlock-inner">
@@ -51,38 +39,11 @@
       <div class="qrlock-title" id="qrLockTitle">Habitrain</div>
       <div class="qrlock-greet" id="qrLockGreet">Foxy t'attend</div>
 
-      <button id="qrUnlockBtn">🔓 Scanner mon bracelet</button>
-      <div class="qrlock-hint" id="qrLockHint">Approche ton tag NFC ou scanne ton QR</div>
+      <div class="qrlock-hint" id="qrLockHint">📶 Approche ton bracelet</div>
       <div class="lock-ver" id="qrLockVer">v—</div>
     </div>
   </div>
 
-  <div id="qrSheet">
-    <div class="qrsheet-bar">
-      <button id="qrSheetClose">✕ Fermer</button>
-      <span class="qrsheet-hint">Imprime à 100 %, puis découpe et plastifie chaque étiquette.</span>
-      <label class="qrsheet-hint" style="display:flex;align-items:center;gap:6px">Page
-        <select id="qrSheetFmt">
-          <option value="a4" selected>A4</option>
-          <option value="10x15">10 × 15 cm</option>
-        </select>
-      </label>
-      <label class="qrsheet-hint" style="display:flex;align-items:center;gap:6px">Taille
-        <select id="qrSheetMm">
-          <option value="10">10 mm</option>
-          <option value="11">11 mm</option>
-          <option value="12">12 mm</option>
-          <option value="15">15 mm</option>
-          <option value="20" selected>20 mm</option>
-          <option value="30">30 mm</option>
-        </select>
-      </label>
-      <span id="qrSheetFit" class="qrsheet-hint"></span>
-      <button id="qrSheetDl">⬇️ Télécharger</button>
-      <button id="qrSheetPrint">🖨️ Imprimer</button>
-    </div>
-    <div id="qrSheetBody" class="qrsheet-body"></div>
-  </div>
 
   <div id="onboard">
     <div class="ob-inner">
@@ -115,7 +76,6 @@
       <div class="facade-or"><span>ou</span></div>
 
       <div class="facade-alt">
-        <button id="facadeQr">📷 QR code</button>
         <button id="facadeNfc">📶 Tag NFC</button>
       </div>
 
@@ -447,7 +407,7 @@
     <div id="settingsNav" style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px">
       <button class="settings-toggle-btn set-nav" data-target="secNotif">🔔 Notifications &amp; rythme</button>
       <button class="settings-toggle-btn set-nav" data-target="wardrobeCard">👕 Garde-robe &amp; stock</button>
-      <button class="settings-toggle-btn set-nav" data-target="qrCard">📶 Tags NFC, QR &amp; bracelet</button>
+      <button class="settings-toggle-btn set-nav" data-target="qrCard">📶 Tags NFC &amp; bracelet</button>
       <button class="settings-toggle-btn set-nav" data-target="sensorCard">📡 Capteur de couche</button>
       <button class="settings-toggle-btn set-nav" data-target="tenueSensorCard">🔒 Capteur de tenue</button>
       <button class="settings-toggle-btn set-nav" data-target="lockCard">🔐 Serrures</button>
@@ -523,10 +483,8 @@
     <div id="wardrobeCats"></div>
 
     <div class="set-cat" style="margin-top:16px;padding-top:12px;border-top:2px solid var(--line)">
-      <h4>🏷️ QR des tenues</h4>
-      <div class="sub">Un QR par vêtement : colle-le à l'intérieur (col ou ceinture) et scanne-le en t'habillant. Foxy vérifie que tu portes bien la tenue tirée.</div>
-      <button class="settings-toggle-btn" id="outfitQrGen" style="width:100%;margin-top:8px">🏷️ Générer les QR de mes tenues</button>
-      <div id="outfitQrList" style="display:flex;flex-wrap:wrap;gap:14px;margin-top:12px"></div>
+      <h4>🏷️ Tags des tenues</h4>
+      <div class="sub">Un tag NFC par vêtement, glissé ou cousu dans le col. Tu l'approches en t'habillant, et Foxy vérifie que c'est bien la tenue tirée. La programmation se fait dans <b>Tags NFC &amp; bracelet</b>.</div>
     </div>
 
     <div class="set-cat" style="margin-top:16px;padding-top:12px;border-top:2px solid var(--line)">
@@ -630,8 +588,8 @@
   </div>
 
   <div class="card" id="qrCard" style="display:none">
-    <h2>📶 Tags, QR &amp; bracelet</h2>
-    <div class="sub">Le tag est la voie normale : les fenêtres l'écoutent déjà. Le QR reste en secours, derrière un bouton.</div>
+    <h2>📶 Tags NFC &amp; bracelet</h2>
+    <div class="sub">Tout passe par les tags : les fenêtres les écoutent d'elles-mêmes, tu n'as rien à ouvrir.</div>
 
     <div class="set-row">
       <div class="info"><div class="n">Déverrouiller par bracelet</div><div class="d">À l'ouverture, l'appli attend ton tag. Secours : 3 tapes sur le titre.</div></div>
@@ -650,19 +608,11 @@
       <div class="set-note" id="nfcWriteResult"></div>
     </div>
 
-    <button class="tiroir-t" data-tiroir="qrSecoursBloc">📷 QR de secours<span class="fl">▾</span></button>
-    <div class="bloc tiroir" id="qrSecoursBloc" style="display:none">
-      <div class="sub">À imprimer et garder : ils dépannent quand un tag est perdu, abîmé, ou le téléphone sans NFC.</div>
-      <button class="settings-toggle-btn" id="qrPrintSheet">🖨️ Feuille complète à imprimer</button>
-      <button class="settings-toggle-btn" id="qrClothesGen" style="margin-top:8px">👕 QR de mes tenues</button>
-      <div id="qrClothesList" style="margin-top:10px"></div>
-      <div class="set-cat" style="margin-top:10px"><h4>Actions à valider par lecture</h4>
-        <div id="qrActions"></div>
-      </div>
-      <div class="set-cat"><h4>Mes codes, un par un</h4>
-        <div id="qrGenList"></div>
-      </div>
-      <div class="set-note">🔒 Tes codes sont uniques à ton installation. Garde une capture de secours.</div>
+    <button class="tiroir-t" data-tiroir="qrPreuvesBloc">✅ Ce qui demande une preuve<span class="fl">▾</span></button>
+    <div class="bloc tiroir" id="qrPreuvesBloc" style="display:none">
+      <div class="sub">Les actions cochées ne se valident qu'en approchant le bon tag.</div>
+      <div id="qrActions"></div>
+      <div class="set-note">🔒 Tes tags sont uniques à ton installation : personne ne peut les reproduire.</div>
     </div>
 
     <button class="tiroir-t" data-tiroir="qrResetBloc">♻️ Repartir de zéro<span class="fl">▾</span></button>
@@ -674,61 +624,38 @@
 
     <button class="tiroir-t" data-tiroir="qrAideBloc">📖 Aide et règles<span class="fl">▾</span></button>
     <div class="bloc tiroir" id="qrAideBloc" style="display:none">
-<div id="qrGuide" style="margin-top:12px;font-size:13px;line-height:1.6;color:var(--ink)">
+<div style="margin-top:12px;font-size:13px;line-height:1.6;color:var(--ink)">
 
-        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:6px 0 4px">1. Le principe</div>
-        Scanner un QR à un endroit précis <b>prouve physiquement</b> que tu as fait l'action (te lever, aller au tapis de change, etc.). Au lieu de valider depuis ton canapé, tu dois te déplacer et scanner. Ça ancre le programme dans le réel.
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:6px 0 4px">Le principe</div>
+        Approcher un tag posé à un endroit précis <b>prouve physiquement</b> que tu as fait le geste : te lever, aller au tapis, ouvrir le frigo. Au lieu de valider depuis ton canapé, tu dois t'y rendre. C'est ce qui ancre le programme dans le réel.
 
-        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">2. Choisir les actions à scanner</div>
-        Dans <b>« Actions à valider par scan »</b> ci-dessus, coche celles qui demanderont une preuve (changes piliers, tous les changes, biberons, coucher). En mode intensif, le « valider sans preuve » disparaît.
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">Le matériel</div>
+        Des tags <b>NTAG213 ou NTAG215</b> (quelques euros le lot) et un <b>bracelet NFC</b>. Pour les tenues, des tags souples à glisser ou coudre dans le col.
 
-        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">3. Générer et imprimer tes QR</div>
-        Dans <b>« Générer mes QR codes »</b>, chaque action et le bracelet ont leur QR unique. Fais une <b>capture d'écran</b>, puis :
-        • Imprime-les (ou affiche-les sur un vieux téléphone/tablette).<br>
-        • <b>Colle chaque QR à l'endroit logique</b> : celui du change sur le tapis à langer, celui du biberon près du frigo, celui du coucher sur la porte de la chambre.<br>
-        • Plastifie-les ou mets-les sous adhésif transparent : ils s'abîment sinon.
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">Les programmer</div>
+        Dans <b>Mes tags NFC</b>, choisis l'élément, puis approche le tag du dos du téléphone. <b>Un élément = un seul tag, un tag = un seul élément</b> : Foxy prévient avant d'écraser un tag actif, et refuse qu'un même tag serve deux fois.
 
-        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">4. Valider une action</div>
-        Quand une action cochée arrive, Foxy propose <b>« 📷 Scanner »</b>. Tu vas au bon endroit, tu vises le QR, c'est validé. Le mauvais QR est refusé.
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">Les poser</div>
+        • ⌚ <b>bracelet</b> — à ton poignet, en permanence : il prouve chacun de tes changes<br>
+        • 🥛 <b>biberon</b> — sur le biberon ou près du frigo<br>
+        • 🌙 <b>coucher</b> — sur la porte de ta chambre<br>
+        • 🍭 <b>tétine</b> — sur sa protection : contrôles éclair, vingt secondes au compteur<br>
+        • 👕 <b>tenues</b> — dans le col ou à la ceinture
 
-        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">5. Déverrouillage par bracelet (option)</div>
-        Active <b>« Déverrouiller par QR »</b> : à l'ouverture, l'appli reste sur un écran neutre jusqu'à ce que tu scannes le QR de ton bracelet. <b>Secours indispensable</b> : 3 tapes rapides sur le titre débloquent si tu perds le bracelet ou si la caméra flanche. <b>Garde toujours une capture de tes QR + un export de sauvegarde</b> pour ne jamais rester bloqué dehors.
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">Valider</div>
+        Quand une preuve est demandée, la fenêtre <b>écoute déjà</b> : tu approches, c'est validé. Rien à ouvrir, rien à viser. Le mauvais tag est refusé. En mode intensif, « valider sans preuve » disparaît.
 
-        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">6. Les tags NFC (hybride)</div>
-        Le tag est devenu la voie normale : quand une preuve est demandée, la fenêtre <b>écoute déjà</b> — tu approches ton poignet ou l'étiquette, et c'est validé. Le QR reste derrière un bouton, en secours (tag perdu, téléphone sans NFC).<br>
-        • Achète des tags <b>NTAG213 ou NTAG215</b> (lot de quelques euros) et un <b>bracelet NFC</b>.<br>
-        • Dans la section <b>Tags NFC</b> ci-dessus, clique sur ce que tu veux écrire, puis approche le tag du dos du téléphone.<br>
-        • <b>Un élément = un seul tag, un tag = un seul élément.</b> Si l'élément a déjà un tag actif, je te préviens avant d'en écrire un nouveau (l'ancien ne vaudra plus rien). Et si le tag présenté sert déjà ailleurs, je refuse — sauf si tu choisis de le transférer, et l'autre élément se retrouve alors sans tag.<br>
-        • Un tag perdu ou abîmé : « <b>Oublier ce tag</b> » sous la ligne concernée libère la place pour un neuf.<br>
-        • Colle les tags aux mêmes endroits que tes QR (frigo, porte) — et pour tes <b>tenues</b>, glisse ou couds le tag dans le col : il se lit sans caméra, même dans le noir.<br>
-        • Ton <b>bracelet</b> est le tag le plus important : c'est lui qui prouve chacun de tes changes, et lui qui ouvre l'appli.<br>
-        • La <b>tétine</b> a son tag à part : il sert aux <b>contrôles éclair</b>. Foxy le demande sans prévenir, avec vingt secondes au compteur — seule une tétine clipsée à ta tenue peut y répondre.<br>
-        • <b>Les deux fonctionnent ensemble</b> : quand un scan est demandé, l'appli écoute le NFC ET la caméra. Le premier qui répond valide. Garde donc tes QR imprimés en secours.
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">Ouvrir l'appli</div>
+        Avec <b>Déverrouiller par bracelet</b>, l'appli reste sur un écran neutre jusqu'à ce que tu approches ton bracelet. Dans l'application Android, un tag approché <b>lance même Habitrain fermée</b>.<br>
+        <b>Secours indispensable</b> : 3 tapes rapides sur le titre débloquent toujours — bracelet perdu, abîmé, téléphone sans NFC. Garde un export de sauvegarde.
+
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">Repartir de zéro</div>
+        Si un ancien tag fonctionne encore, c'est que le code d'installation n'a pas changé. <b>Repartir de zéro</b> le remplace : tout ce qui a été écrit avant devient illisible, d'un coup. À faire après une perte, un vol, ou un doute.
 
         <div style="background:#FBF3E0;border:1px solid #ecd9a8;border-radius:10px;padding:10px 12px;margin-top:14px;font-size:12px;font-weight:700;color:#8a6a30">
-          ⚠️ Compatibilité : le scan caméra fonctionne sur <b>Android / Chrome</b>. Pas sur iPhone (Safari ne l'autorise pas en PWA).
+          ⚠️ L'appli ne peut pas vérifier qu'un tag est réellement sur toi — seulement que tu peux l'approcher. Le port réel reste ton engagement. Les délais courts et les contrôles imprévus sont là pour rendre la triche pénible, pas impossible.
         </div>
-      </div>
-<div id="qrRules" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line);font-size:13px;line-height:1.6;color:var(--ink)">
-        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:6px 0 4px">📡 Le capteur de couche</div>
-        • Il enregistre ton état en autonomie, même appli fermée.<br>
-        • <b>Règle</b> : synchronise-le au moins à chaque ouverture (menu Capteur → Connecter). Le statut devient alors automatique.<br>
-        • Foxy commente ce qu'il a enregistré à la synchro.
-        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">📷 Les QR de validation</div>
-        • Certaines actions (que tu choisis) exigent un scan physique comme preuve.<br>
-        • <b>Règle</b> : les QR sont collés aux bons endroits (tapis de change, frigo, porte). Pour valider, tu dois t'y rendre et scanner.<br>
-        • En mode intensif, la validation « sans preuve » disparaît.
-        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:#5a4326;margin:14px 0 4px">🔒 Le bracelet obligatoire</div>
-        Quand l'option <b>« Bracelet obligatoire »</b> est activée :<br>
-        • Tu <b>dois porter ton bracelet</b> en permanence pendant le programme.<br>
-        • L'appli vérifie sa présence <b>à chaque ouverture</b> ET lors de <b>contrôles surprises</b> (moments aléatoires).<br>
-        • À chaque vérif, l'appli se <b>verrouille</b> : tu dois scanner ton bracelet pour continuer. Sans scan, elle reste bloquée.<br>
-        • <b>Secours anti-blocage</b> : 3 tapes rapides sur le titre de l'écran de verrouillage débloquent toujours (bracelet perdu, abîmé, caméra en panne). Garde une capture de tes QR + un export de sauvegarde.
-        <div style="background:#FBF3E0;border:1px solid #ecd9a8;border-radius:10px;padding:10px 12px;margin-top:14px;font-size:12px;font-weight:700;color:#8a6a30">
-          ⚠️ L'appli ne peut pas vérifier que le bracelet est à ton poignet — seulement que tu peux le scanner. Le port réel reste ton engagement.
-        </div>
-      </div>
-    </div>
+          </div>
   </div>
 
   <div class="card" id="saveCard" style="display:none">
@@ -862,8 +789,6 @@
   </div>
 </div>
 
-<script src="jsQR.js"></script>
-<script src="qrcode-gen.js"></script>
 <script src="nfc.js"></script>
 <script src="qr.js"></script>
 <script src="sensor.js"></script>
@@ -873,7 +798,6 @@
 <script src="missions.js"></script>
 <script src="badges.js"></script>
 <script src="tips.js"></script>
-<script src="outfit-scan.js"></script>
 <script src="app.js"></script>
 <!-- pont natif : inerte dans un navigateur, actif dans l'application Android -->
 <script src="native.js"></script>

@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '22.9';
+  const APP_VERSION = '23.0';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -844,17 +844,17 @@
      PREUVES PAR SCAN — strictes et nommées
      Une action qui a un code associé ne se valide QUE par ce code.
      Foxy dit lequel scanner et où il se trouve, une étape à la fois.
-     Le QR et le tag NFC sont équivalents : le scanner écoute les deux.
+     Un tag approché, et c'est prouvé : il n'y a plus d'autre voie.
      ============================================================ */
   /* Le change se prouve par TON BRACELET, et rien d'autre. C'est le code que
      tu portes en permanence : une seule preuve, toujours à portée, au poignet.
      L'ancien code du tapis reste accepté pour ne pas invalider ce qui est déjà
      imprimé et collé, mais ce n'est plus lui qu'on te demande. */
   const PREUVE_BRACELET = {
-    nom:'ton bracelet', ou:'À ton poignet — QR ou tag NFC', petit:true,
+    nom:'ton bracelet', ou:'À ton poignet', petit:true,
     accepte: k => k === 'unlock' || k === 'change_pilier' || k === 'change_tous'
   };
-  const PREUVE_TAPIS = { nom:'le QR de ton tapis à langer', ou:'Sur ton tapis à langer',
+  const PREUVE_TAPIS = { nom:'le tag de ton tapis à langer', ou:'Sur ton tapis à langer',
                          accepte: k => k === 'change_pilier' || k === 'change_tous' || k === 'unlock' };
   /* Pas de bracelet dans ton trousseau ? On retombe sur le code du tapis : le
      cadre ne se relâche pas parce qu'un accessoire manque. */
@@ -875,9 +875,9 @@
   const PREUVE_DEF = {
     get change_pilier() { return preuveChange(); },
     get change_tous()   { return preuveChange(); },
-    biberon:       { nom:'le QR de ton biberon',        ou:'Près du frigo ou du plan de travail',
+    biberon:       { nom:'le tag de ton biberon',       ou:'Près du frigo ou du plan de travail',
                      accepte: k => k === 'biberon' },
-    coucher:       { nom:'le QR du coucher',            ou:'Sur la porte de ta chambre',
+    coucher:       { nom:'le tag du coucher',           ou:'Sur la porte de ta chambre',
                      accepte: k => k === 'coucher' },
     tetine:        { nom:'le tag de ta tétine',         ou:'Sur la protection de ta tétine', petit:true,
                      accepte: k => k === 'tetine' },
@@ -977,7 +977,6 @@
         let rendu = false;
         const fin = (v) => { if (rendu) return; rendu = true; try { stop(); } catch(e) {} foxyPopHide(); res(v); };
         const boutons = [];
-        boutons.push({ soft:true, label:'📷 Passer par le QR', onClick: () => fin('qr') });
         if (n >= 2) boutons.push({ soft:true, label:'✓ Valider sans preuve', onClick: () => fin('sans') });
         else boutons.push({ soft:true, label:'Je ne peux pas', onClick: () => fin('sans') });
         foxyPopShow('📶 ' + entete + lieu, n === 1 ? 'curious' : 'pensive', boutons);
@@ -1005,13 +1004,7 @@
         continue;
       }
 
-      // secours : la caméra et le QR imprimé
-      const k = await scannerUnCode({ petit: !!def.petit });
-      if (!k) { entete = etape + 'lecture annulée. On réessaie : ' + def.nom + '.'; continue; }
-      const r = await verifierPreuve(k, kind, def, etape, ctx);
-      if (r === 'retry') { entete = etape + 'approche ' + def.nom + '.'; continue; }
-      if (r === 'mauvais') { entete = etape + 'ce n\'est pas le bon code. Je veux ' + def.nom + '.'; continue; }
-      return r;
+      entete = etape + 'approche ' + def.nom + '.';
     }
   }
 
@@ -1191,12 +1184,10 @@
         foxyPopShow('📶 ' + bro('Ton biberon ! Approche ton tag pour qu\'on démarre, et installe-toi confortablement.\n\nJe vise ' + mmss(cible) + ' — on n\'est pas pressés.',
                                 'Biberon. Approche ton tag, on démarre. Objectif : ' + mmss(cible) + '.')
           + '\n📍 ' + def.ou, 'bottle',
-          [ { soft:true, label:'📷 Passer par le QR', onClick: () => fin('qr') },
-            { soft:true, label:'Finalement non', onClick: () => fin(null) } ]);
+          [ { soft:true, label:'Finalement non', onClick: () => fin(null) } ]);
         var stop = ecouterTag(k => fin({ tag:k }));
       });
-      let code = d && d.tag ? d.tag : null;
-      if (d === 'qr') code = await scannerUnCode({});
+      const code = d && d.tag ? d.tag : null;
       if (!code) {
         if (d !== null) await imSay(bro('On laisse tomber pour cette fois. Reviens quand tu es prêt. 🦊', 'Abandonné.'), 700, 'calm');
         return false;
@@ -1236,14 +1227,7 @@
                     'Écarte ton tag. Réécoute dans ' + (BIB_PLANCHER - sec) + ' s.'))
           + '\n\nIdéal : ' + mmss(cible);
       };
-      const boutons = [
-        { soft:true, label:'📷 Terminer avec le QR', onClick: async () => {
-            if (!pret()) return;
-            const k = await scannerUnCode({});
-            if (k && def.accepte(k)) fin({ tag:k });
-          } },
-        { soft:true, label:'Annuler ce biberon', onClick: () => fin('annule') }
-      ];
+      const boutons = [{ soft:true, label:'Annuler ce biberon', onClick: () => fin('annule') }];
       foxyPopShow(texte(), 'bottle', boutons);
       var stop = ecouterTag(k => { if (def.accepte(k) && pret()) fin({ tag:k }); },
                             { apres: BIB_PLANCHER * 1000 });
@@ -2611,7 +2595,7 @@
     }}),
     habille: () => ({ label:'👕 Je viens de m\'habiller', onClick: async () => {
       imAddMe('Je viens de m\'habiller.');
-      await imSay(broOn() ? 'Montre-moi. Scanne l\'étiquette de ta tenue.' : 'Fais voir ! Scanne le QR de ta tenue. 🦊', 800, 'curious');
+      await imSay(broOn() ? 'Montre-moi. Approche le tag de ta tenue.' : 'Fais voir ! Approche le tag de ta tenue. 🦊', 800, 'curious');
       try { await scanTenue(); } catch(e) {}
     }}),
     biberon: () => ({ label:'🍼 Mon biberon', onClick: async () => {
@@ -5927,7 +5911,7 @@
       mode:'auto', b:['b_check'] },
 
     { id:'r_preuve', ic:'📷', n:'Chaque action se prouve',
-      t:'Les changes, la tenue, le biberon et le coucher se valident au scan du QR ou du tag correspondant.',
+      t:'Les changes, la tenue, le biberon et le coucher se valident en approchant le tag correspondant.',
       mode:'auto', b:['b_preuve','b_incoherence','b_capteur_muet'] },
 
     { id:'r_tenue', ic:'👕', n:'Tenue ABDL en continu',
@@ -6307,7 +6291,7 @@
       fmt: v => v.toFixed(1) + ' par jour',
       mieux: (a,b) => 'Tes entorses sont tombées de ' + a.toFixed(1) + ' à ' + b.toFixed(1) + ' par jour. Le cadre te coûte moins d\'effort qu\'avant.',
       pire: (a,b) => 'Tes entorses remontent : ' + b.toFixed(1) + ' par jour contre ' + a.toFixed(1) + '.',
-      cle: 'Quand les entorses reviennent en bloc, ce n\'est presque jamais la volonté qui lâche — c\'est le matériel ou l\'organisation. Vérifie ton stock et l\'emplacement de tes QR avant de te faire des reproches.' },
+      cle: 'Quand les entorses reviennent en bloc, ce n\'est presque jamais la volonté qui lâche — c\'est le matériel ou l\'organisation. Vérifie ton stock et l\'emplacement de tes tags avant de te faire des reproches.' },
 
     { id:'tauxPreuve', sens:1, minEcart:0.2, unite:'%',
       fmt: v => Math.round(v*100) + ' %',
@@ -10584,7 +10568,7 @@
         braceletActif = !!(prefs.braceletRequired || prefs.unlock);
       }
     } catch(e) {}
-    if (braceletActif) recap += '\n🔒 Ton bracelet (QR/NFC) : à remettre au poignet — obligatoire.';
+    if (braceletActif) recap += '\n🔒 Ton bracelet : à remettre au poignet — obligatoire.';
     await imSay(recap, 1100, 'explain');
 
     // quels capteurs sont en service ? on ne fait vérifier que ce que tu as
@@ -11433,14 +11417,7 @@
     const inp = document.getElementById('facadePass');
     if (btn) btn.addEventListener('click', tryFacadeLogin);
     if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') tryFacadeLogin(); });
-    const q = document.getElementById('facadeQr');
-    if (q) q.addEventListener('click', () => {
-      if (!window.HabitrainQR) { facadeError('Scan indisponible sur cet appareil.'); return; }
-      window.HabitrainQR.startScan('unlock', async (kind) => {
-        if (kind === 'unlock') await exitPause();
-        else facadeError('QR non reconnu.');
-      });
-    });
+
     const n = document.getElementById('facadeNfc');
     if (n) n.addEventListener('click', async () => {
       const NFC = window.HabitrainNFC;
@@ -11508,62 +11485,16 @@
     card.style.display = show ? '' : 'none';
     if (show) { await renderQrConfig(); await renderNfcWriter(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
   });
-  // ===== QR des vêtements =====
-  (function(){
-    const b = document.getElementById('qrClothesGen');
-    if (b) b.addEventListener('click', async () => { await renderClothesQr(); });
-  })();
-
-  async function renderClothesQr() {
-    const WB = window.HabitrainWardrobe, QR = window.HabitrainQR;
-    const box = document.getElementById('qrClothesList');
-    if (!box || !WB || !QR) return;
-    box.innerHTML = '<div class="sub">Génération…</div>';
-    const w = await WB.getWardrobe();
-    box.innerHTML = '';
-    // on génère pour les tenues portées (nuit, jour, sieste) — pas les accessoires
-    for (const cat of ['nuit','jour','sieste']) {
-      const items = w[cat] || [];
-      if (!items.length) continue;
-      const titre = document.createElement('div');
-      titre.style.cssText = 'font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;margin:12px 0 6px';
-      titre.textContent = cat === 'nuit' ? '🌙 Nuit' : (cat === 'jour' ? '☀️ Jour' : '😴 Sieste');
-      box.appendChild(titre);
-      // on évite les doublons (une tenue peut être dans plusieurs catégories)
-      const vus = new Set();
-      for (const nom of items) {
-        const id = WB.itemId(cat, nom);
-        if (vus.has(nom)) continue;
-        vus.add(nom);
-        const wrap = document.createElement('div');
-        wrap.style.cssText = 'display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line)';
-        const cv = document.createElement('canvas');
-        const txt = await QR.payloadFor(id, true);
-        QR.drawQR(cv, txt, 90, 'M');
-        const lbl = document.createElement('div');
-        lbl.style.cssText = 'flex:1;font-size:13px;font-weight:700;color:var(--ink)';
-        lbl.textContent = nom;
-        wrap.appendChild(cv); wrap.appendChild(lbl);
-        box.appendChild(wrap);
-      }
-    }
-    const note = document.createElement('div');
-    note.className = 'set-note';
-    note.textContent = 'Fais une capture, imprime et plastifie. Colle chaque QR à l\'intérieur du vêtement correspondant.';
-    box.appendChild(note);
-    try { await window.storage.set('ob:qrdone', JSON.stringify(true)); } catch(e) {}
-  }
-
-  // Scanner la tenue qu'on vient de mettre
+  // Lire la tenue qu'on vient de mettre : tag cousu ou glissé dans le col
   async function scanTenue() {
     const QR = window.HabitrainQR, WB = window.HabitrainWardrobe;
     if (!QR || !WB) return;
-    // une étiquette cousue dans un col est aussi petite qu'un bracelet
-    QR.startScan(null, async (kind) => {
+    await (async () => {
+      const kind = await attendreTag({ titre:'Approche le tag de ta tenue — il est dans le col ou à la ceinture.', expr:'curious' });
       if (!kind) return;
       const item = await WB.findByItemId(kind);
       if (!item) {
-        if (voiceMode === 'foxy') { try { await imSay('Ce QR n\'est pas une de tes tenues. Réessaie ?', 800, 'puzzled'); } catch(e) {} }
+        if (voiceMode === 'foxy') { try { await imSay('Ce tag n\'est pas une de tes tenues. Réessaie ?', 800, 'puzzled'); } catch(e) {} }
         return;
       }
       await WB.logWorn(todayStr(), item.cat, item.name);
@@ -11590,7 +11521,7 @@
         } catch(e) {}
       }
       try { await refresh(); } catch(e) {}
-    }, { petit: true });
+    })();
   }
 
   /* ------------------------------------------------------------
@@ -11642,14 +11573,15 @@
     const QR = window.HabitrainQR, WB = window.HabitrainWardrobe;
     if (!QR || !WB) return;
     await imSay(broOn() ? 'Montre.' : 'Fais voir ! 🦊', 600, 'curious');
-    return new Promise((resolve) => {
-      QR.startScan(null, async (kind) => {
-        if (!kind) { resolve(); return; }
+    return (async () => {
+      {
+        const kind = await attendreTag({ titre:'Approche le tag de ta tenue.', expr:'curious' });
+        if (!kind) { return; }
         const it = await WB.findByItemId(kind);
         if (!it) {
-          await imSay('Ce QR n\'est pas une de tes tenues. Réessaie ?', 800, 'puzzled');
+          await imSay('Ce tag n\'est pas une de tes tenues. Réessaie ?', 800, 'puzzled');
           await corrigerTenue({ name:'?' }, att, essai);
-          resolve(); return;
+          return;
         }
         await WB.logWorn(todayStr(), it.cat, it.name);
         // on rejuge sur l'heure courante : la correction a pu franchir une bascule
@@ -11668,9 +11600,8 @@
           await corrigerTenue(it, att2, essai);
         }
         try { await refresh(); } catch(e) {}
-        resolve();
-      }, { petit: true });
-    });
+      }
+    })();
   }
 
   // enregistre une entorse du jour
@@ -11696,264 +11627,6 @@
     }
   }
 
-  // ===== Feuille complète de QR à imprimer =====
-  const QR_PLACEMENT = {
-    change_pilier: 'Secours — le change se prouve au bracelet',
-    change_tous:   'Secours — le change se prouve au bracelet',
-    biberon:       'Près du frigo ou du plan de travail',
-    coucher:       'Sur la porte de ta chambre',
-    unlock:        'Sur ton bracelet — à garder au poignet',
-    tetine:        'Sur la protection de ta tétine'
-  };
-
-  (function(){
-    const b = document.getElementById('qrPrintSheet');
-    if (b) b.addEventListener('click', async () => { await buildQrSheet(); });
-    const c = document.getElementById('qrSheetClose');
-    if (c) c.addEventListener('click', () => document.body.classList.remove('qrsheet-on'));
-    const p = document.getElementById('qrSheetPrint');
-    if (p) p.addEventListener('click', () => window.print());
-    const d = document.getElementById('qrSheetDl');
-    if (d) d.addEventListener('click', () => downloadQrSheet());
-    const m = document.getElementById('qrSheetMm');
-    if (m) m.addEventListener('change', async () => { await buildQrSheet(); });
-    const f = document.getElementById('qrSheetFmt');
-    if (f) f.addEventListener('change', async () => {
-      // le 10×15 n'a de sens qu'avec des codes compacts : on s'aligne d'office
-      // 11 mm : le plus grand code qui garde 4 colonnes et 3,6 cm de libre en 10×15
-      if (f.value === '10x15' && m && parseFloat(m.value) > 11) m.value = '11';
-      await buildQrSheet();
-    });
-  })();
-
-  async function buildQrSheet() {
-    const QR = window.HabitrainQR, WB = window.HabitrainWardrobe;
-    const box = document.getElementById('qrSheetBody');
-    if (!box || !QR) return;
-    // L'impression masque tous les enfants directs de <body> sauf la feuille.
-    // Si la feuille est imbriquée dans un autre bloc, c'est ce bloc qui disparaît
-    // et la page sort vide : on la remonte d'abord au niveau du body.
-    const sheet = document.getElementById('qrSheet');
-    if (sheet && sheet.parentElement !== document.body) document.body.appendChild(sheet);
-    document.body.classList.add('qrsheet-on');
-    box.innerHTML = '<div class="qrsheet-sub">Génération…</div>';
-    window.scrollTo(0, 0);
-
-    // taille d'impression choisie dans la barre (en millimètres)
-    const selMm = document.getElementById('qrSheetMm');
-    const mmChoisi = selMm ? parseFloat(selMm.value) || 20 : 20;
-
-    // ---- Échelle des étiquettes, alignée sur la taille du QR ----
-    // Tout est exprimé en millimètres et dérivé de mmChoisi : à 10 mm de code,
-    // une légende en 12,5 px occuperait plus de place que le QR lui-même.
-    // Plancher de lisibilité à l'impression : ~1,8 mm de hauteur de caractère.
-    const fNom  = Math.max(1.5, mmChoisi * 0.16).toFixed(2);   // nom de l'étiquette
-    const fLieu = Math.max(1.25, mmChoisi * 0.125).toFixed(2); // emplacement
-    const pad   = Math.max(0.8, mmChoisi * 0.10).toFixed(2);   // marge intérieure
-    const colMin = Math.max(18, mmChoisi * 1.9).toFixed(0);    // largeur mini d'une colonne
-    // Police étroite : à hauteur égale elle occupe ~20 % de largeur en moins,
-    // ce qui compte plus que les millimètres sur une étiquette de 2 cm.
-    const ETROITE = "'Arial Narrow','Helvetica Neue Condensed','Liberation Sans Narrow',"
-                  + "'Roboto Condensed',system-ui,sans-serif";
-
-    // --- Format de page ---
-    // En 10×15, la place est comptée : on retire le titre décoratif, les intertitres
-    // et la note de bas de page, et on ne garde que les étiquettes.
-    const selFmt = document.getElementById('qrSheetFmt');
-    const photo = selFmt ? selFmt.value === '10x15' : false;
-    const margePage = photo ? 4 : 12;
-    const largeurUtile = photo ? (100 - margePage * 2) : 100;
-    const cssPage = photo
-      ? '@page{size:100mm 150mm;margin:' + margePage + 'mm}'
-        + 'body{padding:0}'
-        + '.qrsheet-title,.qrsheet-sub,.qrsheet-sec{display:none}'
-        + '.qrsheet-body{padding:0}'
-      : '@page{size:A4;margin:' + margePage + 'mm}';
-
-    const echelle =
-      '<style>' + cssPage +
-      '.qrsheet-grid{grid-template-columns:repeat(auto-fill,minmax(' + colMin + 'mm,1fr));gap:' + pad + 'mm;' +
-        'max-width:' + largeurUtile + 'mm}' +
-      '.qrsheet-card{padding:' + pad + 'mm}' +
-      '.qrsheet-card .n,.qrsheet-card .w{font-family:' + ETROITE + ';font-stretch:condensed;' +
-        'letter-spacing:-.01em;hyphens:auto;overflow-wrap:anywhere}' +
-      '.qrsheet-card .n{font-size:' + fNom + 'mm;line-height:1.05}' +
-      '.qrsheet-card .w{font-size:' + fLieu + 'mm;line-height:1.1;font-weight:600;' +
-        'margin-top:' + (pad/4).toFixed(2) + 'mm}' +
-      '.qrsheet-card canvas,.qrsheet-card img{margin-bottom:' + (pad/2).toFixed(2) + 'mm}' +
-      '</style>';
-
-    const frag = document.createElement('div');
-    const now = new Date();
-    frag.innerHTML = echelle +
-      '<div class="qrsheet-title">🦊 Habitrain — mes QR codes</div>' +
-      '<div class="qrsheet-sub">Généré le ' + now.toLocaleDateString('fr-FR') +
-      ' · Ces codes sont uniques à ton installation. Découpe chaque étiquette et plastifie-la.</div>';
-
-    // en 10×15, tout va dans une grille unique : trois grilles séparées
-    // laisseraient des trous de plusieurs centimètres entre les sections
-    let grilleUnique = null;
-    const ajouterSection = async (titre, items) => {
-      if (!items.length) return;
-      if (!photo) {
-        const h = document.createElement('div');
-        h.className = 'qrsheet-sec'; h.textContent = titre;
-        frag.appendChild(h);
-      }
-      let grid;
-      if (photo) {
-        if (!grilleUnique) {
-          grilleUnique = document.createElement('div');
-          grilleUnique.className = 'qrsheet-grid';
-          frag.appendChild(grilleUnique);
-        }
-        grid = grilleUnique;
-      } else {
-        grid = document.createElement('div');
-        grid.className = 'qrsheet-grid';
-      }
-      for (const it of items) {
-        const card = document.createElement('div');
-        card.className = 'qrsheet-card';
-        const cv = document.createElement('canvas');
-        // Format court partout : 21×21 modules au lieu de 29×29, soit des carrés
-        // ~40 % plus larges à taille de papier égale. La correction reste en M :
-        // avec un contenu aussi court elle ne coûte aucun module de plus.
-        const payload = await QR.payloadFor(it.id, true);
-        QR.drawQR(cv, payload, 400, 'M', mmChoisi);
-        card.appendChild(cv);
-        const n = document.createElement('div');
-        n.className = 'n'; n.textContent = it.nom;
-        card.appendChild(n);
-        if (it.ou) {
-          const w = document.createElement('div');
-          w.className = 'w'; w.textContent = '📍 ' + it.ou;
-          card.appendChild(w);
-        }
-        grid.appendChild(card);
-      }
-      if (!photo) frag.appendChild(grid);
-    };
-
-    // 1) Actions à valider
-    const actions = QR.QR_ACTIONS.map(a => ({
-      id: a.id, nom: a.label, ou: QR_PLACEMENT[a.id] || ''
-    }));
-    await ajouterSection('Actions à valider', actions);
-
-    // 2) Bracelet
-    await ajouterSection('Bracelet de déverrouillage', [
-      { id:'unlock', nom:'Bracelet', ou: QR_PLACEMENT.unlock }
-    ]);
-
-    // 3) Tenues
-    if (WB) {
-      try {
-        const w = await WB.getWardrobe();
-        const vus = new Set();
-        const tenues = [];
-        for (const cat of ['nuit','jour','sieste']) {
-          for (const nom of (w[cat] || [])) {
-            if (vus.has(nom)) continue;
-            vus.add(nom);
-            // en 10×15 l'emplacement est le même pour les 11 tenues : deux lignes
-            // répétées onze fois, autant de place perdue. On le dit une fois en A4,
-            // en abrégé sur la page photo.
-            tenues.push({ id: WB.itemId(cat, nom), nom,
-                          ou: photo ? 'Col ou ceinture' : 'À l\'intérieur du col ou de la ceinture' });
-          }
-        }
-        await ajouterSection('Mes tenues (' + tenues.length + ')', tenues);
-      } catch(e) {}
-    }
-
-    const pied = document.createElement('div');
-    pied.className = 'qrsheet-sub';
-    pied.style.marginTop = '18px';
-    pied.innerHTML = '⚠️ Garde une copie de cette feuille en lieu sûr : si tu actives le bracelet obligatoire, c\'est ta porte de sortie. '
-      + 'Secours anti-blocage : 3 tapes rapides sur le logo de l\'écran de connexion.'
-      + '<br><br>📐 <b>Impression.</b> Règle la taille dans la barre, puis imprime <b>à 100 %, sans « ajuster à la page »</b> — '
-      + 'c\'est la seule façon d\'obtenir les millimètres annoncés. La marge blanche autour de chaque code en fait partie : '
-      + 'ne la rogne pas à la découpe. Tes anciennes impressions restent valables, l\'appli lit les deux formats.';
-    frag.appendChild(pied);
-
-    box.innerHTML = '';
-    box.appendChild(frag);
-
-    // --- Témoin : est-ce que ça tient sur la page choisie ? ---
-    // On mesure ce qui vient d'être rendu plutôt que de l'estimer.
-    try {
-      const fit = document.getElementById('qrSheetFit');
-      if (fit) {
-        const hMm = box.getBoundingClientRect().height / 96 * 25.4;
-        const budget = photo ? (150 - margePage * 2) : (297 - margePage * 2);
-        const reste = budget - hMm;
-        const nomPage = photo ? '10 × 15' : 'A4';
-        if (reste >= 5) {
-          fit.style.color = '#2e7d4f';
-          fit.textContent = '✓ tient sur ' + nomPage + ' (' + Math.round(reste) + ' mm de libre)';
-        } else if (reste >= 0) {
-          fit.style.color = '#b8860b';
-          fit.textContent = '⚠︎ tient de justesse (' + reste.toFixed(1) + ' mm) — prends la taille en dessous';
-        } else {
-          fit.style.color = '#c0392b';
-          fit.textContent = '✗ déborde de ' + Math.abs(reste).toFixed(0) + ' mm sur ' + nomPage
-            + (photo ? ' — passe en 10 mm' : '');
-        }
-      }
-    } catch(e) {}
-
-    try { await window.storage.set('ob:qrdone', JSON.stringify(true)); } catch(e) {}
-  }
-
-  // Télécharge la feuille comme fichier HTML autonome (ouvrable et imprimable partout)
-  function downloadQrSheet() {
-    const box = document.getElementById('qrSheetBody');
-    if (!box) return;
-    // on remplace chaque canvas par une image PNG intégrée
-    const clone = box.cloneNode(true);
-    const srcCanvas = box.querySelectorAll('canvas');
-    const dstCanvas = clone.querySelectorAll('canvas');
-    for (let i = 0; i < dstCanvas.length; i++) {
-      try {
-        const src = srcCanvas[i];
-        const img = document.createElement('img');
-        img.src = src.toDataURL('image/png');
-        // on reprend la taille d'impression réelle du canvas (en mm) au lieu
-        // d'une largeur fixe : sinon le choix de taille ne sortait jamais du navigateur.
-        const l = src.style.width, h = src.style.height;
-        img.style.cssText = 'display:block;margin:0 auto 6px;image-rendering:pixelated;'
-          + (l ? ('width:' + l + ';height:' + (h || l)) : 'width:120px;height:120px');
-        dstCanvas[i].parentNode.replaceChild(img, dstCanvas[i]);
-      } catch(e) {}
-    }
-    const css = [
-      'body{font-family:system-ui,-apple-system,sans-serif;color:#111;margin:0;padding:16px;background:#fff}',
-      '.qrsheet-title{font-size:22px;font-weight:600;margin-bottom:4px;color:#4a3520}',
-      '.qrsheet-sub{font-size:12.5px;color:#666;margin-bottom:16px}',
-      '.qrsheet-sec{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;',
-      'color:#8a6a45;margin:18px 0 8px;border-bottom:1px solid #e2ddd4;padding-bottom:4px}',
-      '.qrsheet-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}',
-      '.qrsheet-card{border:1.5px dashed #b9b2a6;border-radius:10px;padding:10px 8px;text-align:center;',
-      'background:#fff;break-inside:avoid;page-break-inside:avoid}',
-      '.qrsheet-card .n{font-size:12.5px;font-weight:800;line-height:1.25;color:#111}',
-      '.qrsheet-card .w{font-size:11px;font-weight:600;color:#666;margin-top:3px;line-height:1.35}',
-      '@media print{body{padding:0}@page{size:A4;margin:12mm}}'
-    ].join('');
-    const html = '<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">' +
-      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-      '<title>Habitrain — mes QR codes</title><style>' + css + '</style></head><body>' +
-      clone.innerHTML + '</body></html>';
-    try {
-      const blob = new Blob([html], { type:'text/html' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'habitrain-qr-codes-' + new Date().toISOString().slice(0,10) + '.html';
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1500);
-    } catch(e) {}
-  }
 
   /* ============================================================
      CONTRÔLE ÉCLAIR DE LA TÉTINE
@@ -12499,27 +12172,27 @@
     });
   }
   // ouvre le scanner et rend le code lu (ou null si annulé)
-  /* Un scan en attente est publié ici : si un tag arrive par le natif pendant
-     ce temps, il vaut lecture, et la caméra se referme. */
+  /* Une lecture, c'est un tag approché — il n'y a plus d'autre voie. La
+     caméra et les QR ont disparu : tout ce qui compte tient au poignet, au
+     col ou sur un objet, et se lit sans rien ouvrir. */
   let scanEnAttente = null;
-  function scannerUnCode(opt) {
+  function attendreTag(opt) {
+    opt = opt || {};
     return new Promise(res => {
-      const QR = window.HabitrainQR;
-      if (!QR) return res(null);
-      let fini = false;
-      const ov = document.getElementById('qrScanOverlay');
-      const rendre = (k) => {
+      let fini = false, minuteur = null;
+      const fin = (k) => {
         if (fini) return; fini = true;
-        clearInterval(iv); scanEnAttente = null;
-        res(k);
+        if (minuteur) clearTimeout(minuteur);
+        try { stop(); } catch(e) {}
+        foxyPopHide(); res(k || null);
       };
-      const iv = setInterval(() => {
-        if (!fini && ov && ov.style.display === 'none') rendre(null);
-      }, 400);
-      scanEnAttente = (k) => { try { QR.stopScan(); } catch(e) {} rendre(k); };
-      QR.startScan(null, k => rendre(k), opt || {});
+      foxyPopShow('📶 ' + (opt.titre || 'Approche ton tag.'), opt.expr || 'curious',
+        [{ soft:true, label: opt.sortie || 'Annuler', onClick: () => fin(null) }]);
+      var stop = ecouterTag(k => fin(k), { apres: opt.apres || 0 });
+      if (opt.delai) minuteur = setTimeout(() => fin(null), opt.delai);
     });
   }
+  function scannerUnCode(opt) { return attendreTag(opt || {}); }
 
   /* ---------- Les chapitres ---------- */
   const SETUP_CHAP = {};
@@ -12977,32 +12650,24 @@
 
   SETUP_CHAP.etiquettes = async () => {
     const acc = await lireStock('profil:accessoires', null) || {};
-    await sDire('Les étiquettes. C\'est ce qui fait que je n\'ai pas à te croire sur parole : chaque geste se prouve par un code.<br><br>'
+    await sDire('Tes <b>tags</b>. C\'est ce qui fait que je n\'ai pas à te croire sur parole : chaque geste se prouve en approchant un tag.<br><br>'
       + (acc.bracelet
-          ? '• ⌚ ton <b>bracelet</b> — <b>chaque change</b>, c\'est lui<br>• 🍼 ton <b>tapis à langer</b> — en secours, si tu n\'as pas ton bracelet'
-          : '• 🍼 ton <b>tapis à langer</b> — chaque change')
-      + '<br>• 🥛 ton <b>biberon</b> — ou le frigo<br>• 🌙 la <b>porte de ta chambre</b> — le coucher<br>• 👕 chacune de tes <b>tenues</b> — au col ou à la ceinture', 'explain', 'On les fabrique');
-    const g = await sChoix('Je te prépare la feuille : tous tes codes, prêts à imprimer (ou à télécharger). Tu la fermes quand c\'est fait, et je reviens.',
-      [ { k:'go', label:'🖨️ Ouvrir ma feuille de codes' }, { k:'deja', label:'Je les ai déjà imprimés', soft:true } ], 'curious');
-    if (g === 'go') {
-      document.body.classList.remove('onboarding');
-      try { await buildQrSheet(); } catch(e) {}
-      await new Promise(res => { const iv = setInterval(() => { if (!document.body.classList.contains('qrsheet-on')) { clearInterval(iv); res(); } }, 400); });
-      document.body.classList.add('onboarding');
-      try { await ecrireStock('ob:qrdone', true); } catch(e) {}
-    }
-    const colle = await sChoix('Maintenant, colle-les à leur place. Et ensuite, on vérifie : tu les scannes une par une, là où elles sont. Une étiquette qui ne se lit pas, c\'est un change que tu ne pourras pas prouver.',
-      [ { k:'go', label:'📷 Elles sont collées, on vérifie' }, { k:'plus_tard', label:'Pas encore collées', soft:true } ], 'teach');
+          ? '• ⌚ ton <b>bracelet</b> — <b>chaque change</b>, c\'est lui<br>'
+          : '• 🍼 ton <b>tapis à langer</b> — chaque change<br>')
+      + '• 🥛 ton <b>biberon</b> — ou le frigo<br>• 🌙 la <b>porte de ta chambre</b> — le coucher<br>• 👕 chacune de tes <b>tenues</b> — un tag glissé dans le col<br><br>'
+      + 'Des NTAG213 ou 215 font l\'affaire, quelques euros le lot.', 'explain', 'On les programme');
+    const colle = await sChoix('Programme-les dans <b>Paramètres → Tags NFC</b>, puis pose chacun à sa place. Ensuite on vérifie ensemble : tu les approches un par un, là où ils sont. Un tag qui ne se lit pas, c\'est un change que tu ne pourras pas prouver.',
+      [ { k:'go', label:'📶 Ils sont posés, on vérifie' }, { k:'plus_tard', label:'Pas encore', soft:true } ], 'teach');
     if (colle !== 'go') { await repondre('etiquettes_verif', false); await sDire('D\'accord. Reviens sur ce chapitre quand elles sont en place — je garde la place.', 'calm'); return; }
 
     const verifiees = Object.assign({}, rep('etiquettes_ok') || {});
     const FIXES = [
-      { k:'change_pilier', n:'le code du tapis à langer', accepte: x => x === 'change_pilier' || x === 'change_tous' },
-      { k:'biberon',       n:'le code du biberon',         accepte: x => x === 'biberon' },
-      { k:'coucher',       n:'le code de la porte',        accepte: x => x === 'coucher' }
+      { k:'biberon',       n:'le tag du biberon',          accepte: x => x === 'biberon' },
+      { k:'coucher',       n:'le tag de la porte',         accepte: x => x === 'coucher' }
     ];
     // le bracelet d'abord : c'est lui qui prouvera tes changes
-    if (acc.bracelet) FIXES.unshift({ k:'unlock', n:'le code de ton bracelet', accepte: x => x === 'unlock', petit:true });
+    if (acc.bracelet) FIXES.unshift({ k:'unlock', n:'le tag de ton bracelet', accepte: x => x === 'unlock' });
+    else FIXES.unshift({ k:'change_pilier', n:'le tag du tapis à langer', accepte: x => x === 'change_pilier' || x === 'change_tous' });
     // la tétine, si elle est du trousseau : c'est elle qu'on contrôlera au débotté
     if (await tetinePrevue()) FIXES.push({ k:'tetine', n:'le tag de ta tétine', accepte: x => x === 'tetine', petit:true });
     for (const f of FIXES) {
@@ -13010,24 +12675,19 @@
         // le tag est écouté pendant qu'on pose la question : tu approches, ça passe
         let stopTag = null;
         const a = await Promise.race([
-          sChoix('Approche le tag de <b>' + f.n + '</b>.', [ { k:'scan', label:'📷 Passer par le QR' }, { k:'passe', label:'Passer', soft:true } ], 'curious'),
+          sChoix('Approche <b>' + f.n + '</b> du téléphone.', [ { k:'passe', label:'Passer', soft:true } ], 'curious'),
           new Promise(r => { stopTag = ecouterTag(k => r({ tag:k })); })
         ]);
         if (stopTag) { try { stopTag(); } catch(e) {} }
         if (a === 'passe') break;
-        let k = (a && a.tag) ? a.tag : null;
-        if (!k) {
-          document.body.classList.remove('onboarding');
-          k = await scannerUnCode({ petit: !!f.petit });
-          document.body.classList.add('onboarding');
-        }
+        const k = (a && a.tag) ? a.tag : null;
         if (k && f.accepte(k)) {
           verifiees[f.k] = true; await repondre('etiquettes_ok', verifiees);
           if (f.k === 'unlock') { await activerBracelet(true); await sDire('✅ Lu. Ton bracelet est actif : c\'est lui qui prouvera tes changes, et c\'est lui qui ouvre l\'appli.', 'proud', 'Suivant'); }
           else await sDire('✅ Lu. Parfait.', 'proud', 'Suivant');
         }
         else if (k) await sDire('Ça, ce n\'est pas ' + f.n + '. Vérifie que le bon tag est au bon endroit.', 'concern', 'Je réessaie');
-        else await sDire('Rien lu. Approche le tag franchement du dos du téléphone — ou passe par le QR.', 'concern', 'Je réessaie');
+        else await sDire('Rien lu. Approche le tag franchement du dos du téléphone, et laisse-le une seconde.', 'concern', 'Je réessaie');
       }
     }
     // les tenues, une par une
@@ -15023,23 +14683,7 @@
         scheduleBraceletChecks();
       };
     }
-    // génération
-    const gl = document.getElementById('qrGenList'); gl.innerHTML = '';
-    const toGen = QR.QR_ACTIONS.concat([{ id:'unlock', label:'Bracelet de déverrouillage' }]);
-    for (const item of toGen) {
-      const wrap = document.createElement('div'); wrap.className = 'qrgen-item';
-      const cv = document.createElement('canvas');
-      const petit = (item.id === 'unlock');
-      const txt = await QR.payloadFor(item.id, true);
-      QR.drawQR(cv, txt, petit ? 170 : 140, 'M');
-      const lbl = document.createElement('div'); lbl.innerHTML = '<div class="n">'+item.label+'</div>';
-      wrap.appendChild(cv); wrap.appendChild(lbl);
-      gl.appendChild(wrap);
-    }
-    try { await window.storage.set('ob:qrdone', JSON.stringify(true)); } catch(e) {}
   }
-  // annulation du scan
-  document.getElementById('qrScanCancel').addEventListener('click', () => { if (QR) QR.stopScan(); });
 
   /* ============================================================
      UN TAG APPROCHÉ, ET L'APPLICATION S'OUVRE
@@ -15205,10 +14849,10 @@
 
     if (hint) {
       hint.innerHTML = nfcDispo
-        ? '<span class="qrlock-nfc">📶 Approche ton tag</span><br><span class="qrlock-or">ou utilise le bouton pour ton QR</span>'
-        : '<span class="qrlock-or">Scanne le QR de ton bracelet pour entrer.</span>';
+        ? '<span class="qrlock-nfc">📶 Approche ton bracelet</span>'
+        : '<span class="qrlock-or">Pas de NFC ici : trois tapes sur le titre pour entrer.</span>';
     }
-    if (btn) btn.textContent = '📷 Scanner mon bracelet';
+    if (btn) btn.style.display = 'none';
 
     // écoute NFC passive, relancée à chaque affichage de l'écran
     if (nfcDispo) {
@@ -15224,9 +14868,6 @@
     }
 
     lockOuvrir = ouvrir;   // un tag lu par le natif ouvre le même chemin
-    if (btn) btn.onclick = () => {
-      QR.startScan('unlock', (kind) => { if (kind === 'unlock') ouvrir(); }, { petit: true });
-    };
     // secours discret : 3 tapes sur le titre (TOUJOURS actif, anti-blocage)
     let taps = [];
     const title = document.getElementById('qrLockTitle');
