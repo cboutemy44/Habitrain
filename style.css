@@ -196,7 +196,7 @@
 
   /* barre d'onglets du reporting */
   .tabbar { display:flex; gap:7px; margin-bottom:16px; }
-  body.foxy .tabbar, body.immersive .tabbar { display:none; }
+  /* les onglets restent : Foxy est en haut, ton suivi juste en dessous */
   .tab {
     flex:1; font-family:'Gochi Hand',cursive; font-size:16px; font-weight:400;
     padding:10px 6px; border-radius:12px; cursor:pointer;
@@ -544,8 +544,8 @@
 
   /* ===== Mode immersif : conversation plein cadre ===== */
   body.immersive { background: linear-gradient(180deg,#F5EEF6,#EEF0FA) !important; }
-  /* on masque tout le reporting */
-  body.immersive .card:not(#imChat):not(#settingsCard):not(#debugCard):not(#timelineCard):not(#questCard):not(#saveCard):not(#sensorCard):not(#qrCard):not(#lockCard):not(#wardrobeCard):not(#missionsCard):not(#badgesCard):not(#tipsCard):not(#qrCard) { display:none !important; }
+  /* Foxy occupe le haut de l'écran, les cartes servent de rappel en dessous :
+     plus rien n'est masqué, il y a bien moins de choses à afficher qu'avant. */
   body.immersive #verBadge { opacity:0.5; }
 
   #imChat { display:none; }
@@ -553,8 +553,9 @@
     display:flex; flex-direction:column;
     border:1.5px solid #e0d0ea; border-radius:22px; background:#fff;
     overflow:hidden; box-shadow:0 6px 26px rgba(90,60,110,0.10);
-    min-height:70vh;
   }
+  /* en mode Foxy, ce qu'il dit passe par sa bulle : le fil de messages ne sert plus */
+  body.foxy .im-thread { display:none; }
   .im-head {
     display:flex; align-items:center; gap:12px; padding:16px 18px;
     background:linear-gradient(180deg,#F3ECF9,#F7F1FB); border-bottom:1px solid #ece0f4;
@@ -613,9 +614,6 @@
   /* thème Foxy : tons chauds renard */
   body.foxy { background:linear-gradient(180deg,#FDF1E6,#FBEADB) !important; }
   body.foxy #imChat { border-color:#f0d0b0; }
-  body.foxy #foxyTalk { display:flex !important; }
-  body.foxy #foxyTalk #foxyInput { border-color:#f0d0b0; }
-  body.foxy #foxyTalk #foxySend { background:#d9743a; }
   body.foxy .im-msg.care { background:#FCEBDD; color:#7a4420; }
   body.foxy .im-msg.me { background:linear-gradient(135deg,#e08840,#c8703a); }
   body.foxy .im-typing { background:#FCEBDD; }
@@ -935,3 +933,44 @@ body.onboarding .foxypop-overlay { z-index: 10150; }
   border-radius: 20px; padding: 7px 12px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
 }
 .ob-chip:active { background: rgba(255,255,255,.16); }
+
+/* ===== Change guidé ===== */
+.pose-fil { display: flex; justify-content: center; gap: 8px; margin-bottom: 10px; }
+.pose-pt {
+  width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 15px; background: #F3EBE1; border: 1.5px solid var(--line); filter: grayscale(1); opacity: .5;
+}
+.pose-pt.faite { filter: none; opacity: 1; background: #E8F5EC; border-color: #9fd3b0; }
+.pose-pt.ici {
+  filter: none; opacity: 1; background: #FBF1DE; border-color: #e0a060;
+  box-shadow: 0 0 0 3px rgba(224,160,96,.22); transform: scale(1.08);
+}
+.pose-titre {
+  font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px; color: #a85a2a; margin-bottom: 6px;
+}
+.pose-ligne {
+  font-size: 15.5px; font-weight: 600; color: #5a3418; line-height: 1.5;
+  min-height: 66px; margin-bottom: 12px; white-space: pre-line; cursor: pointer;
+}
+#poseExtras { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.pose-tag {
+  font-size: 12.5px; font-weight: 700; line-height: 1.45; text-align: left;
+  padding: 9px 11px; border-radius: 11px; background: #FBF3E0; border: 1px solid #ecd9a8; color: #a85a2a;
+}
+.pose-tag.capteur { background: #E8F2F8; border-color: #bcd8e8; color: #2a5a7a; }
+.pose-tag.alerte { background: #FBEBE5; border-color: #f0c5b0; color: #a8543b; }
+.pose-tag.foxy {
+  background: #FBF3E8; border: none; border-left: 3px solid #d9a05a; border-radius: 0 11px 11px 0;
+  font-style: italic; font-weight: 600; color: #8a6a45;
+}
+
+/* ===== Sections regroupées dans une carte ===== */
+.bloc { padding: 16px 0; border-top: 1px solid var(--line); }
+.bloc:first-of-type { padding-top: 2px; border-top: none; }
+.bloc:last-of-type { padding-bottom: 0; }
+.bloc h2 {
+  font-family: 'Fraunces', serif; font-weight: 600; font-size: 14.5px;
+  color: var(--ink); margin-bottom: 3px;
+}
+.bloc .sub { color: var(--muted); font-size: 12px; font-weight: 600; margin-bottom: 12px; }
+.bloc.moment, .bloc.outfit-card, .bloc.sup-card, .bloc.breach-card { background: none; border-radius: 0; }

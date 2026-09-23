@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '21.4';
+  const APP_VERSION = '21.8';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -97,6 +97,8 @@
   let immersive = false;
 
   async function loadVoice() {
+    // Foxy est le mode nominal : le reporting ne sort que si tu l'as choisi
+    voiceMode = 'foxy';
     try { const r = await window.storage.get('pref:voicemode'); if (r && r.value) voiceMode = JSON.parse(r.value); } catch(e) {}
     immersive = immersiveModes.includes(voiceMode);
     applyVoiceChrome();
@@ -104,14 +106,16 @@
     // En l'attendant, tout le reste du démarrage restait bloqué derrière —
     // y compris la vérification du verrouillage, qui n'arrivait donc qu'APRÈS
     // que Foxy ait parlé. C'était la cause de la phrase aperçue avant l'entrée.
-    if (immersive) { try { imRunMoment(); } catch(e) {} }
+    // Son mot d'accueil passe par le chef d'orchestre : sans ça, il écrasait
+    // une conversation déjà en cours (une invitation, une question posée).
+    if (immersive) { try { talk(TALK.AMBIANCE, 'moment:ouverture', () => imRunMoment()); } catch(e) {} }
   }
   async function setVoiceMode(mode) {
     voiceMode = mode;
     immersive = immersiveModes.includes(mode);
     try { await window.storage.set('pref:voicemode', JSON.stringify(mode)); } catch(e) {}
     applyVoiceChrome();
-    if (immersive) { try { await imRunMoment(); } catch(e) {} }
+    if (immersive) { try { await talk(TALK.AMBIANCE, 'moment:ouverture', () => imRunMoment()); } catch(e) {} }
     else { try { await renderMoment(); } catch(e) {} try { await renderBreaches(); } catch(e) {} try { await showTab(currentTab); } catch(e) {} }
   }
   // ancienne API conservée
@@ -392,6 +396,8 @@
 
   // ---- Sheet "scènes de change" (ordre propre, indépendant des expressions) ----
   const CHANGE_CELLS = { prep:0, remove:1, place:8, front:6, tabLow:7, tabHigh:6, tabRight:7, done:14 };
+  // vignette de la planche guide-steps.png (4×2) pour chaque étape du change
+  const CHANGE_CELLS_IDX = { prep:0, remove:1, place:2, done:7 };
   function positionChangeCell(el, idx, sizePx) {
     if (!el) return;
     const col = idx % 4, row = Math.floor(idx / 4);
@@ -408,24 +414,18 @@
      et ses récits spontanés sur ce qui se passe en lui.
      ============================================================ */
   const FOXY_FEELS_STEP = {
-    0: [ 'Tu sais, le bruit du plastique quand je déplie les languettes... ce petit crissement, maintenant rien que de l\'entendre je me détends déjà. C\'est devenu un signal pour moi.',
+    0: [ 'Tu sais, le bruit du plastique quand je déplie les languettes… ce petit crissement, rien que de l\'entendre je me détends déjà.',
          'Moi j\'aime bien ce moment. Tout est encore propre et net, et je sais ce qui arrive après. Y\'a une sorte d\'attente, tu vois ?' ],
-    1: [ 'Quand je retire l\'ancienne, y\'a toujours ce petit pincement de me retrouver sans rien. Deux secondes où je me sens... nu, quoi. Bizarrement je n\'aime pas trop ça.',
-         'C\'est marrant, avant je trouvais ça gênant ce moment. Maintenant c\'est juste une transition, j\'y pense même plus.' ],
-    2: [ 'La fraîcheur quand elle se pose sous moi, ça me fait toujours quelque chose. Un peu froid les premières secondes, et puis ça devient tiède contre la peau.',
-         'Allongé comme ça, sans rien à faire pendant qu\'on s\'occupe de moi... franchement c\'est un des moments les plus reposants de ma journée.' ],
-    3: [ 'Quand je remonte le devant, je sens le tissu qui m\'enveloppe. C\'est là que ça commence vraiment pour moi.',
-         'Ce moment-là, c\'est comme fermer une porte. Après, y\'a plus de question à se poser pour les heures qui viennent.' ],
-    4: [ 'Le premier clic de languette... c\'est le son que je préfère de toute la journée. Sérieux.',
-         'Là je commence à sentir le serrage autour des hanches. C\'est comme si mon corps recevait un message : "voilà, tu peux lâcher maintenant".' ],
-    5: [ 'Quand les deux côtés sont pris, y\'a un truc qui se relâche dans ma tête. Comme si je posais un sac que je portais depuis le matin.',
-         'C\'est fou comme quelque chose d\'aussi simple peut changer tout mon état d\'esprit en quelques secondes.' ],
-    6: [ 'Je vérifie toujours les élastiques deux fois. Pas par peur des fuites — juste parce que j\'aime savoir que tout est bien en place.',
-         'Ce petit contrôle, c\'est devenu un rituel. Ça m\'ancre, je sais pas comment dire mieux.' ],
-    7: [ 'Et voilà. Quand je me relève et que je sens le volume entre mes jambes... c\'est là que je me sens vraiment bien. Comme rentré chez moi.',
-         'Les premiers pas après un change, avec ce petit balancement... franchement, j\'adore. C\'est mon moment préféré.',
-         'Maintenant c\'est fait, et je sais que je n\'ai plus à y penser. Cette tranquillité-là, c\'est ce que je cherchais depuis le début.' ]
+    1: [ 'Quand je retire l\'ancienne, y\'a toujours ce petit pincement de me retrouver sans rien. Deux secondes où je me sens nu, quoi.',
+         'C\'est marrant, avant je trouvais ce moment gênant. Maintenant c\'est juste une transition, j\'y pense même plus.' ],
+    2: [ 'La fraîcheur quand elle se pose sous moi, ça me fait toujours quelque chose. Un peu froid, et puis ça devient tiède.',
+         'Le premier clic de languette… c\'est le son que je préfère de toute la journée. Sérieux.',
+         'Allongé comme ça, sans rien à faire pendant qu\'on s\'occupe de moi : c\'est un des moments les plus reposants de ma journée.' ],
+    3: [ 'Et voilà. Quand je me relève et que je sens le volume entre mes jambes… c\'est là que je me sens vraiment bien. Comme rentré chez moi.',
+         'Les premiers pas après un change, avec ce petit balancement… franchement, j\'adore.',
+         'Maintenant c\'est fait, et je n\'ai plus à y penser jusqu\'au prochain. Cette tranquillité-là, c\'est ce que je cherchais.' ]
   };
+
 
   /* ---------- Ce que sa couche lui apporte, au quotidien ----------
      De petites remarques courtes, glissées régulièrement. Foxy dit
@@ -503,24 +503,52 @@
          'C\'est devenu mon indicateur : si ma nuit a bien travaillé, je sais que la journée va bien se passer.'] }
   ];
 
-  const CHANGE_STEPS = [
-    { cell:'prep',    t:'D\'abord, déplie les 4 languettes en éventail. Vérifie qu\'aucune n\'est collée par accident — une languette mal dépliée, et la couche fait des plis.' },
-    { cell:'remove',  t:'Défais les languettes de l\'ancienne couche, retire-la et enlève ta grenouillère. Roule la couche usagée et jette-la à la poubelle.' },
-    { cell:'place',   t:'Allonge-toi sur le dos, soulève le bassin et glisse la couche fraîche sous tes fesses. Centre bien la partie arrière — si elle est trop basse, ça fuira derrière.' },
-    { cell:'front',   t:'Remonte le devant jusqu\'à ce que la ceinture soit juste sous le nombril. Assure-toi que les bords sont bien symétriques des deux côtés.' },
-    { cell:'tabLow',  t:'Languette inférieure gauche : tire-la vers le bas et vers l\'extérieur (environ 45°), puis colle-la fermement sur le devant. C\'est elle qui tient autour des cuisses.' },
-    { cell:'tabHigh', t:'Languette supérieure gauche : tire-la vers le haut et vers l\'extérieur (environ 30°). C\'est elle qui ajuste la taille. Laisse environ 2 doigts d\'espace entre les deux languettes.' },
-    { cell:'tabRight',t:'Maintenant l\'autre côté : d\'abord la languette basse, puis la haute. Vérifie que les deux côtés sont bien symétriques — si une languette est plus haute que l\'autre, la couche part de travers.' },
-    { cell:'done',    t:'Vérifie qu\'un doigt passe à la taille et que les élastiques épousent les cuisses sans serrer. Puis remets ta grenouillère propre. Et voilà... parfait ! 🦊✨' }
+  /* Les créneaux du planning, définis ici une fois pour toutes : le rappel
+     périodique, le démarrage et la validation d'un change lisent la même
+     liste. Avant, la validation ne connaissait que les trois piliers : un
+     change fait pendant un check n'était donc jamais marqué comme fait, et
+     le rappel revenait toutes les minutes. */
+  const CRENEAUX = [
+    { key:'c0900', m:9*60,     ctx:'pilier', label:'Change du matin' },
+    { key:'c1130', m:11*60+30, ctx:'check',  label:'Check + 1er biberon' },
+    { key:'c1330', m:13*60+30, ctx:'check',  label:'Check du déjeuner' },
+    { key:'c1600', m:16*60,    ctx:'pilier', label:'Change de sortie de sieste' },
+    { key:'c1930', m:19*60+30, ctx:'check',  label:'Check du dîner' },
+    { key:'c2230', m:22*60+30, ctx:'pilier', label:'Change de nuit' }
   ];
+  // le créneau dont la fenêtre couvre l'heure donnée (pilier : 2 h, check : 45 min)
+  function creneauCourant(now, tolerance) {
+    const d = now || new Date();
+    const nowMin = d.getHours()*60 + d.getMinutes();
+    for (const s of CRENEAUX) {
+      const ctx = (hardMode || discActive()) ? 'pilier' : s.ctx;
+      const fen = tolerance != null ? tolerance : (ctx === 'pilier' ? 120 : 45);
+      if (nowMin >= s.m && nowMin <= s.m + fen) return Object.assign({}, s, { ctx });
+    }
+    return null;
+  }
+
+  /* Le change guidé, en quatre temps. Il en comptait huit, dont six pour
+     les seules languettes : à l'usage, on tapait « suivant » sans lire. */
+  const CHANGE_STEPS = [
+    { cell:'prep', titre:'Prépare', pastille:'🍼',
+      t:'Installe-toi, tout à portée de main : ta couche, la crème, les lingettes.\nDéplie les 4 languettes en éventail — aucune ne doit rester collée.' },
+    { cell:'remove', titre:'Retire l\'ancienne', pastille:'♻️',
+      t:'Défais les languettes, retire ta couche et ta tenue.\nRoule la couche usagée vers l\'intérieur et jette-la.' },
+    { cell:'place', titre:'Pose la fraîche', pastille:'✨',
+      t:'Allongé, bassin soulevé : glisse la couche bien centrée, remonte le devant sous le nombril.\nLanguettes du bas vers l\'extérieur, puis celles du haut — les deux côtés symétriques.' },
+    { cell:'done', titre:'Vérifie et rhabille-toi', pastille:'👕',
+      t:'Un doigt doit passer à la taille, les élastiques épousent les cuisses sans serrer.\nRemets ta tenue, et voilà. 🦊✨' }
+  ];
+
 
   /* Consignes de capteurs, injectées dans les étapes qui les concernent.
      Rien ne s'affiche si tu n'as pas le matériel : on ne te demande pas de
      déplacer un capteur que tu ne possèdes pas. */
   const CONSIGNES_CAPTEUR = {
-    1: { cle:'couche', t:'📡 <b>Récupère le capteur de couche</b> avant de jeter l\'ancienne. Décolle-le doucement, essuie la face qui touchait la couche avec un chiffon sec — jamais d\'eau, jamais d\'alcool sur la grille du capteur.' },
-    3: { cle:'couche', t:'📡 <b>Pose le capteur sur la couche fraîche</b> : à l\'avant, centré, à deux doigts sous la ceinture. La grille tournée vers l\'intérieur, contre le tissu, sans le coller à la zone absorbante.' },
-    7: { cle:'tenue',  t:'🔒 <b>Reclipse le module de tenue</b> en butée de fermeture, une fois la tenue remise et fermée. Vérifie que la diode clignote une fois : c\'est lui qui confirme qu\'il voit l\'aimant.' }
+    1: { cle:'couche', t:'📡 <b>Récupère ton capteur</b> avant de jeter l\'ancienne. Essuie sa face avec un chiffon sec — jamais d\'eau ni d\'alcool sur la grille.' },
+    2: { cle:'couche', t:'📡 <b>Pose le capteur</b> à l\'avant de la couche fraîche, centré, à deux doigts sous la ceinture, grille contre le tissu.' },
+    3: { cle:'tenue',  t:'🔒 <b>Reclipse le module de tenue</b> en butée de fermeture, une fois la tenue fermée. La diode clignote une fois.' }
   };
 
   async function consigneCapteurPour(i) {
@@ -622,69 +650,70 @@
   function runChangeStep(i) {
     const step = CHANGE_STEPS[i];
     const last = i === CHANGE_STEPS.length - 1;
-    positionGuideStep(document.getElementById('poseGuide'), i);
-    document.getElementById('poseStepNum').textContent = 'Étape ' + (i+1) + ' / ' + CHANGE_STEPS.length;
-    const acts = document.getElementById('poseActs');
-    acts.innerHTML = '';
-    // on repart propre : sinon les consignes des étapes précédentes s'empilent
-    try { document.querySelectorAll('.consigne-capteur').forEach(e => e.remove()); } catch(e) {}
-    // à la première étape, on annonce quel modèle prendre
-    if (i === 0) {
-      pickChangeModel().then(info => {
-        const line = document.getElementById('poseLine');
-        if (!info || !line) return;
-        let msg = '';
-        if (info.vide) {
-          msg = '⚠️ Plus aucune couche en stock ! Prends ce que tu as et pense à recommander.';
-        } else if (info.horsPeriode) {
-          msg = '⚠️ Plus de modèle « ' + info.period + ' » : prends une ' + info.model.name + ' (' + info.model.qty + ' restantes).';
-        } else {
-          msg = '🍼 Prends une ' + info.model.name + ' (' + info.model.qty + ' de ce modèle).';
-        }
-        const tag = document.createElement('div');
-        tag.style.cssText = 'font-size:12.5px;font-weight:800;color:#a85a2a;background:#FBF3E0;border:1px solid #ecd9a8;border-radius:10px;padding:8px 10px;margin-bottom:10px';
-        tag.textContent = msg;
-        line.parentNode.insertBefore(tag, line);
+    positionGuideStep(document.getElementById('poseGuide'), CHANGE_CELLS_IDX[step.cell] != null ? CHANGE_CELLS_IDX[step.cell] : i);
+    // fil de progression : une pastille par étape
+    const fil = document.getElementById('posePoints');
+    if (fil) {
+      fil.innerHTML = '';
+      CHANGE_STEPS.forEach((st, k) => {
+        const d = document.createElement('div');
+        d.className = 'pose-pt' + (k < i ? ' faite' : k === i ? ' ici' : '');
+        d.textContent = st.pastille;
+        fil.appendChild(d);
       });
     }
-    // consigne de capteur pour cette étape, s'il y en a une
-    consigneCapteurPour(i).then(txt => {
-      if (!txt) return;
-      const line = document.getElementById('poseLine');
-      if (!line) return;
-      const tag = document.createElement('div');
-      tag.className = 'consigne-capteur';
-      tag.style.cssText = 'font-size:12.5px;font-weight:700;color:#2a5a7a;background:#E8F2F8;'
-        + 'border:1px solid #bcd8e8;border-radius:10px;padding:8px 10px;margin-bottom:10px;line-height:1.45';
-      tag.innerHTML = txt;
-      line.parentNode.insertBefore(tag, line);
-    });
+    document.getElementById('poseStepNum').textContent = step.titre + ' · ' + (i+1) + '/' + CHANGE_STEPS.length;
+    const acts = document.getElementById('poseActs');
+    acts.innerHTML = '';
+    const extras = document.getElementById('poseExtras');
+    if (extras) extras.innerHTML = '';
 
-    // Foxy glisse parfois ce que ça lui fait, à lui
-    if (!broOn() && Math.random() < 0.3) {
-      const lot = FOXY_FEELS_STEP[i];
-      if (lot && lot.length) {
-        const line = document.getElementById('poseLine');
-        if (line) {
-          const d = document.createElement('div');
-          d.style.cssText = 'font-size:12.5px;font-weight:600;font-style:italic;color:#8a6a45;' +
-            'background:#FBF3E8;border-left:3px solid #d9a05a;border-radius:0 10px 10px 0;' +
-            'padding:9px 11px;margin-bottom:10px;line-height:1.5';
-          d.textContent = '🦊 ' + lot[Math.floor(Math.random()*lot.length)];
-          line.parentNode.insertBefore(d, line);
-        }
-      }
+    const ajouterTag = (html, cls) => {
+      if (!extras) return;
+      const tag = document.createElement('div');
+      tag.className = 'pose-tag' + (cls ? ' ' + cls : '');
+      tag.innerHTML = html;
+      extras.appendChild(tag);
+    };
+
+    // première étape : quelle couche prendre
+    if (i === 0) {
+      pickChangeModel().then(info => {
+        if (!info) return;
+        if (info.vide) ajouterTag('⚠️ Plus aucune couche en stock. Prends ce que tu as, et pense à recommander.', 'alerte');
+        else if (info.horsPeriode) ajouterTag('⚠️ Plus de modèle « ' + info.period + ' » : prends une <b>' + info.model.name + '</b> (' + info.model.qty + ' restantes).', 'alerte');
+        else ajouterTag('🍼 Prends une <b>' + info.model.name + '</b> — il t\'en reste ' + info.model.qty + '.');
+      });
     }
-    poseType(step.t, () => {
+    // consigne de capteur, s'il y en a une pour cette étape
+    consigneCapteurPour(i).then(txt => { if (txt) ajouterTag(txt, 'capteur'); });
+    // et parfois, ce que ça lui fait à lui
+    if (!broOn() && Math.random() < 0.35) {
+      const lot = FOXY_FEELS_STEP[i];
+      if (lot && lot.length) ajouterTag('🦊 ' + lot[Math.floor(Math.random()*lot.length)], 'foxy');
+    }
+
+    // le texte s'écrit, mais un appui l'affiche d'un coup : on n'attend jamais
+    const suivant = () => {
+      if (acts.childElementCount) return;
       const b = document.createElement('button');
       b.className = 'ok';
-      b.textContent = last ? '🐾 Couche fraîche posée !' : 'Fait ! On continue';
+      b.textContent = last ? '🐾 Couche fraîche posée' : 'Fait, on continue';
       b.addEventListener('click', async () => {
         if (last) { await finishChange(); }
         else { runChangeStep(i+1); }
       });
       acts.appendChild(b);
-    });
+      if (i > 0) {
+        const r = document.createElement('button');
+        r.className = 'adj'; r.textContent = '‹ Étape précédente';
+        r.addEventListener('click', () => runChangeStep(i-1));
+        acts.appendChild(r);
+      }
+    };
+    poseType(step.t, suivant);
+    const ligne = document.getElementById('poseLine');
+    if (ligne) ligne.onclick = () => { if (poseTypeTimer) { clearInterval(poseTypeTimer); poseTypeTimer = null; ligne.textContent = step.t; suivant(); } };
   }
 
   // pilier dont la fenêtre couvre l'heure actuelle (pour compter un change manuel)
@@ -737,10 +766,14 @@
     await saveCheck(proof ? 'change_fait' : 'change_fait_sanspreuve', 'change_'+(changeCtx||'check'));
     try { await calibrerCapteurApresChange(proof, changeCtx); } catch(e) {}
     let slotKey = activeSlotKey;
+    // un change vaut pour le créneau en cours, pilier OU check : sans ça, le
+    // rappel du créneau revenait en boucle alors que le change venait d'être fait
+    if (!slotKey) { const c = creneauCourant(); if (c) slotKey = c.key; }
     if (!slotKey) { const p = pillarSlotForNow(); if (p) slotKey = p.key; }
     // change de nuit avancé : c'est bien le pilier de 22h30 qu'on valide
     if (!slotKey && couchageNuit(new Date())) slotKey = 'c2230';
     await markSlotDoneKey(slotKey);
+    if (slotKey) dueSnooze[slotKey] = Date.now() + 3*3600000;
 
     // Le stock se décompte ICI, et nulle part ailleurs. Jusqu'à présent le
     // modèle était réservé à l'étape 1 du change guidé... et jamais consommé :
@@ -823,74 +856,68 @@
     return { ok:false, raison:'pas la bonne', item, attendue: att.nom };
   }
 
-  // Une étape. Résout 'ok' (scan valide) ou 'force' (abandon assumé, entorse notée).
-  function unePreuve(kind, rang, total, essai, ctx) {
+  /* Une étape de preuve. Renvoie 'ok' (scan valide) ou 'force' (validé sans
+     preuve, entorse notée).
+
+     Elle s'appelait elle-même à chaque échec : un scan qui ne passait pas
+     relançait la même fenêtre indéfiniment, et le bouton de sortie se
+     perdait au fond de la pile. C'est maintenant une simple boucle, avec
+     une sortie visible dès le deuxième essai. */
+  async function unePreuve(kind, rang, total, essai, ctx) {
     const QR = window.HabitrainQR;
     const def = PREUVE_DEF[kind];
-    if (!QR || !def) return Promise.resolve('ok');   // rien à prouver : on ne bloque pas
-    essai = essai || 1;
-
+    if (!QR || !def) return 'ok';               // rien à prouver : on ne bloque pas
     const etape = total > 1 ? ('Étape ' + rang + ' sur ' + total + ' — ') : '';
-    const entete = essai === 1
-      ? (etape + 'scanne ' + def.nom + '.')
-      : (etape + 'ce n\'est pas le bon code. Je veux ' + def.nom + '.');
-    const texte = entete + '\n📍 ' + def.ou
-                + (window.HabitrainNFC && window.HabitrainNFC.supported()
-                   ? '\nTu peux aussi approcher ton tag.' : '');
+    const lieu = '\n📍 ' + def.ou
+      + (window.HabitrainNFC && window.HabitrainNFC.supported() ? '\nTu peux aussi approcher ton tag.' : '');
+    let entete = etape + 'scanne ' + def.nom + '.';
 
-    return new Promise(resolve => {
-      const boutons = [
-        { label:'📷 Scanner', onClick: () => {
-          foxyPopHide();
-          QR.startScan(null, async (k) => {
-            if (k && def.accepte(k)) {
-              if (kind === 'tenue') {
-                const v = await tenueConforme(k, ctx && ctx.nuit);
-                if (!v.ok) {
-                  const quoi = v.attendue
-                    ? ('C\'est « ' + (v.item ? v.item.name : '?') +' ». Je veux « ' + v.attendue + ' ».')
-                    : 'Cette étiquette n\'est pas une de tes tenues.';
-                  foxyPopShow(quoi + '\nVa la changer, puis rescanne.', 'puzzled',
-                    [{ label:'📷 J\'ai changé, je rescanne', onClick: async () => {
-                        foxyPopHide();
-                        const suite = await unePreuve(kind, rang, total, essai + 1, ctx);
-                        resolve(suite);
-                      }},
-                     { soft:true, label:'Je n\'ai pas celle-là', onClick: async () => {
-                        foxyPopHide();
-                        try { await marquerEntorse('b_tenue_hs'); } catch(e2) {}
-                        resolve('force');
-                      }}]);
-                  return;
-                }
-              }
-              resolve('ok'); return;
-            }
-            // mauvais code, ou scan abandonné : on redemande, sans se lasser
-            const suite = await unePreuve(kind, rang, total, essai + 1, ctx);
-            resolve(suite);
-          }, { petit: kind === 'tenue' });
-        }},
-        { soft:true, label:'Je ne peux pas scanner', onClick: async () => {
-          foxyPopHide();
+    for (let n = essai || 1; ; n++) {
+      // à partir du 2e essai, la sortie est offerte directement
+      const choix = await new Promise(res => {
+        const boutons = [{ label: n === 1 ? '📷 Scanner' : '📷 Réessayer', onClick: () => { foxyPopHide(); res('scan'); } }];
+        if (n >= 2) boutons.push({ soft:true, label:'✓ Valider sans scanner', onClick: () => { foxyPopHide(); res('sans'); } });
+        else boutons.push({ soft:true, label:'Je ne peux pas scanner', onClick: () => { foxyPopHide(); res('sans'); } });
+        foxyPopShow(entete + lieu, n === 1 ? 'curious' : 'pensive', boutons);
+      });
+
+      if (choix === 'sans') {
+        const ok = await new Promise(res => {
           foxyPopShow(broOn()
             ? 'Alors ce sera noté comme validé sans preuve. Je ne fais pas semblant d\'y croire.'
-            : 'D\'accord... mais je le note comme « sans preuve ». Ça compte comme une entorse, tu le sais. 🦊',
+            : 'D\'accord… mais je le note comme « sans preuve ». Ça compte comme une entorse, tu le sais. 🦊',
             'concern',
-            [{ label:'J\'ai compris', onClick: async () => {
-                foxyPopHide();
-                try { await marquerEntorse('b_preuve'); } catch(e) {}
-                resolve('force');
-              }},
-              { soft:true, label:'Finalement je scanne', onClick: async () => {
-                foxyPopHide();
-                const suite = await unePreuve(kind, rang, total, 1, ctx);
-                resolve(suite);
-              }}]);
-        }}
-      ];
-      foxyPopShow(texte, essai === 1 ? 'curious' : 'pensive', boutons);
-    });
+            [{ label:'J\'ai compris', onClick: () => { foxyPopHide(); res(true); } },
+             { soft:true, label:'Finalement je scanne', onClick: () => { foxyPopHide(); res(false); } }]);
+        });
+        if (ok) { try { await marquerEntorse('b_preuve'); } catch(e) {} return 'force'; }
+        entete = etape + 'scanne ' + def.nom + '.';
+        continue;
+      }
+
+      const k = await scannerUnCode();
+      if (!k) { entete = etape + 'scan annulé. On réessaie : ' + def.nom + '.'; continue; }
+      if (!def.accepte(k)) { entete = etape + 'ce n\'est pas le bon code. Je veux ' + def.nom + '.'; continue; }
+
+      if (kind === 'tenue') {
+        const v = await tenueConforme(k, ctx && ctx.nuit);
+        if (!v.ok) {
+          const quoi = v.attendue
+            ? ('C\'est « ' + (v.item ? v.item.name : '?') + ' ». Je veux « ' + v.attendue + ' ».')
+            : 'Cette étiquette n\'est pas une de tes tenues.';
+          const suite = await new Promise(res => {
+            foxyPopShow(quoi + '\nTu veux la changer, ou c\'est bien celle que tu portes ?', 'pensive', [
+              { label:'📷 Je l\'ai changée, je rescanne', onClick: () => { foxyPopHide(); res('retry'); } },
+              { soft:true, label:'C\'est celle que je porte', onClick: () => { foxyPopHide(); res('garde'); } }
+            ]);
+          });
+          if (suite === 'retry') { entete = etape + 'scanne ' + def.nom + '.'; continue; }
+          try { await marquerEntorse('b_tenue_hs'); } catch(e) {}
+          return 'force';
+        }
+      }
+      return 'ok';
+    }
   }
 
   // Chaîne d'étapes, dans l'ordre. Renvoie true si TOUT a été prouvé.
@@ -924,6 +951,25 @@
       img.onerror = () => resolve('icon-192.png');
       img.src = activeSheet();
     });
+  }
+
+  /* Foxy parle dans la carte de conversation, en bas de l'onglet « Maintenant ».
+     Dès qu'il prend la parole ou qu'il te propose des réponses, on t'y amène :
+     tu n'as jamais à aller le chercher en faisant défiler l'écran. */
+  let _scrollChat = 0;
+  function allerAuChat(force) {
+    try {
+      if (voiceMode !== 'foxy' || ecranVerrouille()) return;
+      if (currentTab !== 'maintenant') { showTab('maintenant'); force = true; }
+      const c = document.getElementById('imChat');
+      if (!c || c.style.display === 'none') return;
+      const r = c.getBoundingClientRect();
+      const visible = r.top >= 0 && r.bottom <= (window.innerHeight || 0) + 40;
+      if (!force && visible) return;
+      if (!force && Date.now() - _scrollChat < 1200) return;   // pas deux fois de suite
+      _scrollChat = Date.now();
+      c.scrollIntoView({ behavior:'smooth', block: r.height > (window.innerHeight - 60) ? 'start' : 'center' });
+    } catch(e) {}
   }
 
   function imClear() {
@@ -1072,7 +1118,19 @@
     } catch(e) { setTimeout(go, 400); }
   }
 
-  function talkDemarre(item) { talkActive = item; talkLance(item); }
+  function talkDemarre(item) { item.debut = Date.now(); talkActive = item; talkLance(item); }
+
+  /* Garde-fou : une discussion laissée en plan (une question à laquelle tu n'as
+     pas répondu, une fenêtre restée ouverte) gardait la parole pour toujours,
+     et tout le reste attendait derrière elle — parfois des heures. Au bout de
+     quinze minutes sans réponse, elle rend la parole. */
+  setInterval(() => {
+    if (!talkActive || fenetreOuverte()) return;
+    if (Date.now() - (talkActive.debut || 0) < 15*60000) return;
+    talkActive.dead = true;
+    talkActive = null;
+    talkSuivante();
+  }, 30000);
 
   // exécute réellement la discussion et rend la parole à la fin.
   // Le vérificateur, quand il y en a un, décide juste avant : une discussion
@@ -1145,6 +1203,7 @@
   let rpgAdvance = null;
   let currentM = null; // moment courant, pour restaurer les boutons après un message libre
   function rpgSay(text, expr, waitTap) {
+    allerAuChat();
     return new Promise(resolve => {
       setFoxyPortrait(expr || pendingExpr || 'neutral');
       const rt = document.getElementById('rpgText');
@@ -1177,6 +1236,7 @@
 
   function imSetActions(buttons) {
     const box = imActions(); box.innerHTML = '';
+    allerAuChat();
     // le safeword vit dans les réglages (et « stop foxy » au clavier)
     buttons.forEach(b => {
       if (!b) return;
@@ -1998,7 +2058,8 @@
 
     imSetActions([
       ACT.rassurer(m), ACT.calin(m), ACT.pasBien(m),
-      ACT.changer(m), ACT.caVa(m), ACT.reporting()
+      ACT.changer(m), ACT.caVa(m),
+      { soft:true, label:'🦊 Revenir à Foxy', onClick: () => setVoiceMode('foxy') }
     ]);
   }
 
@@ -2132,11 +2193,9 @@
       imAddMe(f ? 'Ça roule, merci.' : 'Ça va, merci.');
       await imSay(pick(f ? FOXY_OKAY : OKAY), 700, pickExpr('fun'));
       imSetActions([
-        { soft:true, label:'💭 Finalement, j\'ai une question', onClick: () => imOfferHelp(m) },
-        { soft:true, label:'📋 Revenir en mode reporting', onClick: () => setVoiceMode('report') }
+        { soft:true, label:'💭 Finalement, j\'ai une question', onClick: () => imOfferHelp(m) }
       ]);
     }}),
-    reporting: () => ({ soft:true, label:'📋 Revenir en mode reporting', onClick: () => setVoiceMode('report') }),
     retour: (m) => ({ soft:true, label:'‹ Autre chose', dit:false, onClick: async () => { imSetActions(menuFoxy(m)); } })
   };
 
@@ -2176,8 +2235,7 @@
         broOn() ? 'De moi ? Bon. Qu\'est-ce que tu veux savoir.' : 'De moi ? Avec plaisir ! Qu\'est-ce que tu veux savoir ? 🦊',
         () => [ACT.foxyMaintenant(), ACT.sonVecu(m)].concat(broOn() ? [] : [ACT.saCouche()])),
       { sep:'' },
-      ACT.caVa(m),
-      ACT.reporting()
+      ACT.caVa(m)
     ];
   }
 
@@ -3499,10 +3557,6 @@
     });
     const stage = document.getElementById('rpgStage');
     if (stage) stage.addEventListener('click', () => { if (rpgAdvance) rpgAdvance(); });
-    const fsend = document.getElementById('foxySend');
-    const finput = document.getElementById('foxyInput');
-    if (fsend) fsend.addEventListener('click', () => foxyHandleInput(finput.value));
-    if (finput) finput.addEventListener('keydown', (e) => { if (e.key === 'Enter') foxyHandleInput(finput.value); });
   });
 
   const skinColors = { verte: 'var(--green)', surveiller: 'var(--amber)', traiter: 'var(--coral)' };
@@ -7259,6 +7313,7 @@
   }
   function closeCheck() {
     document.getElementById('overlay').classList.remove('show');
+    setTimeout(() => allerAuChat(true), 120);
     changeModel = null;   // libère le modèle réservé si le change est abandonné
     if (poseTypeTimer) { clearInterval(poseTypeTimer); poseTypeTimer = null; }
   }
@@ -7341,6 +7396,55 @@
     }
   }
 
+  /* Le rappel d'un créneau ouvrait une fenêtre par-dessus l'appli. En mode
+     Foxy, il se vit maintenant dans la conversation, comme le reste : c'est
+     lui qui te parle, tu lui réponds, et seule la pose garde son écran. */
+  async function lancerRappelChange(slot) {
+    if (voiceMode !== 'foxy') { popChangeDue(slot); return attendreOverlay(); }
+    activeSlotKey = slot.key;
+    if (slot.ctx === 'pilier') {
+      const k = await imDemander(bro(
+        'Hé. C\'est l\'heure de ton ' + slot.label.toLowerCase() + '. Viens, on s\'en occupe ensemble. 🦊',
+        'C\'est l\'heure : ' + slot.label.toLowerCase() + '. On y va.'), [
+        { k:'go',   label:'🦊 On y va', dit:'On y va.' },
+        { k:'tard', label:'Pas tout de suite', dit:'Pas tout de suite.', soft:true }
+      ], 'wave');
+      if (k === 'go') { startChange('pilier'); return; }
+      dueSnooze[slot.key] = Date.now() + (hardMode || discActive() ? 5 : 10)*60000;
+      activeSlotKey = null;
+      await imSay(bro(
+        'D\'accord. Je te relance dans un petit moment — tu sais bien qu\'on finira par le faire. 🦊',
+        'Je te relance dans dix minutes. Ça se fera.'), 850, 'calm');
+      if (currentM) await imOfferHelp(currentM);
+      return;
+    }
+    // un check : l'état de la couche, et ce qu'on en fait
+    const k = await imDemander(bro(
+      'Petit check, ' + nomOu('toi') + ' : ta couche, elle en est où ? Touche par-dessus ta tenue.',
+      'Check. Ta couche en est où ?'), [
+      { k:'sec',     label:'🌵 Sèche — je laisse',      dit:'Encore sèche, je laisse.' },
+      { k:'mouille', label:'💧 Mouillée — je laisse',   dit:'Mouillée, je la garde.' },
+      { k:'change',  label:'🔄 Mouillée — je change',   dit:'Mouillée, je change.' },
+      { k:'sature',  label:'🌊 Saturée — je change',    dit:'Saturée, je change.' }
+    ], 'curious');
+    if (k === 'change' || k === 'sature') {
+      await saveCheck(k === 'sature' ? 'etat_sature' : 'etat_mouille', 'check_' + slot.key);
+      try { await declarerEtatCouche(k === 'sature' ? 'sature' : 'mouille', 'parole'); } catch(e) {}
+      startChange('check', true);
+      return;
+    }
+    await saveCheck(k === 'sec' ? 'etat_sec' : 'etat_mouille', 'check_' + slot.key);
+    try { await declarerEtatCouche(k === 'sec' ? 'sec' : 'mouille', 'parole'); } catch(e) {}
+    await markSlotDone(slot.key);
+    await imSay(k === 'sec'
+      ? bro('Encore sèche… tu te retiens un chouïa, non ? Laisse venir quand ça vient, c\'est comme ça qu\'on s\'habitue. 🦊',
+            'Encore sèche. Tu te retiens. Laisse venir.')
+      : bro('Bien mouillée — c\'est exactement ce qu\'on cherche. On la garde encore un peu, elle travaille pour toi. 💛',
+            'Mouillée. Bien. On la garde.'), 950, k === 'sec' ? 'curious' : 'proud');
+    try { await renderCheckStat(); } catch(e) {}
+    if (currentM) await imOfferHelp(currentM);
+  }
+
   function addBtn(container, cls, label, handler) {
     const b = document.createElement('button');
     if (cls) b.className = cls;
@@ -7403,6 +7507,32 @@
       } catch(e) {}
     })();
 
+    // état de la couche avant retrait : dans la conversation quand Foxy est là
+    if (voiceMode === 'foxy') {
+      (async () => {
+        try {
+          const m = await etatMesure(90);
+          if (m) {
+            const LBL = { sec:'sèche', mouille:'bien mouillée', sature:'saturée' };
+            await imSay(bro(
+              'Ton capteur me la donne ' + (LBL[m.etat] || m.etat) + '. Pas besoin de me le dire, je sais. On y va. 🦊',
+              'Capteur : ' + (LBL[m.etat] || m.etat) + '. On y va.'), 900, 'calm');
+            await saveChangeState(m.etat);
+          } else {
+            const etat = await demanderEtatCouche(bro(
+              ctx === 'pilier' ? 'Avant qu\'on la retire : elle en est où ?' : 'Avant de la retirer, elle est comment ?',
+              'Avant de la retirer : elle en est où ?'));
+            if (etat) {
+              await saveChangeState(etat);
+              try { const { rc } = await declarerEtatCouche(etat, 'parole'); await confirmerEtat(etat, rc); } catch(e) {}
+            }
+          }
+        } catch(e) {}
+        ouvrirPose();
+      })();
+      return;
+    }
+
     // écran 1 : état de la couche avant retrait.
     // Si le capteur a une mesure récente, on ne demande rien : on constate.
     // Ta parole ne sert que là où aucun capteur ne peut trancher.
@@ -7462,6 +7592,13 @@
     document.getElementById('modalPose').style.display = 'none';
     document.getElementById('modalDue').style.display = 'none';
     document.getElementById('modalChange').style.display = '';
+    document.getElementById('overlay').classList.add('show');
+  }
+
+  // ouvre directement l'écran de pose (le seul qui garde sa fenêtre)
+  function ouvrirPose() {
+    ['modalCheck','modalFix','modalDue','modalChange'].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
+    showPose();
     document.getElementById('overlay').classList.add('show');
   }
 
@@ -9224,6 +9361,8 @@
       try { await renderMoment(); } catch(e) {}
     } else if (name === 'suivi') {
       try { await renderMoment(); } catch(e) {} // gère l'affichage du bilan du soir
+      try { await renderRegles(); } catch(e) {}
+      try { renderTimeline(); } catch(e) {}
     } else if (name === 'cadre') {
       renderTimeline();
     }
@@ -9289,7 +9428,10 @@
     });
     ov.style.display = 'flex';
   }
-  function foxyPopHide() { const ov = document.getElementById('foxyPop'); if (ov) ov.style.display = 'none'; }
+  function foxyPopHide() {
+    const ov = document.getElementById('foxyPop'); if (ov) ov.style.display = 'none';
+    setTimeout(() => allerAuChat(), 120);
+  }
 
   // ==== Mode pause (façade neutre, suspend tout, fige le suivi) ====
   let paused = false;
@@ -12879,12 +13021,6 @@
   const TP = window.HabitrainTips;
   let tipsGuide = 'couche';
 
-  document.getElementById('openTips').addEventListener('click', async () => {
-    const card = document.getElementById('tipsCard');
-    const show = card.style.display === 'none';
-    card.style.display = show ? '' : 'none';
-    if (show) { await renderTips(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
-  });
 
   async function currentStage() {
     try { const r = await window.storage.get('queststage'); if (r && r.value) return JSON.parse(r.value); } catch(e) {}
@@ -12953,12 +13089,6 @@
   }
 
   // --- Affichage du tableau de hauts faits ---
-  document.getElementById('openBadges').addEventListener('click', async () => {
-    const card = document.getElementById('badgesCard');
-    const show = card.style.display === 'none';
-    card.style.display = show ? '' : 'none';
-    if (show) { await renderBadges(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
-  });
 
   async function renderBadges() {
     if (!BG) return;
@@ -13170,12 +13300,6 @@
            '<div style="height:100%;width:'+pct+'%;background:var(--green)"></div></div>';
   }
 
-  document.getElementById('openMissions').addEventListener('click', async () => {
-    const card = document.getElementById('missionsCard');
-    const show = card.style.display === 'none';
-    card.style.display = show ? '' : 'none';
-    if (show) { await renderMissions(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
-  });
 
   async function renderMissions() {
     if (!MS) return;
@@ -14226,12 +14350,95 @@
       box.appendChild(sec);
     }
   }
-  document.getElementById('openQuest').addEventListener('click', async () => {
-    const card = document.getElementById('questCard');
-    const show = card.style.display === 'none';
-    card.style.display = show ? '' : 'none';
-    if (show) { await renderQuest(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
-  });
+  /* ============================================================
+     LA SALLE DE JEUX
+     Tout ce qui se gagne, se collectionne et se raconte tient dans
+     une seule pièce : missions, hauts faits, notre aventure et les
+     conseils de Foxy. Il t'accueille à l'entrée — la première fois
+     en te faisant visiter, ensuite en te disant où tu en es.
+     ============================================================ */
+  async function etatSalle() {
+    const e = { missions:0, missionsFaites:0, periode:null, badges:0, badgesTotal:0, chapitres:0, chapitresTotal:0, conseils:0 };
+    try {
+      if (window.HabitrainMissions) {
+        const MSx = window.HabitrainMissions;
+        await MSx.ensureDaily(todayStr());
+        const st = await MSx.getState();
+        e.missions = (st.daily || []).length;
+        e.missionsFaites = (st.daily || []).filter(id => st.doneD && st.doneD[id]).length;
+        if (st.activePeriod) { const p = MSx.periodById(st.activePeriod.id); e.periode = p ? (p.name || p.titre || p.nom) : null; e.periodeJours = MSx.daysLeft(st.activePeriod); }
+      }
+    } catch(e2) {}
+    try {
+      if (BG) { const u = await BG.getUnlocked(); e.badgesTotal = BG.BADGES.length; e.badges = BG.BADGES.filter(b => u[b.id]).length; }
+    } catch(e2) {}
+    try { e.chapitres = (await currentStage()) || 0; } catch(e2) {}
+    try { if (window.HabitrainTips) e.conseils = window.HabitrainTips.countTotal ? window.HabitrainTips.countTotal() : 0; } catch(e2) {}
+    return e;
+  }
+
+  async function ouvrirSalle() {
+    const card = document.getElementById('salleCard');
+    if (!card) return;
+    const montrer = card.style.display === 'none';
+    card.style.display = montrer ? '' : 'none';
+    if (!montrer) return;
+    try { await renderMissions(); } catch(e) {}
+    try { await renderBadges(); } catch(e) {}
+    try { await renderQuest(); } catch(e) {}
+    try { await renderTips(); } catch(e) {}
+    card.scrollIntoView({ behavior:'smooth', block:'start' });
+    if (voiceMode !== 'foxy' || paused) return;
+    // clé unique : rouvrir la salle redonne la parole à Foxy, même s'il vient de parler
+    talk(TALK.GUIDE, 'salle:accueil:' + Date.now(), () => accueilSalle());
+  }
+
+  async function accueilSalle() {
+    const premiere = !(await lireStock('salle:vue', false));
+    const e = await etatSalle();
+    if (premiere) {
+      await ecrireStock('salle:vue', Date.now());
+      await imSay(bro(
+        'Ah, tu as trouvé la salle de jeux ! 🧸 Viens, je te fais visiter — c\'est ici qu\'on garde tout ce qui est amusant.',
+        'La salle de jeux. Je te fais visiter.'), 950, 'joy');
+      await imSay(bro(
+        '🎯 Tes <b>missions</b> : des petites choses à faire dans la journée. Rien d\'obligatoire — c\'est pour t\'emmener un peu plus loin que d\'habitude.',
+        'Les missions : des petites choses à faire dans la journée. Pas obligatoires.'), 1000, 'explain');
+      await imSay(bro(
+        '🏆 Tes <b>hauts faits</b> : ils s\'attrapent tout seuls, quand tu fais quelque chose pour la première fois ou que tu tiens longtemps. Il y en a ' + (e.badgesTotal || 'plein') + ' à trouver.',
+        'Les hauts faits : ' + (e.badgesTotal || 'plein') + ' à attraper. Ils se débloquent tout seuls.'), 1000, 'explain');
+      await imSay(bro(
+        '🗺️ <b>Notre aventure</b> : l\'histoire qu\'on écrit ensemble. Elle s\'ouvre chapitre par chapitre, au fil de ton mois. C\'est un peu mon carnet à moi.',
+        'Notre aventure : l\'histoire, chapitre par chapitre.'), 1000, 'moved');
+      await imSay(bro(
+        '💡 Et mes <b>conseils</b> : tout ce que j\'ai appris pendant mon programme, rangé là pour toi. Reviens-y quand tu bloques sur quelque chose.',
+        'Mes conseils : ce que j\'ai appris. Pour quand tu bloques.'), 1000, 'teach');
+      await imSay(bro(
+        'Voilà, tu es chez toi ici. Prends ton temps, regarde, et amuse-toi. 🦊💛',
+        'Tu es chez toi ici. Regarde.'), 900, 'happy');
+      if (currentM) await imOfferHelp(currentM);
+      return true;
+    }
+    const lignes = [];
+    if (e.missions) lignes.push('🎯 Missions du jour : <b>' + e.missionsFaites + ' sur ' + e.missions + '</b>' + (e.missionsFaites >= e.missions ? ' — tout est fait !' : ''));
+    if (e.periode) lignes.push('🏔️ Mission de période : <b>' + esc(e.periode) + '</b>' + (e.periodeJours ? ' — encore ' + e.periodeJours + ' jour' + (e.periodeJours > 1 ? 's' : '') : ''));
+    if (e.badgesTotal) lignes.push('🏆 Hauts faits : <b>' + e.badges + ' sur ' + e.badgesTotal + '</b>');
+    if (e.chapitres) lignes.push('🗺️ Notre aventure : <b>' + e.chapitres + ' chapitre' + (e.chapitres > 1 ? 's' : '') + '</b> ouvert' + (e.chapitres > 1 ? 's' : ''));
+    await imSay(bro(
+      'Te revoilà dans la salle de jeux, ' + nomOu('toi') + ' ! 🧸 Viens voir où tu en es.',
+      'Salle de jeux. Regarde où tu en es.'), 900, 'joy');
+    if (lignes.length) await imSay(lignes.join('<br>'), 1000, 'explain');
+    const reste = e.missions - e.missionsFaites;
+    await imSay(reste > 0
+      ? bro('Il te reste ' + reste + ' mission' + (reste > 1 ? 's' : '') + ' à faire aujourd\'hui. Tu veux que je t\'en lise une ?',
+            'Reste ' + reste + ' mission' + (reste > 1 ? 's' : '') + '.')
+      : bro('Tout est fait pour aujourd\'hui. Franchement, bien joué. 🦊', 'Tout est fait aujourd\'hui. Bien.'),
+      900, reste > 0 ? 'curious' : 'proud');
+    if (currentM) await imOfferHelp(currentM);
+    return true;
+  }
+
+  (document.getElementById('openSalle')||{addEventListener(){}}).addEventListener('click', () => { ouvrirSalle(); });
   document.querySelectorAll('#debugCard [data-vm]').forEach(btn => {
     btn.addEventListener('click', () => setVoiceMode(btn.dataset.vm));
   });
@@ -14239,7 +14446,7 @@
   document.querySelectorAll('#debugCard [data-force]').forEach(btn => {
     btn.addEventListener('click', () => {
       const labels = { c0900:'Change du matin', c1600:'Change de sortie de sieste', c2230:'Change de nuit' };
-      popChangeDue({ key: btn.dataset.force, m:0, ctx:'pilier', label: labels[btn.dataset.force] });
+      lancerRappelChange({ key: btn.dataset.force, m:0, ctx:'pilier', label: labels[btn.dataset.force] });
     });
   });
   // nettoyage des tests du jour
@@ -14362,23 +14569,8 @@
 
     // --- Rappel de change automatique aux heures imposées ---
     // Créneaux du planning (minute depuis minuit) + type + libellé.
-    const CHANGE_SLOTS = [
-      { key:'c0900', m:9*60,     ctx:'pilier', label:'Change du matin' },
-      { key:'c1130', m:11*60+30, ctx:'check',  label:'Check + 1er biberon' },
-      { key:'c1330', m:13*60+30, ctx:'check',  label:'Check du déjeuner' },
-      { key:'c1600', m:16*60,    ctx:'pilier', label:'Change de sortie de sieste' },
-      { key:'c1930', m:19*60+30, ctx:'check',  label:'Check du dîner' },
-      { key:'c2230', m:22*60+30, ctx:'pilier', label:'Change de nuit' }
-    ];
-    const TOL = 45; // fenêtre de déclenchement : jusqu'à 45 min après l'heure
-    const now = new Date();
-    const nowMin = now.getHours()*60 + now.getMinutes();
-
-    // trouver un créneau actif (heure atteinte, dans la tolérance) non encore fait aujourd'hui
-    let dueSlot = null;
-    for (const s of CHANGE_SLOTS) {
-      if (nowMin >= s.m && nowMin <= s.m + TOL) { dueSlot = s; break; }
-    }
+    // créneau actif au lancement (45 min de tolérance), non encore fait aujourd'hui
+    const dueSlot = creneauCourant(new Date(), 45);
     let alreadyDone = false;
     if (dueSlot) {
       try {
@@ -14438,10 +14630,7 @@
       // le créneau dû est déclaré au chef d'orchestre : s'il y a une discussion
       // d'accès en cours (reprise, arrêt silencieux), il attend sagement son tour.
       const prio = (dueSlot.ctx === 'pilier' || hardMode || discActive()) ? TALK.PILIER : TALK.CHECK;
-      setTimeout(() => talk(prio, 'due:'+dueSlot.key, () => { popChangeDue(dueSlot); return attendreOverlay(); }), 500);
-    } else if (!popupPrise && autoOn && (notifPrefs.surprise !== false) && Math.random() < OPEN_PROBABILITY) {
-      // sinon, éventuellement une vérif surprise (si activée dans les réglages)
-      setTimeout(() => talk(TALK.CHECK, 'check:surprise', () => { popCheck(); return attendreOverlay(); }), 700);
+      setTimeout(() => talk(prio, 'due:'+dueSlot.key, () => lancerRappelChange(dueSlot)), 500);
     }
     // vérif périodique du change dû (persiste tant que non fait, avec snooze)
     setInterval(checkDueChangePeriodic, 60000);
@@ -14455,24 +14644,8 @@
   async function checkDueChangePeriodic() {
     if (paused) return;
     if (document.getElementById('overlay').classList.contains('show')) return; // déjà une modale ouverte
-    const CHANGE_SLOTS = [
-      { key:'c0900', m:9*60,     ctx:'pilier', label:'Change du matin' },
-      { key:'c1130', m:11*60+30, ctx:'check',  label:'Check + 1er biberon' },
-      { key:'c1330', m:13*60+30, ctx:'check',  label:'Check du déjeuner' },
-      { key:'c1600', m:16*60,    ctx:'pilier', label:'Change de sortie de sieste' },
-      { key:'c1930', m:19*60+30, ctx:'check',  label:'Check du dîner' },
-      { key:'c2230', m:22*60+30, ctx:'pilier', label:'Change de nuit' }
-    ];
-    const now = new Date();
-    const nowMin = now.getHours()*60 + now.getMinutes();
-    // un pilier reste "dû" de son heure jusqu'à +2h (les checks : fenêtre courte de 45 min)
-    let due = null;
-    for (const s of CHANGE_SLOTS) {
-      // en mode intensif, tous les créneaux deviennent des piliers obligatoires
-      const ctx = (hardMode || discActive()) ? 'pilier' : s.ctx;
-      const window = (ctx === 'pilier') ? 120 : 45;
-      if (nowMin >= s.m && nowMin <= s.m + window) { due = Object.assign({}, s, { ctx }); break; }
-    }
+    // un pilier reste dû jusqu'à +2 h, un check 45 min
+    const due = creneauCourant();
     if (!due) return;
     // déjà fait ?
     try {
@@ -14486,7 +14659,7 @@
     // un change dû ouvre toujours une fenêtre : lui, il a vraiment quelque
     // chose à dire, et il a le droit de couper une discussion moins importante.
     talk(due.ctx === 'pilier' ? TALK.PILIER : TALK.CHECK, 'due:'+due.key,
-         () => { popChangeDue(due); return attendreOverlay(); }, { coupe: true });
+         () => lancerRappelChange(due), { coupe: true });
   }
 
   // Enregistrement du service worker (mode hors-ligne / installable)
