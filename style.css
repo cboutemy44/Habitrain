@@ -181,7 +181,7 @@
     background-repeat:no-repeat; background-color:#FDF3EA; border:2.5px solid #e0a060;
     box-shadow:0 4px 14px rgba(200,120,60,.25);
   }
-  .foxypop-text { font-size:15.5px; font-weight:700; color:#5a3418; line-height:1.5; margin-bottom:18px; min-height:24px; }
+  .foxypop-text { font-size:15.5px; font-weight:700; color:#5a3418; line-height:1.5; margin-bottom:18px; min-height:24px; white-space:pre-line; }
   .foxypop-acts { display:flex; flex-direction:column; gap:9px; }
   .foxypop-acts button {
     font-family:inherit; font-size:14.5px; font-weight:800; padding:13px; border-radius:13px; cursor:pointer; border:none;

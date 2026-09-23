@@ -64,11 +64,36 @@
     return true;
   }
 
+  /* Lit UNE fois le tag présenté : son numéro de série (l'identité physique du
+     tag, qui ne change jamais) et ce qu'il contient déjà. C'est ce qui permet
+     de savoir qu'un tag est déjà affecté à autre chose AVANT de l'écraser.
+     Renvoie {uid, payload} ou null si rien n'est venu dans le délai. */
+  function readTag(timeoutMs) {
+    if (!supported()) return Promise.reject(new Error('Web NFC non supporté (Android/Chrome requis)'));
+    return new Promise((res, rej) => {
+      let fini = false, lecteur = null, ctl = null, minuteur = null;
+      const stop = () => { try { if (ctl) ctl.abort(); } catch(e) {} if (minuteur) clearTimeout(minuteur); };
+      try {
+        lecteur = new NDEFReader();
+        ctl = new AbortController();
+        lecteur.scan({ signal: ctl.signal }).then(() => {
+          lecteur.onreading = (ev) => {
+            if (fini) return; fini = true; stop();
+            res({ uid: ev.serialNumber || null, payload: readRecords(ev.message) || '' });
+          };
+          lecteur.onreadingerror = () => { /* tag illisible : on laisse réessayer */ };
+        }).catch(e => { if (!fini) { fini = true; stop(); rej(e); } });
+      } catch(e) { rej(e); return; }
+      minuteur = setTimeout(() => { if (!fini) { fini = true; stop(); res(null); } }, timeoutMs || 20000);
+    });
+  }
+
   window.HabitrainNFC = {
     supported,
     isScanning: () => scanning,
     startScan,
     stopScan,
-    writeTag
+    writeTag,
+    readTag
   };
 })();

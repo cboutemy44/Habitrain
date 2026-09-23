@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '22.1';
+  const APP_VERSION = '22.3';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -837,16 +837,40 @@
      Foxy dit lequel scanner et où il se trouve, une étape à la fois.
      Le QR et le tag NFC sont équivalents : le scanner écoute les deux.
      ============================================================ */
+  /* Le change se prouve par TON BRACELET, et rien d'autre. C'est le code que
+     tu portes en permanence : une seule preuve, toujours à portée, au poignet.
+     L'ancien code du tapis reste accepté pour ne pas invalider ce qui est déjà
+     imprimé et collé, mais ce n'est plus lui qu'on te demande. */
+  const PREUVE_BRACELET = {
+    nom:'ton bracelet', ou:'À ton poignet — QR ou tag NFC', petit:true,
+    accepte: k => k === 'unlock' || k === 'change_pilier' || k === 'change_tous'
+  };
+  const PREUVE_TAPIS = { nom:'le QR de ton tapis à langer', ou:'Sur ton tapis à langer',
+                         accepte: k => k === 'change_pilier' || k === 'change_tous' || k === 'unlock' };
+  /* Pas de bracelet dans ton trousseau ? On retombe sur le code du tapis : le
+     cadre ne se relâche pas parce qu'un accessoire manque. */
+  let braceletDispo = null;
+  async function chargerBracelet() {
+    try {
+      const acc = await lireStock('profil:accessoires', null);
+      if (acc && typeof acc.bracelet !== 'undefined') { braceletDispo = !!acc.bracelet; return braceletDispo; }
+    } catch(e) {}
+    try {
+      const p = await window.HabitrainQR.getQrPrefs();
+      braceletDispo = !!(p.braceletRequired || p.unlock);
+    } catch(e) { braceletDispo = false; }
+    return braceletDispo;
+  }
+  function preuveChange() { return braceletDispo === false ? PREUVE_TAPIS : PREUVE_BRACELET; }
+
   const PREUVE_DEF = {
-    change_pilier: { nom:'le QR de ton tapis à langer', ou:'Sur ton tapis à langer',
-                     accepte: k => k === 'change_pilier' || k === 'change_tous' },
-    change_tous:   { nom:'le QR de ton tapis à langer', ou:'Sur ton tapis à langer',
-                     accepte: k => k === 'change_pilier' || k === 'change_tous' },
+    get change_pilier() { return preuveChange(); },
+    get change_tous()   { return preuveChange(); },
     biberon:       { nom:'le QR de ton biberon',        ou:'Près du frigo ou du plan de travail',
                      accepte: k => k === 'biberon' },
     coucher:       { nom:'le QR du coucher',            ou:'Sur la porte de ta chambre',
                      accepte: k => k === 'coucher' },
-    tenue:         { nom:'l\'étiquette de ta tenue',    ou:'À l\'intérieur du col ou de la ceinture',
+    tenue:         { nom:'l\'étiquette de ta tenue',    ou:'À l\'intérieur du col ou de la ceinture', petit:true,
                      accepte: k => /^wb/.test(String(k)) }
   };
 
@@ -888,7 +912,8 @@
     const etape = total > 1 ? ('Étape ' + rang + ' sur ' + total + ' — ') : '';
     const lieu = '\n📍 ' + def.ou
       + (window.HabitrainNFC && window.HabitrainNFC.supported() ? '\nTu peux aussi approcher ton tag.' : '');
-    let entete = etape + 'scanne ' + def.nom + '.';
+    const verbe = (window.HabitrainNFC && window.HabitrainNFC.supported()) ? 'approche ou scanne ' : 'scanne ';
+    let entete = etape + verbe + def.nom + '.';
 
     for (let n = essai || 1; ; n++) {
       // à partir du 2e essai, la sortie est offerte directement
@@ -909,12 +934,12 @@
              { soft:true, label:'Finalement je scanne', onClick: () => { foxyPopHide(); res(false); } }]);
         });
         if (ok) { try { await marquerEntorse('b_preuve'); } catch(e) {} return 'force'; }
-        entete = etape + 'scanne ' + def.nom + '.';
+        entete = etape + verbe + def.nom + '.';
         continue;
       }
 
-      const k = await scannerUnCode();
-      if (!k) { entete = etape + 'scan annulé. On réessaie : ' + def.nom + '.'; continue; }
+      const k = await scannerUnCode({ petit: !!def.petit });
+      if (!k) { entete = etape + 'lecture annulée. On réessaie : ' + def.nom + '.'; continue; }
       if (!def.accepte(k)) { entete = etape + 'ce n\'est pas le bon code. Je veux ' + def.nom + '.'; continue; }
 
       if (kind === 'tenue') {
@@ -940,7 +965,14 @@
 
   // Chaîne d'étapes, dans l'ordre. Renvoie true si TOUT a été prouvé.
   async function exigerPreuves(kinds, ctx) {
-    const liste = (kinds || []).filter(k => PREUVE_DEF[k]);
+    // deux clés qui pointent la même preuve ne se demandent qu'une fois :
+    // un change ne réclame pas deux scans du même bracelet.
+    const vus = [];
+    const liste = (kinds || []).filter(k => {
+      const d = PREUVE_DEF[k];
+      if (!d || vus.indexOf(d) >= 0) return false;
+      vus.push(d); return true;
+    });
     if (!liste.length) return true;
     let tout = true;
     for (let i = 0; i < liste.length; i++) {
@@ -5958,7 +5990,7 @@
       fmt: v => Math.round(v*100) + ' %',
       mieux: (a,b) => 'Tu scannes ' + Math.round(b*100) + ' % de tes changes, contre ' + Math.round(a*100) + ' avant. Le geste est devenu automatique.',
       pire: (a,b) => 'Tu valides de plus en plus sans preuve : ' + Math.round(b*100) + ' % de scans contre ' + Math.round(a*100) + ' avant.',
-      cle: 'Un scan qu\'on saute, c\'est presque toujours un QR mal placé. Celui de ton tapis doit être visible SANS te relever. Déplace-le plutôt que de forcer l\'habitude.' },
+      cle: 'Un scan qu\'on saute, c\'est presque toujours un code qu\'on n\'a pas sous la main. Ton bracelet, lui, est déjà à ton poignet : garde-le, et il n\'y a plus rien à chercher.' },
 
     { id:'biberons', sens:1, minEcart:0.7, unite:'/jour',
       fmt: v => v.toFixed(1) + ' par jour',
@@ -11314,16 +11346,21 @@
     try { await renderRegles(); } catch(e) {}
     // une entorse rattachée à son énoncé pèse autrement qu'une ligne
     // dans un tableau : Foxy cite la règle, une fois, sans insister.
+    /* La règle se cite DANS la conversation, mais elle n'y retient personne :
+       une preuve validée sans scan attendait ici que Foxy ait fini de parler,
+       et le contrôle en cours restait suspendu derrière sa phrase. */
     if (nouvelle && !silencieux && voiceMode === 'foxy' && !paused) {
       const c = citerRegle(id);
-      if (c) { try { await imSay('📋 ' + c, 800, 'explain'); } catch(e) {} }
+      if (c) talk(TALK.CADRE, 'regle:' + id + ':' + d, async () => {
+        try { await imSay('📋 ' + c, 800, 'explain'); } catch(e) {}
+      });
     }
   }
 
   // ===== Feuille complète de QR à imprimer =====
   const QR_PLACEMENT = {
-    change_pilier: 'Sur ton tapis à langer',
-    change_tous:   'Sur ton tapis à langer',
+    change_pilier: 'Secours — le change se prouve au bracelet',
+    change_tous:   'Secours — le change se prouve au bracelet',
     biberon:       'Près du frigo ou du plan de travail',
     coucher:       'Sur la porte de ta chambre',
     unlock:        'Sur ton bracelet — à garder au poignet'
@@ -11578,6 +11615,115 @@
     } catch(e) {}
   }
 
+  /* ===== Registre des tags NFC =====
+     Un élément = un tag, un tag = un élément. On garde donc le numéro de série
+     de chaque tag programmé, en face de ce qu'il désigne. C'est ce registre qui
+     permet de prévenir avant d'écraser un tag actif, et de refuser qu'un même
+     tag serve deux fois. */
+  const TAGS_CLE = 'nfc:tags';
+  async function lireTags() {
+    try { const r = await window.storage.get(TAGS_CLE); if (r && r.value) return JSON.parse(r.value) || {}; } catch(e) {}
+    return {};
+  }
+  async function ecrireTags(t) { try { await window.storage.set(TAGS_CLE, JSON.stringify(t)); } catch(e) {} }
+  function tagPour(tags, uid) {
+    if (!uid) return null;
+    const k = Object.keys(tags).find(k => tags[k] && tags[k].uid === uid);
+    return k ? { kind:k, info:tags[k] } : null;
+  }
+  function dateCourte(ts) {
+    try { return new Date(ts).toLocaleDateString('fr-FR', { day:'numeric', month:'short' }); } catch(e) { return ''; }
+  }
+
+  // une question fermée, dans la fenêtre Foxy
+  function demanderPop(texte, expr, options) {
+    return new Promise(res => {
+      foxyPopShow(texte, expr, options.map(o => ({
+        label:o.label, soft:o.soft, onClick: () => { foxyPopHide(); res(o.v); }
+      })));
+    });
+  }
+
+  /* Programme un tag pour une cible, avec les deux garde-fous :
+     1. la cible a déjà un tag actif → on prévient avant de le remplacer ;
+     2. le tag présenté sert déjà à autre chose → on refuse, ou on le transfère
+        explicitement (et l'ancien élément se retrouve alors sans tag). */
+  async function programmerTag(cible, apres) {
+    const NFC = window.HabitrainNFC, QR = window.HabitrainQR;
+    const res = document.getElementById('nfcWriteResult');
+    const dire = t => { if (res) res.textContent = t; };
+    if (!NFC || !NFC.supported() || !QR) { dire('⚠️ NFC non disponible sur cet appareil.'); return false; }
+
+    const tags = await lireTags();
+    const actuel = tags[cible.kind];
+
+    // 1) un tag est déjà actif pour cet élément
+    if (actuel && actuel.uid) {
+      const suite = await demanderPop(
+        'Il y a déjà un tag actif pour « ' + cible.label +' » (programmé le ' + dateCourte(actuel.at) + ').\n\n'
+        + 'Un élément ne peut avoir qu\'un seul tag. Si tu en écris un nouveau, l\'ancien ne servira plus à rien — pense à le retirer.',
+        'pensive',
+        [ { label:'📶 Écrire quand même le nouveau', v:'go' },
+          { label:'Laisser celui qui existe', v:'non', soft:true } ]);
+      if (suite !== 'go') { dire('Rien de changé : le tag actuel reste le bon.'); return false; }
+    }
+
+    // 2) on lit d'abord le tag présenté : qui est-il déjà ?
+    dire('📶 Approche le tag du dos du téléphone…');
+    let lu = null;
+    try { lu = await NFC.readTag(20000); }
+    catch(e) { dire('⚠️ Lecture impossible : ' + (e.message || 'NFC refusé') + '.'); return false; }
+    if (!lu) { dire('⏱️ Aucun tag présenté. Recommence quand tu es prêt.'); return false; }
+
+    // ce tag est-il déjà celui d'un autre élément ?
+    let occupe = tagPour(tags, lu.uid);
+    if (!occupe && lu.payload) {
+      try {
+        const k = await QR.parsePayloadPublic(lu.payload);
+        if (k && k !== cible.kind) occupe = { kind:k, info:{ uid: lu.uid, at: null } };
+      } catch(e) {}
+    }
+    if (occupe && occupe.kind !== cible.kind) {
+      const nomAutre = (tags[occupe.kind] && tags[occupe.kind].label) || nomDeKind(occupe.kind);
+      const suite = await demanderPop(
+        'Ce tag est déjà celui de « ' + nomAutre + ' ».\n\n'
+        + 'Un tag ne peut pas désigner deux choses à la fois : si je l\'écris pour « ' + cible.label + ' », '
+        + '« ' + nomAutre + ' » se retrouve sans tag.',
+        'concern',
+        [ { label:'Prendre un autre tag', v:'non' },
+          { label:'Le transférer ici quand même', v:'go', soft:true } ]);
+      if (suite !== 'go') { dire('Rien d\'écrit. Présente un tag vierge, ou un tag que tu veux réellement réaffecter.'); return false; }
+      delete tags[occupe.kind];
+    }
+
+    // 3) écriture, puis enregistrement au registre
+    dire('📶 Garde le même tag contre le téléphone, j\'écris…');
+    try {
+      const payload = await QR.payloadFor(cible.kind, true);
+      await NFC.writeTag(payload);
+    } catch(e) {
+      dire('⚠️ Échec : ' + (e.message || 'tag non détecté ou protégé') + '. Réessaie en le maintenant contre le téléphone.');
+      return false;
+    }
+    tags[cible.kind] = { uid: lu.uid, at: Date.now(), label: cible.label };
+    await ecrireTags(tags);
+    dire('✅ Tag « ' + cible.label + ' » programmé — c\'est désormais le seul valable pour cet élément. '
+      + (cible.tenue ? 'Glisse-le dans le col ou couds-le à l\'intérieur.' : 'Colle-le au bon endroit.'));
+    if (apres) await apres();
+    return true;
+  }
+
+  function nomDeKind(k) {
+    const N = { unlock:'ton bracelet', biberon:'ton biberon', coucher:'le coucher',
+                change_pilier:'ton tapis à langer', change_tous:'ton tapis à langer' };
+    if (N[k]) return N[k];
+    try {
+      const WB = window.HabitrainWardrobe;
+      if (WB && /^wb/.test(String(k))) return 'une de tes tenues';
+    } catch(e) {}
+    return 'un autre élément';
+  }
+
   // ===== Programmation des tags NFC =====
   async function renderNfcWriter() {
     const sup = document.getElementById('nfcSupport');
@@ -11590,30 +11736,61 @@
       list.innerHTML = '';
       return;
     }
-    sup.innerHTML = '✅ NFC disponible. Choisis ce que tu veux écrire, puis approche un tag vierge du dos du téléphone.';
+    sup.innerHTML = '✅ NFC disponible. Un élément = un seul tag, et un tag = un seul élément. Choisis ce que tu veux écrire, puis approche le tag du dos du téléphone.';
     list.innerHTML = '';
     const cibles = [
-      { kind:'unlock',        label:'🔒 Bracelet (déverrouillage)' },
-      { kind:'change_pilier', label:'🔑 Change pilier' },
-      { kind:'change_tous',   label:'🍼 Tous les changes' },
+      { kind:'unlock',        label:'⌚ Bracelet — ouverture ET preuve des changes' },
       { kind:'biberon',       label:'🍼 Biberon' },
-      { kind:'coucher',       label:'🌙 Coucher' }
+      { kind:'coucher',       label:'🌙 Coucher' },
+      { kind:'change_pilier', label:'🔑 Tapis à langer (secours)' }
     ];
+    // Les tenues aussi : un tag cousu ou glissé dans le col vaut l'étiquette QR,
+    // et se lit sans sortir la caméra ni chercher la lumière.
+    try {
+      const WB = window.HabitrainWardrobe;
+      if (WB) {
+        const w = await WB.getWardrobe();
+        const vus = new Set();
+        for (const cat of ['nuit','jour','sieste','contention']) {
+          for (const nom of (w[cat] || [])) {
+            if (vus.has(nom)) continue;
+            vus.add(nom);
+            const ic = cat === 'nuit' ? '🌙' : (cat === 'jour' ? '☀️' : (cat === 'sieste' ? '😴' : '🔒'));
+            cibles.push({ kind: WB.itemId(cat, nom), label: ic + ' ' + nom, tenue:true });
+          }
+        }
+      }
+    } catch(e) {}
+
+    const tags = await lireTags();
+    let titreMis = false;
     cibles.forEach(c => {
+      if (c.tenue && !titreMis) {
+        titreMis = true;
+        const t = document.createElement('div');
+        t.style.cssText = 'font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;margin:10px 0 2px';
+        t.textContent = '👕 Tes tenues';
+        list.appendChild(t);
+      }
+      const actif = tags[c.kind];
       const b = document.createElement('button');
       b.className = 'settings-toggle-btn';
-      b.textContent = '📶 Écrire : ' + c.label;
-      b.addEventListener('click', async () => {
-        try {
-          const payload = await window.HabitrainQR.payloadFor(c.kind, true);
-          res.textContent = '📶 Approche le tag du dos du téléphone...';
-          await NFC.writeTag(payload);
-          res.textContent = '✅ Tag « ' + c.label + ' » programmé ! Colle-le au bon endroit.';
-        } catch (e) {
-          res.textContent = '⚠️ Échec : ' + (e.message || 'tag non détecté ou protégé') + '. Réessaie en le maintenant contre le téléphone.';
-        }
-      });
+      b.textContent = (actif ? '✅ ' : '📶 ') + c.label
+        + (actif ? '  · tag actif depuis le ' + dateCourte(actif.at) : '');
+      b.addEventListener('click', () => programmerTag(c, renderNfcWriter));
       list.appendChild(b);
+      if (actif) {
+        const o = document.createElement('button');
+        o.className = 'settings-toggle-btn';
+        o.style.cssText = 'opacity:.75;font-size:12.5px';
+        o.textContent = '   ↳ Oublier ce tag (perdu, abîmé)';
+        o.addEventListener('click', async () => {
+          const t2 = await lireTags(); delete t2[c.kind]; await ecrireTags(t2);
+          if (res) res.textContent = 'Tag oublié pour « ' + c.label + ' ». Tu peux en programmer un neuf.';
+          await renderNfcWriter();
+        });
+        list.appendChild(o);
+      }
     });
   }
 
@@ -11827,7 +12004,7 @@
     });
   }
   // ouvre le scanner et rend le code lu (ou null si annulé)
-  function scannerUnCode() {
+  function scannerUnCode(opt) {
     return new Promise(res => {
       const QR = window.HabitrainQR;
       if (!QR) return res(null);
@@ -11836,7 +12013,7 @@
       const iv = setInterval(() => {
         if (!fini && ov && ov.style.display === 'none') { fini = true; clearInterval(iv); res(null); }
       }, 400);
-      QR.startScan(null, k => { if (fini) return; fini = true; clearInterval(iv); res(k); });
+      QR.startScan(null, k => { if (fini) return; fini = true; clearInterval(iv); res(k); }, opt || {});
     });
   }
 
@@ -12229,10 +12406,11 @@
     const sauver = () => ecrireStock('profil:accessoires', acc);
 
     // bracelet
-    const b = await sChoix('Le <b>bracelet</b>. Un bracelet avec ton code : l\'appli ne s\'ouvre qu\'en le scannant. Tu ne peux plus « juste regarder » sans l\'avoir au poignet.'
-      + (niv.bracelet ? '<br><br>À ton niveau, <b>je te le conseille</b>.' : '<br><br>À ton niveau, c\'est facultatif.'),
+    const b = await sChoix('Le <b>bracelet</b>. C\'est la pièce que je te demande le plus souvent : ton code, à ton poignet, en permanence.<br><br>• Il <b>prouve tes changes</b> — un seul geste, toujours à portée, plus besoin de chercher un code collé quelque part.<br>• Il peut aussi <b>ouvrir l\'appli</b> : sans lui au poignet, tu ne peux plus « juste regarder ».'
+      + (niv.bracelet ? '<br><br>À ton niveau, <b>je te le conseille vraiment</b>.' : '<br><br>À ton niveau, c\'est facultatif — mais sans lui, chaque change se prouvera au code du tapis.'),
       [ { k:'oui', label:'⌚ Oui, je le porte' }, { k:'non', label:'Pas maintenant', soft:true } ], 'explain');
     acc.bracelet = b === 'oui';
+    braceletDispo = acc.bracelet;
     // le verrouillage n'est activé qu'une fois le bracelet imprimé ET lu au
     // scan (chapitre des étiquettes) : sinon, au prochain lancement, tu
     // serais bloqué devant un écran qui réclame un code que tu n'as pas.
@@ -12289,13 +12467,17 @@
       const p = await window.HabitrainQR.getQrPrefs();
       p.braceletRequired = !!on; if (on) p.unlock = true;
       await window.HabitrainQR.saveQrPrefs(p);
+      if (on) braceletDispo = true;
     } catch(e) {}
   }
 
   SETUP_CHAP.etiquettes = async () => {
     const acc = await lireStock('profil:accessoires', null) || {};
-    await sDire('Les étiquettes. C\'est ce qui fait que je n\'ai pas à te croire sur parole : chaque geste se prouve par un code.<br><br>• 🍼 ton <b>tapis à langer</b> — chaque change<br>• 🥛 ton <b>biberon</b> — ou le frigo<br>• 🌙 la <b>porte de ta chambre</b> — le coucher<br>• 👕 chacune de tes <b>tenues</b> — au col ou à la ceinture'
-      + (acc.bracelet ? '<br>• ⌚ ton <b>bracelet</b>' : ''), 'explain', 'On les fabrique');
+    await sDire('Les étiquettes. C\'est ce qui fait que je n\'ai pas à te croire sur parole : chaque geste se prouve par un code.<br><br>'
+      + (acc.bracelet
+          ? '• ⌚ ton <b>bracelet</b> — <b>chaque change</b>, c\'est lui<br>• 🍼 ton <b>tapis à langer</b> — en secours, si tu n\'as pas ton bracelet'
+          : '• 🍼 ton <b>tapis à langer</b> — chaque change')
+      + '<br>• 🥛 ton <b>biberon</b> — ou le frigo<br>• 🌙 la <b>porte de ta chambre</b> — le coucher<br>• 👕 chacune de tes <b>tenues</b> — au col ou à la ceinture', 'explain', 'On les fabrique');
     const g = await sChoix('Je te prépare la feuille : tous tes codes, prêts à imprimer (ou à télécharger). Tu la fermes quand c\'est fait, et je reviens.',
       [ { k:'go', label:'🖨️ Ouvrir ma feuille de codes' }, { k:'deja', label:'Je les ai déjà imprimés', soft:true } ], 'curious');
     if (g === 'go') {
@@ -12315,17 +12497,18 @@
       { k:'biberon',       n:'le code du biberon',         accepte: x => x === 'biberon' },
       { k:'coucher',       n:'le code de la porte',        accepte: x => x === 'coucher' }
     ];
-    if (acc.bracelet) FIXES.push({ k:'unlock', n:'le code de ton bracelet', accepte: x => x === 'unlock' });
+    // le bracelet d'abord : c'est lui qui prouvera tes changes
+    if (acc.bracelet) FIXES.unshift({ k:'unlock', n:'le code de ton bracelet', accepte: x => x === 'unlock', petit:true });
     for (const f of FIXES) {
       while (!verifiees[f.k]) {
         const a = await sChoix('Scanne <b>' + f.n + '</b>.', [ { k:'scan', label:'📷 Scanner' }, { k:'passe', label:'Passer', soft:true } ], 'curious');
         if (a === 'passe') break;
         document.body.classList.remove('onboarding');
-        const k = await scannerUnCode();
+        const k = await scannerUnCode({ petit: !!f.petit });
         document.body.classList.add('onboarding');
         if (k && f.accepte(k)) {
           verifiees[f.k] = true; await repondre('etiquettes_ok', verifiees);
-          if (f.k === 'unlock') { await activerBracelet(true); await sDire('✅ Lu. Ton bracelet est actif : désormais, l\'appli s\'ouvre avec lui.', 'proud', 'Suivant'); }
+          if (f.k === 'unlock') { await activerBracelet(true); await sDire('✅ Lu. Ton bracelet est actif : c\'est lui qui prouvera tes changes, et c\'est lui qui ouvre l\'appli.', 'proud', 'Suivant'); }
           else await sDire('✅ Lu. Parfait.', 'proud', 'Suivant');
         }
         else if (k) await sDire('Ça, ce n\'est pas ' + f.n + '. Vérifie que la bonne étiquette est au bon endroit.', 'concern', 'Je réessaie');
@@ -14823,6 +15006,7 @@
     try { await loadDayMood(); } catch(e) {}
     try { await loadDiscipline(); } catch(e) {}
     try { await loadDesertion(); } catch(e) {}
+    try { await chargerBracelet(); } catch(e) {}
     try { await loadProfilNom(); } catch(e) {}
     try { await figerDonneesExistantes(); } catch(e) {}
     // marqueurs pour les hauts faits contextuels
