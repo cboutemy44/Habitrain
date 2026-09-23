@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '21.8';
+  const APP_VERSION = '21.9';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -960,6 +960,8 @@
   function allerAuChat(force) {
     try {
       if (voiceMode !== 'foxy' || ecranVerrouille()) return;
+      // tu es dans la salle de jeux ou les réglages : on ne te déplace pas de force
+      if (panneauOuvert()) { appelFoxy(); return; }
       if (currentTab !== 'maintenant') { showTab('maintenant'); force = true; }
       const c = document.getElementById('imChat');
       if (!c || c.style.display === 'none') return;
@@ -970,6 +972,137 @@
       _scrollChat = Date.now();
       c.scrollIntoView({ behavior:'smooth', block: r.height > (window.innerHeight - 60) ? 'start' : 'center' });
     } catch(e) {}
+  }
+
+  /* ============================================================
+     BONJOUR, AU REVOIR
+     Foxy sait quand tu pars et quand tu reviens. En partant, il te
+     dit au revoir dans sa bulle ; au retour, il te salue selon
+     l'heure et le temps passé — et il te raconte ce qu'il a fait
+     pendant ce temps-là.
+     ============================================================ */
+  let _presenceTic = 0;
+  async function marquerPresence() {
+    _presenceTic = Date.now();
+    await ecrireStock('presence:last', Date.now());
+  }
+  function momentDuJour(h) {
+    if (h < 5) return 'nuit';
+    if (h < 11) return 'matin';
+    if (h < 14) return 'midi';
+    if (h < 18) return 'aprem';
+    if (h < 22) return 'soir';
+    return 'nuit';
+  }
+  const AU_REVOIR = {
+    matin: ['À tout à l\'heure ! Passe une bonne matinée. 🦊', 'File. Je garde la maison. 🦊'],
+    midi:  ['Bon appétit ! Je t\'attends ici. 🦊', 'À tout de suite. 💛'],
+    aprem: ['À tout à l\'heure. Je ne bouge pas d\'ici. 🦊', 'Va, je t\'attends. 💛'],
+    soir:  ['À tout de suite. Pense à ton change du soir. 🦊', 'À tout à l\'heure. 💛'],
+    nuit:  ['Bonne nuit, dors bien. Je veille. 🌙', 'Fais de beaux rêves. 🦊💛']
+  };
+  function direAuRevoir() {
+    try {
+      if (voiceMode !== 'foxy' || paused || ecranVerrouille()) return;
+      const lot = AU_REVOIR[momentDuJour(new Date().getHours())] || AU_REVOIR.aprem;
+      const txt = lot[Math.floor(Math.random()*lot.length)];
+      const rt = document.getElementById('rpgText');
+      const rn = document.getElementById('rpgNext');
+      if (rt) rt.textContent = (nomOu(null) ? nomOu(null) + ', ' : '') + txt.charAt(0).toLowerCase() + txt.slice(1);
+      if (rn) rn.style.visibility = 'hidden';
+    } catch(e) {}
+  }
+  async function saluerRetour() {
+    if (voiceMode !== 'foxy' || paused) return false;
+    const last = await lireStock('presence:last', 0);
+    const min = last ? (Date.now() - last) / 60000 : 999;
+    if (min < 20) return false;                       // tu n'es pas vraiment parti
+    // le rituel du réveil et la morale d'une désertion parlent d'eux-mêmes
+    if (await desertionEnAttente()) return false;
+    if (new Date().getHours() >= 6 && !(await lireStock('reveil:rituel:' + todayStr(), false))) return false;
+    const moment = momentDuJour(new Date().getHours());
+    const toi = nomOu(null);
+    const appel = toi ? ', ' + esc(toi) : '';
+    let phrase;
+    if (min < 90) {
+      phrase = bro('Te revoilà' + appel + ' ! 🦊', 'Te revoilà.');
+    } else if (min < 6*60) {
+      const SALUT = {
+        matin: 'Bonjour' + appel + ' ! 🦊 Bien dormi ?',
+        midi:  'Te revoilà' + appel + ' ! 🦊',
+        aprem: 'Ah, te revoilà' + appel + ' ! Tu m\'as manqué, tu sais. 💛',
+        soir:  'Bonsoir' + appel + ' ! 🦊',
+        nuit:  'Tu es debout' + appel + ' ? 🌙'
+      };
+      phrase = bro(SALUT[moment], 'Te revoilà.');
+    } else {
+      phrase = bro(
+        (moment === 'matin' ? 'Bonjour' : moment === 'soir' || moment === 'nuit' ? 'Bonsoir' : 'Coucou') + appel + ' ! 🦊 Ça faisait un moment.',
+        'Te revoilà. Ça faisait un moment.');
+    }
+    await imSay(phrase, 850, moment === 'nuit' ? 'sleep' : 'joy');
+    // ce qu'il a fait pendant ton absence
+    if (min >= 90 && !broOn()) {
+      try {
+        const d = foxyDecrit(foxyJournee());
+        await imSay('Pendant ce temps-là, moi… ' + d.couche.charAt(0).toLowerCase() + d.couche.slice(1), 950, 'happy');
+      } catch(e) {}
+    }
+    // et ce qui t'attend, si quelque chose t'attend
+    try {
+      const c = creneauCourant();
+      if (c) await imSay(bro(
+        'Et tu tombes bien : c\'est l\'heure de ton ' + c.label.toLowerCase() + '.',
+        'C\'est l\'heure : ' + c.label.toLowerCase() + '.'), 900, 'curious');
+      else {
+        const p = prochainPilier(new Date());
+        if (p && p.dans != null && p.dans <= 60) await imSay(bro(
+          'Ton prochain change est dans ' + p.dans + ' minutes. Profite. 🦊',
+          'Prochain change dans ' + p.dans + ' minutes.'), 850, 'calm');
+      }
+    } catch(e) {}
+    if (currentM) await imOfferHelp(currentM);
+    return true;
+  }
+
+  /* ============================================================
+     NAVIGATION
+     Foxy d'un côté, les outils de l'autre. Ouvrir la salle de jeux,
+     les réglages ou le reporting masque son écran : rien ne cohabite
+     avec sa conversation. Le bouton 🦊 ramène toujours à lui.
+     ============================================================ */
+  const PANNEAUX = ['salleCard','settingsCard','tipsCard','badgesCard','missionsCard','questCard',
+                    'wardrobeCard','lockCard','tenueSensorCard','sensorCard','qrCard','saveCard','debugCard'];
+  function panneauOuvert() {
+    return PANNEAUX.some(id => {
+      const e = document.getElementById(id);
+      if (!e || e.style.display === 'none') return false;
+      return id === 'salleCard' || !e.closest('#salleCard');   // les tiroirs de la salle ne comptent pas
+    });
+  }
+  function majPanneau() { document.body.classList.toggle('panneau', panneauOuvert()); }
+  function fermerPanneaux() {
+    PANNEAUX.forEach(id => {
+      const e = document.getElementById(id);
+      if (e && (id === 'salleCard' || !e.closest('#salleCard'))) e.style.display = 'none';
+    });
+    const m = document.getElementById('menuPanneau'); if (m) m.style.display = 'none';
+    majPanneau();
+  }
+  function retourFoxy() {
+    fermerPanneaux();
+    const a = document.getElementById('foxyAppel'); if (a) a.remove();
+    if (currentTab !== 'maintenant') showTab('maintenant');
+    setTimeout(() => allerAuChat(true), 100);
+  }
+  // Foxy t'attend pendant que tu es ailleurs : une pastille, pas un rapt d'écran
+  function appelFoxy() {
+    if (document.getElementById('foxyAppel')) return;
+    const b = document.createElement('button');
+    b.id = 'foxyAppel';
+    b.textContent = '🦊 Foxy t\'attend';
+    b.addEventListener('click', () => retourFoxy());
+    document.body.appendChild(b);
   }
 
   function imClear() {
@@ -9308,7 +9441,9 @@
     const card = document.getElementById('settingsCard');
     const show = card.style.display === 'none';
     card.style.display = show ? '' : 'none';
-    if (show) { renderSettings(); card.scrollIntoView({behavior:'smooth', block:'start'}); }
+    const mp = document.getElementById('menuPanneau'); if (mp) mp.style.display = 'none';
+    majPanneau();
+    if (show) { renderSettings(); window.scrollTo({ top: 0, behavior:'smooth' }); }
     else {
       // en fermant les paramètres, on referme toutes les sections
       document.querySelectorAll('.set-nav').forEach(b => {
@@ -14382,12 +14517,14 @@
     if (!card) return;
     const montrer = card.style.display === 'none';
     card.style.display = montrer ? '' : 'none';
-    if (!montrer) return;
-    try { await renderMissions(); } catch(e) {}
-    try { await renderBadges(); } catch(e) {}
-    try { await renderQuest(); } catch(e) {}
-    try { await renderTips(); } catch(e) {}
-    card.scrollIntoView({ behavior:'smooth', block:'start' });
+    const m = document.getElementById('menuPanneau'); if (m) m.style.display = 'none';
+    if (!montrer) { majPanneau(); return; }
+    // les quatre coins sont repliés : tu ouvres celui qui t'intéresse
+    document.querySelectorAll('#salleCard .tiroir').forEach(e => e.style.display = 'none');
+    document.querySelectorAll('#salleCard .tiroir-t').forEach(e => e.classList.remove('on'));
+    majPanneau();
+    const a = document.getElementById('foxyAppel'); if (a) a.remove();
+    window.scrollTo({ top: 0, behavior:'smooth' });
     if (voiceMode !== 'foxy' || paused) return;
     // clé unique : rouvrir la salle redonne la parole à Foxy, même s'il vient de parler
     talk(TALK.GUIDE, 'salle:accueil:' + Date.now(), () => accueilSalle());
@@ -14439,6 +14576,40 @@
   }
 
   (document.getElementById('openSalle')||{addEventListener(){}}).addEventListener('click', () => { ouvrirSalle(); });
+  (document.getElementById('retourFoxy')||{addEventListener(){}}).addEventListener('click', () => retourFoxy());
+  // départ et retour
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { direAuRevoir(); marquerPresence(); return; }
+    talk(TALK.AMBIANCE, 'presence:retour:' + Date.now(), () => saluerRetour());
+    marquerPresence();
+  });
+  window.addEventListener('pagehide', () => { direAuRevoir(); marquerPresence(); });
+  setInterval(() => { if (document.visibilityState === 'visible') marquerPresence(); }, 60000);
+  (document.getElementById('ouvrirMenu')||{addEventListener(){}}).addEventListener('click', () => {
+    const m = document.getElementById('menuPanneau');
+    if (m) m.style.display = m.style.display === 'none' ? 'flex' : 'none';
+  });
+  // les tiroirs de la salle de jeux : un seul ouvert à la fois
+  document.querySelectorAll('.tiroir-t').forEach(t => {
+    t.addEventListener('click', async () => {
+      const cible = document.getElementById(t.dataset.tiroir);
+      const ouvrir = cible && cible.style.display === 'none';
+      document.querySelectorAll('.tiroir-t').forEach(x => {
+        x.classList.remove('on');
+        const c = document.getElementById(x.dataset.tiroir); if (c) c.style.display = 'none';
+      });
+      if (!ouvrir) return;
+      t.classList.add('on');
+      cible.style.display = '';
+      try {
+        if (t.dataset.tiroir === 'missionsCard') await renderMissions();
+        else if (t.dataset.tiroir === 'badgesCard') await renderBadges();
+        else if (t.dataset.tiroir === 'questCard') await renderQuest();
+        else if (t.dataset.tiroir === 'tipsCard') await renderTips();
+      } catch(e) {}
+      t.scrollIntoView({ behavior:'smooth', block:'start' });
+    });
+  });
   document.querySelectorAll('#debugCard [data-vm]').forEach(btn => {
     btn.addEventListener('click', () => setVoiceMode(btn.dataset.vm));
   });
@@ -14614,6 +14785,9 @@
         }
       }
     } catch(e) {}
+
+    // il te salue au lancement, selon l'heure et le temps passé
+    setTimeout(() => talk(TALK.AMBIANCE, 'presence:ouverture', () => saluerRetour()), 1400);
 
     // le tirage du réveil passe AVANT le change dû : le change du matin
     // vérifie la tenue, il faut donc qu'elle soit tirée

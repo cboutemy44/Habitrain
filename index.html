@@ -16,10 +16,14 @@
     <div class="icon foxy-portrait" id="headFoxy"></div>
     <h1>Journal de suivi</h1>
     <p>Immersion 24/7 · 2 min matin & soir</p>
-    <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-      <button class="settings-toggle-btn" id="openSettings">⚙️ Paramètres</button>
-      <button class="settings-toggle-btn" id="toggleVoice">🦊 Mode Foxy</button>
+    <div class="nav-haut">
+      <button class="nav-foxy" id="retourFoxy">🦊 Foxy</button>
+      <button class="nav-menu" id="ouvrirMenu" aria-label="Menu">☰</button>
+    </div>
+    <div class="menu-panneau" id="menuPanneau" style="display:none">
       <button class="settings-toggle-btn" id="openSalle">🧸 Salle de jeux</button>
+      <button class="settings-toggle-btn" id="openSettings">⚙️ Paramètres</button>
+      <button class="settings-toggle-btn" id="toggleVoice">📋 Reporting</button>
       <button class="settings-toggle-btn" id="pauseBtn">⏸️ Pause</button>
     </div>
   </div>
@@ -123,7 +127,8 @@
   <div class="card" id="salleCard" style="display:none">
     <h2>🧸 La salle de jeux</h2>
     <div class="sub">Tes missions, tes hauts faits, notre aventure et tout ce que Foxy t'a appris.</div>
-<div class="bloc" id="missionsCard">
+<button class="tiroir-t" data-tiroir="missionsCard">🎯 Missions<span class="fl">▾</span></button>
+<div class="bloc tiroir" id="missionsCard" style="display:none">
     <h2>🎯 Missions</h2>
     <div class="sub">Des objectifs de fond sur plusieurs jours, et des défis renouvelés chaque matin.</div>
 
@@ -143,19 +148,22 @@
       <div id="missDone"></div>
     </div>
   </div>
-<div class="bloc" id="badgesCard">
+<button class="tiroir-t" data-tiroir="badgesCard">🏆 Hauts faits<span class="fl">▾</span></button>
+<div class="bloc tiroir" id="badgesCard" style="display:none">
     <h2>🏆 Hauts faits</h2>
     <div class="sub">Ta collection de récompenses, à débloquer tout au long de ton habituation.</div>
     <div id="badgesProg" style="margin:12px 0"></div>
     <div id="badgesList"></div>
   </div>
-<div class="bloc" id="questCard">
+<button class="tiroir-t" data-tiroir="questCard">🗺️ Notre aventure<span class="fl">▾</span></button>
+<div class="bloc tiroir" id="questCard" style="display:none">
     <h2>🗺️ Notre aventure</h2>
     <div class="sub">Le Voyage de Foxy — l'histoire qu'on écrit ensemble, au fil de ton mois.</div>
     <div id="questProgress" style="margin:12px 0"></div>
     <div id="questChapters"></div>
   </div>
-<div class="bloc" id="tipsCard">
+<button class="tiroir-t" data-tiroir="tipsCard">💡 Les conseils de Foxy<span class="fl">▾</span></button>
+<div class="bloc tiroir" id="tipsCard" style="display:none">
     <h2>💡 Conseils de Foxy</h2>
     <div class="sub">🦊 « Tout ce que j'ai appris, je te le transmets — au fur et à mesure que tu avances. »</div>
     <div id="tipsProg" style="margin:12px 0"></div>
