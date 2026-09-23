@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '22.8';
+  const APP_VERSION = '22.9';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -915,15 +915,37 @@
        · navigateur Chrome : Web NFC lit directement.
      ecouterTag(cb) branche les deux et renvoie la fonction qui débranche. */
   let tagEnAttente = null;
-  function ecouterTag(onKind) {
+  /* Anti-rebond. Un tag laissé contre le téléphone n'est pas lu une fois : il
+     est relu en boucle, plusieurs fois par seconde. Sans ce garde-fou, une
+     seule approche valait deux lectures — c'est ce qui bouclait le biberon en
+     une seconde, la deuxième lecture arrivant avant que tu aies retiré la main. */
+  const TAG_REBOND = 3000;
+  let tagDernier = { k:null, t:0 };
+  function tagRebond(k) {
+    const n = Date.now();
+    if (tagDernier.k === k && n - tagDernier.t < TAG_REBOND) { tagDernier.t = n; return true; }
+    tagDernier = { k, t:n };
+    return false;
+  }
+
+  function ecouterTag(onKind, opt) {
+    opt = opt || {};
     const QR = window.HabitrainQR, NFC = window.HabitrainNFC;
     let vivant = true;
-    tagEnAttente = (k) => { if (vivant) onKind(k); };
+    const depart = Date.now();
+    const servir = (k) => {
+      if (!vivant) return;
+      // délai de garde : le temps que tu retires ton tag du téléphone
+      if (opt.apres && Date.now() - depart < opt.apres) return;
+      if (tagRebond(k)) return;
+      onKind(k);
+    };
+    tagEnAttente = servir;
     if (NFC && NFC.supported()) {
       try {
         NFC.startScan(async (payload) => {
           if (!vivant) return;
-          try { const k = await QR.parsePayloadPublic(payload); if (k) onKind(k); } catch(e) {}
+          try { const k = await QR.parsePayloadPublic(payload); if (k) servir(k); } catch(e) {}
         });
       } catch(e) { /* pas de Web NFC : le natif ou le QR prendront le relais */ }
     }
@@ -1154,7 +1176,8 @@
     if (ouverte && ouverte.t && (Date.now() - ouverte.t) > 4 * 3600000) ouverte = null;  // oubliée
 
     let debut = ouverte ? ouverte.t : null;
-    const finirDirect = !!(ouverte && codeInitial && def.accepte(codeInitial));
+    const finirDirect = !!(ouverte && codeInitial && def.accepte(codeInitial)
+                           && (Date.now() - ouverte.t) > 30000);
 
     // ---- 1er temps : on démarre ----
     if (!debut && codeInitial && def.accepte(codeInitial)) {
@@ -1188,6 +1211,10 @@
     }
 
     // ---- pendant : la fenêtre reste, le temps tourne ----
+    /* Un biberon ne se boit pas en trois secondes : tant que ce plancher n'est
+       pas passé, la deuxième lecture ne compte pas. Sans lui, le tag encore
+       posé sur le téléphone refermait la session aussitôt ouverte. */
+    const BIB_PLANCHER = 30;   // secondes
     const resultat = finirDirect ? { tag: codeInitial } : await new Promise(res => {
       let rendu = false, tic = null;
       const fin = v => {
@@ -1195,24 +1222,31 @@
         if (tic) clearInterval(tic);
         try { stop(); } catch(e) {} foxyPopHide(); res(v);
       };
+      const ecoule = () => Math.floor((Date.now() - debut) / 1000);
+      const pret = () => ecoule() >= BIB_PLANCHER;
       const texte = () => {
-        const sec = Math.floor((Date.now() - debut) / 1000);
+        const sec = ecoule();
         const part = Math.min(1, sec / cible);
         const barre = '█'.repeat(Math.round(part * 10)) + '·'.repeat(10 - Math.round(part * 10));
         return '⏱ ' + chrono(sec) + '   ' + barre + '\n\n'
-          + bro('Bois tranquillement. Quand ton biberon est fini, tu approches ton tag une seconde fois — c\'est tout.',
-                'Bois. Tag une deuxième fois quand c\'est fini.')
+          + (pret()
+              ? bro('Bois tranquillement. Quand ton biberon est fini, tu approches ton tag une seconde fois — c\'est tout.',
+                    'Bois. Tag une deuxième fois quand c\'est fini.')
+              : bro('C\'est parti — écarte ton tag du téléphone et installe-toi. Je le réécouterai dans ' + (BIB_PLANCHER - sec) + ' s.',
+                    'Écarte ton tag. Réécoute dans ' + (BIB_PLANCHER - sec) + ' s.'))
           + '\n\nIdéal : ' + mmss(cible);
       };
       const boutons = [
         { soft:true, label:'📷 Terminer avec le QR', onClick: async () => {
+            if (!pret()) return;
             const k = await scannerUnCode({});
             if (k && def.accepte(k)) fin({ tag:k });
           } },
         { soft:true, label:'Annuler ce biberon', onClick: () => fin('annule') }
       ];
       foxyPopShow(texte(), 'bottle', boutons);
-      var stop = ecouterTag(k => { if (def.accepte(k)) fin({ tag:k }); });
+      var stop = ecouterTag(k => { if (def.accepte(k) && pret()) fin({ tag:k }); },
+                            { apres: BIB_PLANCHER * 1000 });
       tic = setInterval(() => {
         const t = document.getElementById('foxyPopText');
         if (!t || document.getElementById('foxyPop').style.display === 'none') return;
