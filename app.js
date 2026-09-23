@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '22.3';
+  const APP_VERSION = '22.8';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -517,13 +517,22 @@
     { key:'c2230', m:22*60+30, ctx:'pilier', label:'Change de nuit' }
   ];
   // le créneau dont la fenêtre couvre l'heure donnée (pilier : 2 h, check : 45 min)
+  /* Modes intensif et discipline : ils SERRENT le cadre, ils ne le déforment
+     pas. Un check reste un check — le transformer en change imposé faisait
+     changer une couche portée une heure : du gâchis, et des statistiques
+     fausses (des changes partout, des durées de port ridicules). Ce qui se
+     durcit, c'est la fenêtre (5 minutes au lieu de 45) et le droit de
+     repousser, qui disparaît. */
+  function serre() { return hardMode || discActive(); }
   function creneauCourant(now, tolerance) {
     const d = now || new Date();
     const nowMin = d.getHours()*60 + d.getMinutes();
     for (const s of CRENEAUX) {
-      const ctx = (hardMode || discActive()) ? 'pilier' : s.ctx;
-      const fen = tolerance != null ? tolerance : (ctx === 'pilier' ? 120 : 45);
-      if (nowMin >= s.m && nowMin <= s.m + fen) return Object.assign({}, s, { ctx });
+      // resserrer, oui ; supprimer le rappel, non : une fenêtre de 5 minutes
+      // ferait disparaître le créneau au lieu de te presser.
+      const dur = s.ctx === 'pilier' ? (serre() ? 60 : 120) : (serre() ? 15 : 45);
+      const fen = tolerance != null ? tolerance : dur;
+      if (nowMin >= s.m && nowMin <= s.m + fen) return Object.assign({}, s);
     }
     return null;
   }
@@ -870,6 +879,8 @@
                      accepte: k => k === 'biberon' },
     coucher:       { nom:'le QR du coucher',            ou:'Sur la porte de ta chambre',
                      accepte: k => k === 'coucher' },
+    tetine:        { nom:'le tag de ta tétine',         ou:'Sur la protection de ta tétine', petit:true,
+                     accepte: k => k === 'tetine' },
     tenue:         { nom:'l\'étiquette de ta tenue',    ou:'À l\'intérieur du col ou de la ceinture', petit:true,
                      accepte: k => /^wb/.test(String(k)) }
   };
@@ -898,6 +909,30 @@
     return { ok:false, raison:'pas la bonne', item, attendue: att.nom };
   }
 
+  /* ===== Écoute d'un tag NFC, quelle que soit la plateforme =====
+     Deux sources, un seul point d'entrée :
+       · application Android : le tag arrive par le natif (__habitrainTag) ;
+       · navigateur Chrome : Web NFC lit directement.
+     ecouterTag(cb) branche les deux et renvoie la fonction qui débranche. */
+  let tagEnAttente = null;
+  function ecouterTag(onKind) {
+    const QR = window.HabitrainQR, NFC = window.HabitrainNFC;
+    let vivant = true;
+    tagEnAttente = (k) => { if (vivant) onKind(k); };
+    if (NFC && NFC.supported()) {
+      try {
+        NFC.startScan(async (payload) => {
+          if (!vivant) return;
+          try { const k = await QR.parsePayloadPublic(payload); if (k) onKind(k); } catch(e) {}
+        });
+      } catch(e) { /* pas de Web NFC : le natif ou le QR prendront le relais */ }
+    }
+    return () => {
+      vivant = false; tagEnAttente = null;
+      try { if (NFC && NFC.isScanning()) NFC.stopScan(); } catch(e) {}
+    };
+  }
+
   /* Une étape de preuve. Renvoie 'ok' (scan valide) ou 'force' (validé sans
      preuve, entorse notée).
 
@@ -910,19 +945,29 @@
     const def = PREUVE_DEF[kind];
     if (!QR || !def) return 'ok';               // rien à prouver : on ne bloque pas
     const etape = total > 1 ? ('Étape ' + rang + ' sur ' + total + ' — ') : '';
-    const lieu = '\n📍 ' + def.ou
-      + (window.HabitrainNFC && window.HabitrainNFC.supported() ? '\nTu peux aussi approcher ton tag.' : '');
-    const verbe = (window.HabitrainNFC && window.HabitrainNFC.supported()) ? 'approche ou scanne ' : 'scanne ';
-    let entete = etape + verbe + def.nom + '.';
+    const lieu = '\n📍 ' + def.ou;
+    let entete = etape + 'approche ' + def.nom + '.';
 
     for (let n = essai || 1; ; n++) {
-      // à partir du 2e essai, la sortie est offerte directement
+      // Le tag d'abord : la fenêtre écoute dès qu'elle s'affiche, tu n'as
+      // rien à appuyer. Le QR reste là, en secours, derrière un bouton.
       const choix = await new Promise(res => {
-        const boutons = [{ label: n === 1 ? '📷 Scanner' : '📷 Réessayer', onClick: () => { foxyPopHide(); res('scan'); } }];
-        if (n >= 2) boutons.push({ soft:true, label:'✓ Valider sans scanner', onClick: () => { foxyPopHide(); res('sans'); } });
-        else boutons.push({ soft:true, label:'Je ne peux pas scanner', onClick: () => { foxyPopHide(); res('sans'); } });
-        foxyPopShow(entete + lieu, n === 1 ? 'curious' : 'pensive', boutons);
+        let rendu = false;
+        const fin = (v) => { if (rendu) return; rendu = true; try { stop(); } catch(e) {} foxyPopHide(); res(v); };
+        const boutons = [];
+        boutons.push({ soft:true, label:'📷 Passer par le QR', onClick: () => fin('qr') });
+        if (n >= 2) boutons.push({ soft:true, label:'✓ Valider sans preuve', onClick: () => fin('sans') });
+        else boutons.push({ soft:true, label:'Je ne peux pas', onClick: () => fin('sans') });
+        foxyPopShow('📶 ' + entete + lieu, n === 1 ? 'curious' : 'pensive', boutons);
+        var stop = ecouterTag(k => fin({ tag:k }));
       });
+
+      if (choix && choix.tag) {
+        const r = await verifierPreuve(choix.tag, kind, def, etape, ctx);
+        if (r === 'retry') { entete = etape + 'approche ' + def.nom + '.'; continue; }
+        if (r === 'mauvais') { entete = etape + 'ce n\'est pas le bon tag. Je veux ' + def.nom + '.'; continue; }
+        return r;
+      }
 
       if (choix === 'sans') {
         const ok = await new Promise(res => {
@@ -934,33 +979,281 @@
              { soft:true, label:'Finalement je scanne', onClick: () => { foxyPopHide(); res(false); } }]);
         });
         if (ok) { try { await marquerEntorse('b_preuve'); } catch(e) {} return 'force'; }
-        entete = etape + verbe + def.nom + '.';
+        entete = etape + 'approche ' + def.nom + '.';
         continue;
       }
 
+      // secours : la caméra et le QR imprimé
       const k = await scannerUnCode({ petit: !!def.petit });
       if (!k) { entete = etape + 'lecture annulée. On réessaie : ' + def.nom + '.'; continue; }
-      if (!def.accepte(k)) { entete = etape + 'ce n\'est pas le bon code. Je veux ' + def.nom + '.'; continue; }
-
-      if (kind === 'tenue') {
-        const v = await tenueConforme(k, ctx && ctx.nuit);
-        if (!v.ok) {
-          const quoi = v.attendue
-            ? ('C\'est « ' + (v.item ? v.item.name : '?') + ' ». Je veux « ' + v.attendue + ' ».')
-            : 'Cette étiquette n\'est pas une de tes tenues.';
-          const suite = await new Promise(res => {
-            foxyPopShow(quoi + '\nTu veux la changer, ou c\'est bien celle que tu portes ?', 'pensive', [
-              { label:'📷 Je l\'ai changée, je rescanne', onClick: () => { foxyPopHide(); res('retry'); } },
-              { soft:true, label:'C\'est celle que je porte', onClick: () => { foxyPopHide(); res('garde'); } }
-            ]);
-          });
-          if (suite === 'retry') { entete = etape + 'scanne ' + def.nom + '.'; continue; }
-          try { await marquerEntorse('b_tenue_hs'); } catch(e) {}
-          return 'force';
-        }
-      }
-      return 'ok';
+      const r = await verifierPreuve(k, kind, def, etape, ctx);
+      if (r === 'retry') { entete = etape + 'approche ' + def.nom + '.'; continue; }
+      if (r === 'mauvais') { entete = etape + 'ce n\'est pas le bon code. Je veux ' + def.nom + '.'; continue; }
+      return r;
     }
+  }
+
+  /* Un code lu — par tag ou par QR, c'est pareil ici. Renvoie 'ok', 'force',
+     'mauvais' (pas le bon code) ou 'retry' (à relire). */
+  async function verifierPreuve(k, kind, def, etape, ctx) {
+    if (!def.accepte(k)) return 'mauvais';
+    if (kind === 'tenue') {
+      const v = await tenueConforme(k, ctx && ctx.nuit);
+      if (!v.ok) {
+        const quoi = v.attendue
+          ? ('C\'est « ' + (v.item ? v.item.name : '?') + ' ». Je veux « ' + v.attendue + ' ».')
+          : 'Ce n\'est pas une de tes tenues.';
+        const suite = await new Promise(res => {
+          foxyPopShow(quoi + '\nTu veux la changer, ou c\'est bien celle que tu portes ?', 'pensive', [
+            { label:'Je l\'ai changée, je relis', onClick: () => { foxyPopHide(); res('retry'); } },
+            { soft:true, label:'C\'est celle que je porte', onClick: () => { foxyPopHide(); res('garde'); } }
+          ]);
+        });
+        if (suite === 'retry') return 'retry';
+        try { await marquerEntorse('b_tenue_hs'); } catch(e) {}
+        return 'force';
+      }
+    }
+    return 'ok';
+  }
+
+  /* ============================================================
+     LE BIBERON SE BOIT EN DEUX TEMPS
+     Un tag pour commencer, un tag pour finir. Entre les deux, le temps
+     passe et il est compté : c'est LUI qui dit si tu as bu comme un grand
+     pressé ou si tu t'es laissé aller. Foxy donne une durée idéale, qui
+     s'allonge à mesure que tu avances dans le programme.
+     ============================================================ */
+  const BIB_CLE = 'bib:sessions:';      // par jour
+  const BIB_ENCOURS = 'bib:encours';    // une session ouverte survit à la fermeture
+
+  // L'idéal n'est pas le même au premier jour qu'au bout d'un mois : on
+  // commence à 8 minutes, on gagne une minute par semaine, on plafonne à 18.
+  async function cibleBiberonSec() {
+    let jours = 0;
+    try {
+      const se = await lireStock('setup:etat', null);
+      const t0 = se && (se.termine === true ? null : se.termine);
+      if (t0) jours = Math.max(0, Math.floor((Date.now() - t0) / 86400000));
+    } catch(e) {}
+    const min = Math.min(18, 8 + Math.floor(jours / 7));
+    return min * 60;
+  }
+  function mmss(sec) {
+    const m = Math.floor(sec / 60), r = sec % 60;
+    return m + ' min ' + String(r).padStart(2, '0') + ' s';
+  }
+  function chrono(sec) {
+    return String(Math.floor(sec / 60)).padStart(2,'0') + ':' + String(sec % 60).padStart(2,'0');
+  }
+  async function sessionsBiberon(date) {
+    try { const r = await window.storage.get(BIB_CLE + (date || todayStr())); if (r && r.value) return JSON.parse(r.value) || []; } catch(e) {}
+    return [];
+  }
+
+  /* Le verdict de Foxy. Bandes autour de la cible : nettement trop vite,
+     un peu vite, juste, ou traîné. Jamais sévère : il ajuste, il ne punit pas. */
+  function verdictBiberon(sec, cible) {
+    const r = sec / cible;
+    if (r < 0.55) return { id:'vite', expr:'pensive',
+      f:'Bu d\'un trait, ça. ' + mmss(sec) + ' — je te voyais plutôt vers ' + mmss(cible) + '. Le biberon n\'est pas une gorgée d\'eau entre deux portes : c\'est un moment où tu te poses. La prochaine fois, allonge-toi et laisse-le venir.',
+      b:'Trop vite. ' + mmss(sec) + ' au lieu de ' + mmss(cible) + '. Tu ne bois pas, tu expédies. On recommence plus lentement la prochaine fois.' };
+    if (r < 0.85) return { id:'presque', expr:'calm',
+      f:'' + mmss(sec) + '. Tu n\'es plus très loin de ' + mmss(cible) + ' — encore quelques gorgées plus lentes et tu y es. 🦊',
+      b:'' + mmss(sec) + '. Il te manque peu pour ' + mmss(cible) + '. Ralentis la fin.' };
+    if (r <= 1.4) return { id:'juste', expr:'proud',
+      f:'' + mmss(sec) + ' — exactement le rythme que je voulais pour toi. C\'est comme ça qu\'un biberon se boit : sans y penser, jusqu\'au bout. 💛',
+      b:'' + mmss(sec) + '. C\'est le bon rythme. Garde-le.' };
+    return { id:'long', expr:'comfort',
+      f:'' + mmss(sec) + '. Tu as pris ton temps, et ce n\'est pas un reproche — mais un biberon tiède se finit mal. Vise ' + mmss(cible) + ' la prochaine fois.',
+      b:'' + mmss(sec) + ', c\'est long. Un biberon qui refroidit se finit mal. Vise ' + mmss(cible) + '.' };
+  }
+
+  /* Les trois biberons ont une heure. Foxy vient te chercher : tu n'as pas à
+     y penser, c'est lui qui t'interpelle, et la session part de là. */
+  const BIBERONS = [
+    { key:'b1130', m:11*60+30, n:'ton premier biberon' },
+    { key:'b1330', m:13*60+30, n:'ton deuxième biberon' },
+    { key:'b1600', m:16*60,    n:'ton troisième biberon' }
+  ];
+  const BIB_FAITS = 'bib:faits:';
+  async function bibFaits(date) {
+    try { const r = await window.storage.get(BIB_FAITS + (date || todayStr())); if (r && r.value) return JSON.parse(r.value) || {}; } catch(e) {}
+    return {};
+  }
+  async function marquerBibFait(key) {
+    if (!key) return;
+    const d = todayStr(), f = await bibFaits(d);
+    f[key] = Date.now();
+    try { await window.storage.set(BIB_FAITS + d, JSON.stringify(f)); } catch(e) {}
+  }
+  // le créneau de biberon en cours (fenêtre large : 90 min, 20 en mode serré)
+  async function biberonDu(now) {
+    const d = now || new Date();
+    const m = d.getHours()*60 + d.getMinutes();
+    const fen = serre() ? 20 : 90;
+    const faits = await bibFaits();
+    for (const b of BIBERONS) {
+      if (m >= b.m && m <= b.m + fen && !faits[b.key]) return b;
+    }
+    return null;
+  }
+  // le créneau auquel rattacher un biberon qu'on vient de boire
+  async function bibAssocie(now) {
+    const d = now || new Date();
+    const m = d.getHours()*60 + d.getMinutes();
+    const faits = await bibFaits();
+    let choisi = null;
+    for (const b of BIBERONS) if (m >= b.m - 60 && !faits[b.key]) { choisi = b; break; }
+    return choisi;
+  }
+
+  let bibSnooze = 0;
+  async function rappelBiberon() {
+    if (paused || voiceMode !== 'foxy') return false;
+    if (bibEnCours) return false;
+    if (Date.now() < bibSnooze) return false;
+    const b = await biberonDu();
+    if (!b) return false;
+    const cible = await cibleBiberonSec();
+
+    const suite = await new Promise(res => {
+      const bts = [ { label:'🍼 Je vais le préparer', onClick: () => { foxyPopHide(); res('go'); } } ];
+      if (!serre()) bts.push({ soft:true, label:'Dans un moment', onClick: () => { foxyPopHide(); res('tard'); } });
+      foxyPopShow(bro(
+        'C\'est l\'heure de ' + b.n + ' ! 🍼\n\nVa le préparer, installe-toi, et approche ton tag quand tu es prêt — je compte le temps avec toi. Idéal : ' + mmss(cible) + '.',
+        'L\'heure de ' + b.n + '. Prépare-le, tag pour démarrer. ' + mmss(cible) + '.'), 'bottle', bts);
+    });
+    if (suite === 'tard') {
+      bibSnooze = Date.now() + 20 * 60000;
+      talk(TALK.CADRE, 'bib:tard:' + Date.now(), async () => {
+        await imSay(bro('D\'accord, je te relance dans vingt minutes. Trois par jour, on ne lâche pas là-dessus. 🦊',
+                        'Vingt minutes. Trois par jour, c\'est le cadre.'), 700, 'calm');
+      });
+      return false;
+    }
+    await sessionBiberon(null, b);
+    return true;
+  }
+
+  let bibEnCours = false;
+  async function sessionBiberon(codeInitial, slot) {
+    if (paused || bibEnCours) return false;
+    bibEnCours = true;
+    try { return await sessionBiberonInterne(codeInitial, slot); }
+    finally { bibEnCours = false; }
+  }
+  async function sessionBiberonInterne(codeInitial, slot) {
+    const QR = window.HabitrainQR;
+    const def = PREUVE_DEF.biberon;
+    const cible = await cibleBiberonSec();
+
+    // une session ouverte ? on la reprend là où elle en est
+    let ouverte = null;
+    try { ouverte = await lireStock(BIB_ENCOURS, null); } catch(e) {}
+    if (ouverte && ouverte.t && (Date.now() - ouverte.t) > 4 * 3600000) ouverte = null;  // oubliée
+
+    let debut = ouverte ? ouverte.t : null;
+    const finirDirect = !!(ouverte && codeInitial && def.accepte(codeInitial));
+
+    // ---- 1er temps : on démarre ----
+    if (!debut && codeInitial && def.accepte(codeInitial)) {
+      debut = Date.now();
+      try { await ecrireStock(BIB_ENCOURS, { t: debut }); } catch(e) {}
+    }
+    if (!debut) {
+      const d = await new Promise(res => {
+        let rendu = false;
+        const fin = v => { if (rendu) return; rendu = true; try { stop(); } catch(e) {} foxyPopHide(); res(v); };
+        foxyPopShow('📶 ' + bro('Ton biberon ! Approche ton tag pour qu\'on démarre, et installe-toi confortablement.\n\nJe vise ' + mmss(cible) + ' — on n\'est pas pressés.',
+                                'Biberon. Approche ton tag, on démarre. Objectif : ' + mmss(cible) + '.')
+          + '\n📍 ' + def.ou, 'bottle',
+          [ { soft:true, label:'📷 Passer par le QR', onClick: () => fin('qr') },
+            { soft:true, label:'Finalement non', onClick: () => fin(null) } ]);
+        var stop = ecouterTag(k => fin({ tag:k }));
+      });
+      let code = d && d.tag ? d.tag : null;
+      if (d === 'qr') code = await scannerUnCode({});
+      if (!code) {
+        if (d !== null) await imSay(bro('On laisse tomber pour cette fois. Reviens quand tu es prêt. 🦊', 'Abandonné.'), 700, 'calm');
+        return false;
+      }
+      if (!def.accepte(code)) {
+        await imSay(bro('Ça, ce n\'est pas ton biberon. Approche le bon tag et on recommence. 🦊',
+                        'Mauvais code. Je veux celui du biberon.'), 800, 'pensive');
+        return false;
+      }
+      debut = Date.now();
+      try { await ecrireStock(BIB_ENCOURS, { t: debut }); } catch(e) {}
+    }
+
+    // ---- pendant : la fenêtre reste, le temps tourne ----
+    const resultat = finirDirect ? { tag: codeInitial } : await new Promise(res => {
+      let rendu = false, tic = null;
+      const fin = v => {
+        if (rendu) return; rendu = true;
+        if (tic) clearInterval(tic);
+        try { stop(); } catch(e) {} foxyPopHide(); res(v);
+      };
+      const texte = () => {
+        const sec = Math.floor((Date.now() - debut) / 1000);
+        const part = Math.min(1, sec / cible);
+        const barre = '█'.repeat(Math.round(part * 10)) + '·'.repeat(10 - Math.round(part * 10));
+        return '⏱ ' + chrono(sec) + '   ' + barre + '\n\n'
+          + bro('Bois tranquillement. Quand ton biberon est fini, tu approches ton tag une seconde fois — c\'est tout.',
+                'Bois. Tag une deuxième fois quand c\'est fini.')
+          + '\n\nIdéal : ' + mmss(cible);
+      };
+      const boutons = [
+        { soft:true, label:'📷 Terminer avec le QR', onClick: async () => {
+            const k = await scannerUnCode({});
+            if (k && def.accepte(k)) fin({ tag:k });
+          } },
+        { soft:true, label:'Annuler ce biberon', onClick: () => fin('annule') }
+      ];
+      foxyPopShow(texte(), 'bottle', boutons);
+      var stop = ecouterTag(k => { if (def.accepte(k)) fin({ tag:k }); });
+      tic = setInterval(() => {
+        const t = document.getElementById('foxyPopText');
+        if (!t || document.getElementById('foxyPop').style.display === 'none') return;
+        t.textContent = texte();
+      }, 1000);
+    });
+
+    if (resultat === 'annule') {
+      try { await ecrireStock(BIB_ENCOURS, null); } catch(e) {}
+      await imSay(bro('Annulé, on n\'en parle plus. 🦊', 'Annulé.'), 700, 'calm');
+      return false;
+    }
+
+    // ---- 2e temps : on compte ----
+    const sec = Math.max(1, Math.floor((Date.now() - debut) / 1000));
+    try { await ecrireStock(BIB_ENCOURS, null); } catch(e) {}
+    const jour = todayStr();
+    const creneau = slot || await bibAssocie();
+    await marquerBibFait(creneau && creneau.key);
+    const liste = await sessionsBiberon(jour);
+    liste.push({ t: new Date(debut).toISOString(), sec, cible, slot: creneau ? creneau.key : null });
+    try { await window.storage.set(BIB_CLE + jour, JSON.stringify(liste)); } catch(e) {}
+    await saveCheck('biberon_bu', 'biberon');
+
+    const v = verdictBiberon(sec, cible);
+    const n = await biberonsDuJour(jour);
+    try { await renderCheckStat(); } catch(e) {}
+    /* Le verdict se dit DANS la fenêtre, pas dans le chat : c'est la
+       conclusion d'un contrôle, et une phrase de conversation pouvait être
+       coupée par n'importe quelle autre — le temps mesuré passait alors à la
+       trappe. Le comptage du jour, lui, peut attendre dans la conversation. */
+    await new Promise(res => {
+      foxyPopShow('⏱ ' + chrono(sec) + '\n\n' + bro(v.f, v.b), v.expr,
+        [{ label:'D\'accord', onClick: () => { foxyPopHide(); res(true); } }]);
+    });
+    talk(TALK.CADRE, 'bib:compte:' + Date.now(), async () => {
+      await imSay(bro('Ça t\'en fait ' + n + ' aujourd\'hui' + (n >= 3 ? ' — objectif atteint. 🦊' : ', encore ' + (3 - n) + ' et tu y es.'),
+                      n + ' aujourd\'hui' + (n >= 3 ? '. Objectif atteint.' : ', il en manque ' + (3 - n) + '.')),
+                  800, n >= 3 ? 'proud' : 'calm');
+    });
+    return true;
   }
 
   // Chaîne d'étapes, dans l'ordre. Renvoie true si TOUT a été prouvé.
@@ -2287,16 +2580,9 @@
       await imSay(broOn() ? 'Montre-moi. Scanne l\'étiquette de ta tenue.' : 'Fais voir ! Scanne le QR de ta tenue. 🦊', 800, 'curious');
       try { await scanTenue(); } catch(e) {}
     }}),
-    biberon: () => ({ label:'🍼 J\'ai bu mon biberon', onClick: async () => {
-      imAddMe('J\'ai bu mon biberon.');
-      const ok = await exigerPreuves(['biberon']);
-      await saveCheck(ok ? 'biberon_bu' : 'biberon_sanspreuve', 'biberon');
-      const n = await biberonsDuJour(todayStr());
-      await imSay(ok
-        ? (broOn()
-            ? 'Bien. ' + n + ' aujourd\'hui. Continue, ton corps en a besoin.'
-            : 'Parfait, ça fait ' + n + ' aujourd\'hui ! ' + (n >= 3 ? 'Objectif atteint, bravo. 🦊' : 'Encore ' + (3-n) + ' et tu y es. 🦊'))
-        : 'Noté sans preuve. Ça compte quand même, mais moins bien.', 850, ok ? 'proud' : 'concern');
+    biberon: () => ({ label:'🍼 Mon biberon', onClick: async () => {
+      imAddMe('Mon biberon.');
+      await sessionBiberon();
       if (currentM) await imOfferHelp(currentM);
     }}),
     coucher: () => ({ label:'🌙 Je vais me coucher', onClick: async () => {
@@ -4444,6 +4730,9 @@
       talk(TALK.CADRE,  'mictions',    () => corroborerMictions());
     }
     talk(TALK.CHECK,    'check:rate',  () => verifierChecksRates());
+    // l'heure d'un biberon : Foxy vient te chercher, il n'attend pas que tu y penses
+    talk(TALK.CHECK,    'bib:rappel',  () => rappelBiberon(),
+      { verifier: async () => !!(await biberonDu()) });
     talk(TALK.PROGRES,  'milestone',   () => foxyMilestones());
     // l'agent de transformation parle une fois par jour, en soirée, quand la
     // journée de la veille est complète et comparable
@@ -6816,6 +7105,7 @@
     { id:'b_incoherence',     n:'Déclaration contredite par un capteur',  grav:'grave',   w:12 },
     { id:'b_capteur_muet',    n:'Capteur silencieux sur une fenêtre',     grav:'moyenne', w:7 },
     { id:'b_check',           n:'Check sauté (11h30, 13h30 ou 19h30)',    grav:'moyenne', w:7 },
+    { id:'b_tetine',          n:'Tétine absente au contrôle éclair',      grav:'legere',  w:3 },
     { id:'b_urgence',         n:'Serrure ouverte en urgence',            grav:'legere',  w:3 },
     { id:'b_arret_silencieux', n:'Arrêt du programme sans le dire',       grav:'grave',   w:12 },
     { id:'b_retour_tardif',   n:'Retour de pause en retard (+2 h)',       grav:'moyenne', w:7 },
@@ -7476,6 +7766,19 @@
   function popCheck(forcedType) {
     if (paused) return;
     const type = forcedType || CHECK_TYPES[Math.floor(Math.random() * CHECK_TYPES.length)];
+    /* La tétine ne se déclare plus : elle se prouve, et vite. Si son tag est
+       programmé, le check bascule sur le contrôle chronométré — ta parole
+       sort du circuit, comme partout ailleurs. */
+    if (type && type.id === 'tetine') {
+      (async () => {
+        if (await tetineConfiguree()) { await controleTetine(false); return; }
+        popCheckFenetre(type);
+      })();
+      return;
+    }
+    popCheckFenetre(type);
+  }
+  function popCheckFenetre(type) {
     buildCheck(type);
     document.getElementById('modalCheck').style.display = '';
     document.getElementById('modalFix').style.display = 'none';
@@ -7561,7 +7864,9 @@
       }
     } else {
       // check : on reporte d'abord l'état de la couche
-      document.getElementById('dueText').textContent = 'Petit check ! Ta couche, elle est comment ?';
+      document.getElementById('dueText').textContent = serre()
+        ? 'Check. Tout de suite, pas dans dix minutes : ta couche, elle est comment ?'
+        : 'Petit check ! Ta couche, elle est comment ?';
       addBtn(acts, 'g', '☀️ Sèche — je laisse', async () => {
         await saveCheck('etat_sec', 'check_'+slot.key);
         markSlotDone(slot.key);
@@ -7580,7 +7885,7 @@
         await saveCheck('etat_sature', 'check_'+slot.key);
         startChange('check', true);
       });
-      addBtn(acts, 'adj', 'Plus tard', () => { dueSnooze[slot.key] = Date.now() + 10*60000; activeSlotKey = null; closeCheck(); });
+      if (!serre()) addBtn(acts, 'adj', 'Plus tard', () => { dueSnooze[slot.key] = Date.now() + 10*60000; activeSlotKey = null; closeCheck(); });
     }
   }
 
@@ -8582,8 +8887,8 @@
           + '</b> : ' + discSession.ecarts + ' points d\'écart cumulés sur 3 jours.</div>')
         + '<div style="font-weight:800;text-transform:uppercase;font-size:10.5px;letter-spacing:.05em;color:#a8543b;margin-bottom:3px">Ce qui change</div>'
         + '<div style="margin-bottom:8px;line-height:1.5">'
-        + '• <b>Tous les créneaux deviennent des changes piliers</b> — les checks de 11h30, 13h30 et 19h30 ne sont plus de simples vérifications.<br>'
-        + '• <b>Tolérance de retard : 5 minutes</b> au lieu de 15.<br>'
+        + '• <b>Les fenêtres se resserrent</b> — une heure sur les piliers, un quart d\'heure sur les checks. Un check reste un check : on ne change pas une couche portée une heure.<br>'
+        + '• <b>Plus aucun report</b> : le « plus tard » disparaît des créneaux.<br>'
         + '• <b>Les rituels ne se reportent plus</b> — le bouton « une autre fois » disparaît.<br>'
         + '• <b>Foxy change de registre</b> — plus direct, moins d\'échappatoires.'
         + '</div>'
@@ -10555,9 +10860,9 @@
       dire:{ f:"Et je te surveille de plus près : douze heures sans un change ni une trace de toi, et je considère que tu es reparti. Au lieu de dix-huit. Tu ne pourras pas glisser dehors en espérant que je ne le voie pas.",
              b:"Douze heures sans trace de toi, et tu es reparti. Au lieu de dix-huit. Tu ne glisses pas dehors sans que je le voie." } },
     discipline: { ic:'🔒', n:'Session de discipline',
-      t:'Les checks deviennent des changes piliers, 5 min de tolérance, plus de report — pendant toute la reprise.',
-      dire:{ f:"Et on ouvre une session de discipline en même temps : tes checks deviennent des changes piliers, cinq minutes de tolérance, plus de « une autre fois ». Tu sais déjà comment ça va finir. Tu vas t'y remettre, et ça ira mieux.",
-             b:"Session de discipline en même temps. Checks en piliers, cinq minutes de tolérance, plus de report." } },
+      t:'Fenêtres resserrées et plus aucun report, pendant toute la reprise. Les checks restent des checks.',
+      dire:{ f:"Et on ouvre une session de discipline en même temps : des fenêtres resserrées sur chaque créneau, et plus de « une autre fois ». Tes changes restent tes changes — c'est ta ponctualité que je serre, pas ta couche. Tu sais déjà comment ça va finir. Tu vas t'y remettre, et ça ira mieux.",
+             b:"Session de discipline en même temps. Fenêtres resserrées, plus de report. Les changes ne bougent pas." } },
     allegement: { ic:'🪶', n:'Alléger d\'abord',
       t:'Ce qui pesait trop est allégé. Chaque soir, Foxy vérifie que ça ne repèse pas.',
       dire:{ f:"Si c'est devenu trop lourd, la réponse, ce n'est pas plus de poids. C'est d'enlever ce qui te coûte sans rien t'apporter. On regarde ça tout de suite, ensemble.",
@@ -11363,7 +11668,8 @@
     change_tous:   'Secours — le change se prouve au bracelet',
     biberon:       'Près du frigo ou du plan de travail',
     coucher:       'Sur la porte de ta chambre',
-    unlock:        'Sur ton bracelet — à garder au poignet'
+    unlock:        'Sur ton bracelet — à garder au poignet',
+    tetine:        'Sur la protection de ta tétine'
   };
 
   (function(){
@@ -11615,6 +11921,99 @@
     } catch(e) {}
   }
 
+  /* ============================================================
+     CONTRÔLE ÉCLAIR DE LA TÉTINE
+     Le tag ne prouve pas qu'elle est dans ta bouche — il prouve qu'elle est
+     à portée de main À CET INSTANT. C'est le DÉLAI qui a de la valeur :
+     vingt secondes, sans prévenir. Une tétine clipsée à ta tenue passe ;
+     une tétine restée dans un tiroir, non.
+     ============================================================ */
+  const TET_DELAI = 20;              // secondes
+  const TET_DERNIER = 'tetine:dernier';
+  const TET_ENTRE = 3 * 3600000;     // au plus un contrôle éclair toutes les 3 h
+
+  // la tétine fait-elle partie du trousseau ?
+  async function tetinePrevue() {
+    try {
+      const acc = await lireStock('profil:accessoires', null);
+      if (acc && acc.tetine) return true;
+      const mat = await lireStock('profil:materiel', null);
+      if (mat && mat.tetine) return true;
+      const w = window.HabitrainWardrobe ? await window.HabitrainWardrobe.getWardrobe() : null;
+      if (w && (w.access || []).some(n => /t[ée]tine|sucette/i.test(n))) return true;
+    } catch(e) {}
+    return false;
+  }
+  async function tetineConfiguree() {
+    try { const t = await lireTags(); if (t && t.tetine) return true; } catch(e) {}
+    return tetinePrevue();
+  }
+
+  /* La fenêtre du contrôle : un compte à rebours, et rien d'autre à faire
+     qu'approcher la tétine. Renvoie true si le tag est venu à temps. */
+  function fenetreTetine(entete) {
+    return new Promise(res => {
+      let reste = TET_DELAI, tic = null, rendu = false;
+      const fin = (v) => {
+        if (rendu) return; rendu = true;
+        if (tic) clearInterval(tic);
+        try { stop(); } catch(e) {}
+        foxyPopHide(); res(v);
+      };
+      const texte = () => entete + '\n\n⏱ ' + reste + ' s\n'
+        + '█'.repeat(Math.max(0, Math.round(reste / TET_DELAI * 10)))
+        + '·'.repeat(10 - Math.max(0, Math.round(reste / TET_DELAI * 10)));
+      foxyPopShow(texte(), 'curious',
+        [{ soft:true, label:'Je ne l\'ai pas', onClick: () => fin(false) }]);
+      var stop = ecouterTag(k => { if (k === 'tetine') fin(true); });
+      tic = setInterval(() => {
+        reste--;
+        const t = document.getElementById('foxyPopText');
+        if (t) t.textContent = texte();
+        if (reste <= 0) fin(false);
+      }, 1000);
+    });
+  }
+
+  /* Le contrôle lui-même. `ouverture` = déclenché au lancement de l'appli. */
+  async function controleTetine(ouverture) {
+    if (paused) return false;
+    if (!(await tetineConfiguree())) return false;
+    const entete = broOn()
+      ? 'Ta tétine. Tout de suite, approche-la.'
+      : (ouverture
+          ? 'Hop, contrôle ! 🦊 Ta tétine — approche-la du téléphone, vite.'
+          : 'Contrôle surprise ! 🍭 Ta tétine, approche-la maintenant.');
+    const ok = await fenetreTetine(entete);
+    try { await window.storage.set(TET_DERNIER, JSON.stringify(Date.now())); } catch(e) {}
+    await saveCheck(ok ? 'tet_ok' : 'tet_miss', 'tetine');
+    if (!ok) try { await marquerEntorse('b_tetine'); } catch(e) {}
+
+    talk(TALK.CADRE, 'tetine:' + Date.now(), async () => {
+      if (ok) {
+        await imSay(bro('Elle était là, à portée. 🦊 C\'est exactement ce que je voulais voir : clipsée sur toi, pas rangée quelque part.',
+                        'Elle était sur toi. Bien.'), 900, 'proud');
+      } else {
+        await imSay(bro('Elle n\'était pas à portée. Ta tétine reste attachée à ta tenue, en bouche ou non — c\'est comme ça qu\'elle fait partie de toi et pas de ton matériel. Va la reclipser. 🍭',
+                        'Pas à portée. Elle reste attachée à ta tenue, point. Va la reclipser.'), 1000, 'concern');
+      }
+    }, { coupe: true });
+    return ok;
+  }
+
+  // Au lancement : une fois sur trois, et jamais deux fois dans la même demi-journée.
+  async function tetineAuLancement() {
+    if (paused || voiceMode !== 'foxy') return false;
+    const h = new Date().getHours();
+    if (h < 8 || h >= 22) return false;                 // pas la nuit
+    if (!(await tetineConfiguree())) return false;
+    let dernier = 0;
+    try { const r = await window.storage.get(TET_DERNIER); if (r && r.value) dernier = JSON.parse(r.value) || 0; } catch(e) {}
+    if (Date.now() - dernier < TET_ENTRE) return false;
+    if (Math.random() > 0.33) return false;             // l'imprévu fait le contrôle
+    return controleTetine(true);
+  }
+
   /* ===== Registre des tags NFC =====
      Un élément = un tag, un tag = un élément. On garde donc le numéro de série
      de chaque tag programmé, en face de ce qu'il désigne. C'est ce registre qui
@@ -11714,7 +12113,7 @@
   }
 
   function nomDeKind(k) {
-    const N = { unlock:'ton bracelet', biberon:'ton biberon', coucher:'le coucher',
+    const N = { unlock:'ton bracelet', biberon:'ton biberon', coucher:'le coucher', tetine:'ta tétine',
                 change_pilier:'ton tapis à langer', change_tous:'ton tapis à langer' };
     if (N[k]) return N[k];
     try {
@@ -11723,6 +12122,67 @@
     } catch(e) {}
     return 'un autre élément';
   }
+
+  /* ===== Repartir de zéro =====
+     Le registre ne fait que noter ce qui a été programmé ; ce qui AUTORISE un
+     tag, c'est le code d'installation, commun à tous tes supports. D'où les
+     résidus : un bracelet oublié du registre ouvre encore l'appli, parce que
+     son contenu reste valable. Réinitialiser change ce code — et tout ce qui
+     a été écrit avant devient illisible, d'un coup. */
+  async function reinitialiserTags() {
+    const info = document.getElementById('qrResetInfo');
+    const dire = t => { if (info) info.textContent = t; };
+    const tags = await lireTags();
+    const combien = Object.keys(tags).length;
+
+    const un = await demanderPop(
+      'On remet tes tags et tes codes à zéro.\n\n'
+      + 'Ce qui va devenir inutilisable, immédiatement :\n'
+      + '• tes tags NFC' + (combien ? ' (' + combien + ' enregistré' + (combien > 1 ? 's' : '') + ', plus tous ceux qui traînent)' : '') + '\n'
+      + '• tous tes QR imprimés, y compris les étiquettes de tes tenues\n'
+      + '• le déverrouillage par bracelet, que je désactive pour ne pas t\'enfermer dehors\n\n'
+      + 'Tu devras tout reprogrammer et tout réimprimer. Rien d\'autre n\'est touché : ton suivi, ton aventure et tes réglages restent intacts.',
+      'pensive',
+      [ { label:'Continuer', v:'go' },
+        { label:'Non, laisser comme ça', v:'non', soft:true } ]);
+    if (un !== 'go') { dire('Rien de changé.'); return false; }
+
+    const deux = await demanderPop(
+      broOn() ? 'Dernière confirmation. Après ça, plus aucun de tes supports actuels ne fonctionne.'
+              : 'Je te le redemande une fois, parce que c\'est sans retour : après ça, plus aucun de tes tags ni de tes QR actuels ne fonctionne. 🦊',
+      'concern',
+      [ { label:'♻️ Oui, tout réinitialiser', v:'go' },
+        { label:'Finalement non', v:'non', soft:true } ]);
+    if (deux !== 'go') { dire('Rien de changé.'); return false; }
+
+    // 1) le registre
+    await ecrireTags({});
+    // 2) le code d'installation : c'est LUI qui invalide les résidus
+    try { await window.HabitrainQR.rotateSecret(); } catch(e) {}
+    // 3) le verrouillage, sinon la prochaine ouverture réclame un bracelet
+    //    dont plus aucun exemplaire ne fonctionne
+    try {
+      const p = await window.HabitrainQR.getQrPrefs();
+      p.unlock = false; p.braceletRequired = false;
+      await window.HabitrainQR.saveQrPrefs(p);
+    } catch(e) {}
+    sessionUnlocked = true;
+    try { await renderQrConfig(); } catch(e) {}
+    try { await renderNfcWriter(); } catch(e) {}
+    const cl = document.getElementById('qrClothesList'); if (cl) cl.innerHTML = '';
+
+    dire('♻️ Fait. Tes anciens supports ne valent plus rien. Reprogramme tes tags ici, et réimprime ta feuille de codes — le bracelet d\'abord.');
+    talk(TALK.CADRE, 'tags:reset:' + Date.now(), async () => {
+      await imSay(bro('Voilà, table rase. 🦊 Tes anciens tags et tes vieux QR ne valent plus rien — même celui que tu avais perdu de vue. On recommence par ton bracelet : c\'est lui qui prouve tes changes.',
+                      'Table rase. Reprogramme ton bracelet en premier : c\'est lui qui prouve tes changes.'), 1000, 'calm');
+    }, { coupe: true });
+    return true;
+  }
+
+  (function(){
+    const b = document.getElementById('qrReset');
+    if (b) b.addEventListener('click', () => reinitialiserTags());
+  })();
 
   // ===== Programmation des tags NFC =====
   async function renderNfcWriter() {
@@ -11742,6 +12202,7 @@
       { kind:'unlock',        label:'⌚ Bracelet — ouverture ET preuve des changes' },
       { kind:'biberon',       label:'🍼 Biberon' },
       { kind:'coucher',       label:'🌙 Coucher' },
+      { kind:'tetine',        label:'🍭 Tétine (contrôles éclair)' },
       { kind:'change_pilier', label:'🔑 Tapis à langer (secours)' }
     ];
     // Les tenues aussi : un tag cousu ou glissé dans le col vaut l'étiquette QR,
@@ -12004,16 +12465,25 @@
     });
   }
   // ouvre le scanner et rend le code lu (ou null si annulé)
+  /* Un scan en attente est publié ici : si un tag arrive par le natif pendant
+     ce temps, il vaut lecture, et la caméra se referme. */
+  let scanEnAttente = null;
   function scannerUnCode(opt) {
     return new Promise(res => {
       const QR = window.HabitrainQR;
       if (!QR) return res(null);
       let fini = false;
       const ov = document.getElementById('qrScanOverlay');
+      const rendre = (k) => {
+        if (fini) return; fini = true;
+        clearInterval(iv); scanEnAttente = null;
+        res(k);
+      };
       const iv = setInterval(() => {
-        if (!fini && ov && ov.style.display === 'none') { fini = true; clearInterval(iv); res(null); }
+        if (!fini && ov && ov.style.display === 'none') rendre(null);
       }, 400);
-      QR.startScan(null, k => { if (fini) return; fini = true; clearInterval(iv); res(k); }, opt || {});
+      scanEnAttente = (k) => { try { QR.stopScan(); } catch(e) {} rendre(k); };
+      QR.startScan(null, k => rendre(k), opt || {});
     });
   }
 
@@ -12499,20 +12969,31 @@
     ];
     // le bracelet d'abord : c'est lui qui prouvera tes changes
     if (acc.bracelet) FIXES.unshift({ k:'unlock', n:'le code de ton bracelet', accepte: x => x === 'unlock', petit:true });
+    // la tétine, si elle est du trousseau : c'est elle qu'on contrôlera au débotté
+    if (await tetinePrevue()) FIXES.push({ k:'tetine', n:'le tag de ta tétine', accepte: x => x === 'tetine', petit:true });
     for (const f of FIXES) {
       while (!verifiees[f.k]) {
-        const a = await sChoix('Scanne <b>' + f.n + '</b>.', [ { k:'scan', label:'📷 Scanner' }, { k:'passe', label:'Passer', soft:true } ], 'curious');
+        // le tag est écouté pendant qu'on pose la question : tu approches, ça passe
+        let stopTag = null;
+        const a = await Promise.race([
+          sChoix('Approche le tag de <b>' + f.n + '</b>.', [ { k:'scan', label:'📷 Passer par le QR' }, { k:'passe', label:'Passer', soft:true } ], 'curious'),
+          new Promise(r => { stopTag = ecouterTag(k => r({ tag:k })); })
+        ]);
+        if (stopTag) { try { stopTag(); } catch(e) {} }
         if (a === 'passe') break;
-        document.body.classList.remove('onboarding');
-        const k = await scannerUnCode({ petit: !!f.petit });
-        document.body.classList.add('onboarding');
+        let k = (a && a.tag) ? a.tag : null;
+        if (!k) {
+          document.body.classList.remove('onboarding');
+          k = await scannerUnCode({ petit: !!f.petit });
+          document.body.classList.add('onboarding');
+        }
         if (k && f.accepte(k)) {
           verifiees[f.k] = true; await repondre('etiquettes_ok', verifiees);
           if (f.k === 'unlock') { await activerBracelet(true); await sDire('✅ Lu. Ton bracelet est actif : c\'est lui qui prouvera tes changes, et c\'est lui qui ouvre l\'appli.', 'proud', 'Suivant'); }
           else await sDire('✅ Lu. Parfait.', 'proud', 'Suivant');
         }
-        else if (k) await sDire('Ça, ce n\'est pas ' + f.n + '. Vérifie que la bonne étiquette est au bon endroit.', 'concern', 'Je réessaie');
-        else await sDire('Rien lu. Plus de lumière, un peu plus loin, bien à plat — et on réessaie.', 'concern', 'Je réessaie');
+        else if (k) await sDire('Ça, ce n\'est pas ' + f.n + '. Vérifie que le bon tag est au bon endroit.', 'concern', 'Je réessaie');
+        else await sDire('Rien lu. Approche le tag franchement du dos du téléphone — ou passe par le QR.', 'concern', 'Je réessaie');
       }
     }
     // les tenues, une par une
@@ -12685,8 +13166,7 @@
           { k:'non', label:'Dans un moment', dit:'Dans un moment.', soft:true }
         ], 'bottle');
         if (k !== 'go') return 'plus_tard';
-        const ok = await exigerPreuves(['biberon']);
-        await saveCheck(ok ? 'biberon_bu' : 'biberon_sanspreuve', 'biberon');
+        await sessionBiberon();
         await imSay(bro('Voilà. Tu vois ? Ça, c\'est ta boisson maintenant. Trois par jour, et ton corps fera le reste. 💛', 'Trois par jour. Ton corps fera le reste.'), 950, 'proud');
       } },
     { id:'sentir', quand: (h, e) => e >= 50,
@@ -14527,6 +15007,86 @@
   // annulation du scan
   document.getElementById('qrScanCancel').addEventListener('click', () => { if (QR) QR.stopScan(); });
 
+  /* ============================================================
+     UN TAG APPROCHÉ, ET L'APPLICATION S'OUVRE
+     Dans l'application Android, Android lance Habitrain dès qu'un tag
+     Habitrain passe près du téléphone — même appli fermée. Le code arrive
+     ici. Ce qu'on en fait dépend de l'écran :
+       · un scan est en cours        → le tag vaut lecture
+       · l'écran de verrouillage     → le bracelet ouvre
+       · la façade de pause          → le bracelet sort de pause
+       · rien de tout ça             → on enchaîne sur ce que le code désigne
+     ============================================================ */
+  let dernierJeton = null;
+  window.__habitrainTag = async function (code, jeton) {
+    if (jeton && jeton === dernierJeton) return;   // même passage de tag, relancé
+    dernierJeton = jeton || null;
+    const QR = window.HabitrainQR;
+    if (!QR || !code) return;
+    let kind = null;
+    try { kind = await QR.parsePayloadPublic(code); } catch(e) {}
+    if (!kind) return;                              // un tag qui n'est pas le nôtre
+
+    // 1) une écoute de tag est ouverte (preuve, session biberon, installation)
+    if (tagEnAttente) { try { tagEnAttente(kind); } catch(e) {} return; }
+    // 2) une lecture caméra est en cours : le tag la remplace
+    if (scanEnAttente) { try { scanEnAttente(kind); } catch(e) {} return; }
+
+    // 3) écran de verrouillage : seul le bracelet ouvre
+    if (kind === 'unlock' && lockOuvrir) { try { lockOuvrir(); } catch(e) {} return; }
+
+    // 4) façade de pause : le bracelet sort de pause
+    if (kind === 'unlock' && paused) { try { await exitPause(); } catch(e) {} return; }
+
+    // 5) application déjà ouverte : le tag lance ce qu'il désigne
+    await tagAgit(kind);
+  };
+
+  /* Ce qu'un tag déclenche quand rien ne l'attendait. On reste sobre : le tag
+     amène à l'action, il ne la valide pas tout seul. */
+  async function slotDejaFait(key) {
+    try {
+      const r = await window.storage.get('slotdone:' + todayStr());
+      const done = (r && r.value) ? JSON.parse(r.value) : {};
+      return !!done[key];
+    } catch(e) { return false; }
+  }
+
+  async function tagAgit(kind) {
+    if (paused) return;
+    if (kind === 'unlock' || kind === 'change_pilier' || kind === 'change_tous') {
+      // le bracelet, hors verrou, c'est le geste du change
+      const slot = creneauCourant(null, true) || pillarSlotForNow();
+      if (slot && !(await slotDejaFait(slot.key))) { await lancerRappelChange(slot); return; }
+      talk(TALK.CADRE, 'tag:change:' + Date.now(), async () => {
+        await imSay(bro('Bracelet vu ! 🦊 Aucun change ne t\'attend là, mais c\'est bien, tu l\'as au poignet.',
+                        'Bracelet vu. Rien à changer maintenant.'), 800, 'calm');
+      }, { coupe: true });
+      return;
+    }
+    // le tag du biberon ouvre la session chronométrée — ou la referme
+    if (kind === 'biberon') {
+      talk(TALK.CHECK, 'tag:biberon:' + Date.now(), async () => {
+        try { await sessionBiberon(kind); } catch(e) {}
+      }, { coupe: true });
+      return;
+    }
+    if (kind === 'coucher') {
+      await saveCheck('coucher_fait', 'coucher');
+      talk(TALK.CADRE, 'tag:coucher:' + Date.now(), async () => {
+        await imSay(bro('Bonne nuit. 🌙 Je veille, comme toujours.', 'Coucher noté. Bonne nuit.'), 850, 'sleep');
+      }, { coupe: true });
+      return;
+    }
+    if (/^wb/.test(String(kind))) {
+      talk(TALK.CADRE, 'tag:tenue:' + Date.now(), async () => {
+        let nom = 'cette tenue';
+        try { const it = await window.HabitrainWardrobe.findByItemId(kind); if (it) nom = it.name; } catch(e) {}
+        await imSay(bro('« ' + nom + ' » — c\'est noté, tu l\'as sur toi. 🦊', 'Tenue vue : ' + nom + '.'), 800, 'calm');
+      }, { coupe: true });
+    }
+  }
+
   // ==== Verrouillage par bracelet ====
   async function checkQrLock() {
     if (!QR) return;
@@ -14538,6 +15098,7 @@
   }
   let sessionUnlocked = false;
   let lockClockTimer = null;
+  let lockOuvrir = null;
   function showQrLock(isSurprise) {
     const lock = document.getElementById('qrLock');
     lock.style.display = 'flex';
@@ -14592,6 +15153,7 @@
 
     const ouvrir = () => {
       sessionUnlocked = true;
+      lockOuvrir = null;
       lock.style.display = 'none';
       if (lockClockTimer) { clearInterval(lockClockTimer); lockClockTimer = null; }
       try { if (NFC && NFC.isScanning()) NFC.stopScan(); } catch(e) {}
@@ -14627,6 +15189,7 @@
       } catch(e) { /* NFC indisponible : le bouton reste la voie normale */ }
     }
 
+    lockOuvrir = ouvrir;   // un tag lu par le natif ouvre le même chemin
     if (btn) btn.onclick = () => {
       QR.startScan('unlock', (kind) => { if (kind === 'unlock') ouvrir(); }, { petit: true });
     };
@@ -14888,7 +15451,9 @@
     t.addEventListener('click', async () => {
       const cible = document.getElementById(t.dataset.tiroir);
       const ouvrir = cible && cible.style.display === 'none';
-      document.querySelectorAll('.tiroir-t').forEach(x => {
+      // un seul tiroir ouvert par carte — ceux des autres cartes ne bougent pas
+      const carte = t.closest('.card') || document;
+      carte.querySelectorAll('.tiroir-t').forEach(x => {
         x.classList.remove('on');
         const c = document.getElementById(x.dataset.tiroir); if (c) c.style.display = 'none';
       });
@@ -15008,6 +15573,8 @@
     try { await loadDesertion(); } catch(e) {}
     try { await chargerBracelet(); } catch(e) {}
     try { await loadProfilNom(); } catch(e) {}
+    // contrôle éclair de la tétine : au hasard, une ouverture sur trois
+    talk(TALK.CHECK, 'tetine:ouverture', () => tetineAuLancement());
     try { await figerDonneesExistantes(); } catch(e) {}
     // marqueurs pour les hauts faits contextuels
     try {

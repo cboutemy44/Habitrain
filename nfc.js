@@ -16,6 +16,16 @@
 
   // décode les enregistrements NDEF et retourne le texte utile
   function readRecords(message) {
+    // le texte d'abord : c'est le payload nu, sans emballage
+    for (const rec of message.records) {
+      try {
+        if (rec.recordType === 'text') {
+          const dec = new TextDecoder(rec.encoding || 'utf-8');
+          const t = dec.decode(rec.data).trim();
+          if (t) return t;
+        }
+      } catch (e) {}
+    }
     for (const rec of message.records) {
       try {
         if (rec.recordType === 'text') {
@@ -56,10 +66,24 @@
     scanning = false; reader = null; abortCtl = null; onTagCb = null;
   }
 
-  // Écrit un identifiant Habitrain sur un tag vierge (programmation des tags)
+  /* Écrit un identifiant Habitrain sur un tag.
+     DEUX enregistrements, dans cet ordre :
+       1. un lien « habitrain://t/<payload> » — c'est celui qu'Android lit pour
+          OUVRIR l'application toute seule quand le tag passe près du téléphone ;
+       2. le texte brut — lu par tout le reste (Web NFC, autres lecteurs).
+     Si le lien est refusé par le navigateur, on écrit le texte seul : le tag
+     reste valable, il ne déclenchera simplement pas l'ouverture automatique. */
   async function writeTag(payload) {
     if (!supported()) throw new Error('Web NFC non supporté (Android/Chrome requis)');
     const w = new NDEFReader();
+    const QR = window.HabitrainQR;
+    const lien = (QR && QR.lienPour) ? QR.lienPour(payload) : null;
+    if (lien) {
+      try {
+        await w.write({ records: [ { recordType:'url', data: lien }, { recordType:'text', data: payload } ] });
+        return true;
+      } catch (e) { /* lien refusé : on retombe sur le texte seul */ }
+    }
     await w.write({ records: [{ recordType: 'text', data: payload }] });
     return true;
   }

@@ -36,21 +36,47 @@
   // MAJUSCULES + CHIFFRES + tiret, on reste dans le jeu de caractères
   // « alphanumérique » du standard QR, encodé sur 5,5 bits au lieu de 8.
   // Même contenu, nettement moins de modules.
-  const KIND_CODE = { change_pilier:'P', change_tous:'T', biberon:'B', coucher:'C', unlock:'U' };
-  const CODE_KIND = { P:'change_pilier', T:'change_tous', B:'biberon', C:'coucher', U:'unlock' };
+  const KIND_CODE = { change_pilier:'P', change_tous:'T', biberon:'B', coucher:'C', unlock:'U', tetine:'S' };
+  const CODE_KIND = { P:'change_pilier', T:'change_tous', B:'biberon', C:'coucher', U:'unlock', S:'tetine' };
   function secretCourt(s) { return String(s).replace(/[^A-Za-z0-9]/g, '').slice(-8).toUpperCase(); }
   // les tenues et accessoires ont un identifiant libre (wb…) : il passe tel quel,
   // en majuscules, et redescend en minuscules à la lecture.
   function codePour(kind) { return KIND_CODE[kind] || String(kind).toUpperCase(); }
+
+  /* Repartir de zéro. Le secret est ce qui rend tes codes valables : tant
+     qu'il ne change pas, un vieux tag écrit avec lui continue d'ouvrir
+     l'appli, même si l'appli l'a oublié. En le remplaçant, TOUT ce qui a été
+     écrit avant devient illisible — tags comme QR imprimés. */
+  async function rotateSecret() {
+    const s = 'HTX-' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+    try { await window.storage.set('qr:secret', JSON.stringify(s)); } catch (e) {}
+    return s;
+  }
 
   async function payloadFor(kind, compact) {
     const s = await getSecret();
     if (compact) return 'H-' + secretCourt(s) + '-' + codePour(kind);
     return 'HABITRAIN|' + s + '|' + kind;
   }
+  /* Un tag NFC porte aussi un lien « habitrain://t/<payload> » : c'est lui qui
+     fait ouvrir l'application toute seule quand tu approches ton bracelet.
+     À la lecture, on retire l'emballage et on retrouve le payload habituel. */
+  const LIEN_PREFIXE = 'habitrain://t/';
+  function lienPour(payload) { return LIEN_PREFIXE + encodeURIComponent(payload); }
+  function payloadDuLien(t) {
+    const s = String(t || '').trim();
+    if (s.toLowerCase().indexOf(LIEN_PREFIXE) === 0) {
+      try { return decodeURIComponent(s.slice(LIEN_PREFIXE.length)); } catch(e) { return s.slice(LIEN_PREFIXE.length); }
+    }
+    // variante web, si un tag a été écrit avec une adresse https
+    const m = s.match(/[?&]h=([^&]+)/);
+    if (m) { try { return decodeURIComponent(m[1]); } catch(e) { return m[1]; } }
+    return s;
+  }
+
   async function parsePayload(text) {
     const s = await getSecret();
-    const t = text || '';
+    const t = payloadDuLien(text || '');
     // format court actuel : H-<SECRET>-<CODE>
     if (t.charAt(0) === 'H' && t.charAt(1) === '-') {
       const p = t.split('-');
@@ -387,6 +413,7 @@
   window.HabitrainQR = {
     QR_ACTIONS, getQrPrefs, saveQrPrefs, actionRequiresScan,
     payloadFor, drawQR, startScan, stopScan, getSecret, parsePayloadPublic: parsePayload,
+    lienPour, payloadDuLien, rotateSecret,
     // diagnostic : rejoue la chaîne de lecture sur une image fixe
     testerLecture: (source, tours) => {
       for (let t = 0; t < (tours || 6); t++) {
