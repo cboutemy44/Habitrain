@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '23.1';
+  const APP_VERSION = '23.3';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -838,6 +838,7 @@
       try { await elementsDesertionChange(slotFait); } catch(e) {}
       try { await proposerRessentirApresChange(); } catch(e) {}
       try { if (ctxFait === 'pilier' || slotFait) await corroborerPilier(slotFait); } catch(e) {}
+      try { await verifierHautsFaits(true); } catch(e) {}
     });
   }
   /* ============================================================
@@ -1621,12 +1622,53 @@
      et tout le reste attendait derrière elle — parfois des heures. Au bout de
      quinze minutes sans réponse, elle rend la parole. */
   setInterval(() => {
-    if (!talkActive || fenetreOuverte()) return;
+    // une fenêtre laissée ouverte bloquait AUSSI le garde-fou : tant qu'elle
+    // était là, plus rien ne pouvait se débloquer. Au bout de 20 minutes sans
+    // le moindre geste, on la referme et on rend la parole.
+    if (fenetreOuverte()) {
+      if (Date.now() - dernierGeste > 20*60000) {
+        dernierGeste = Date.now();
+        try { debloquerTout(true); } catch(e) {}
+      }
+      return;
+    }
+    if (!talkActive) return;
     if (Date.now() - (talkActive.debut || 0) < 15*60000) return;
     talkActive.dead = true;
     talkActive = null;
     talkSuivante();
   }, 30000);
+
+  /* Dernier recours : tout refermer et tout relâcher.
+     Une fenêtre restée ouverte, une question sans réponse, un verrou de
+     session oublié — et l'appli ne répond plus à rien. Ce bouton (Debug) et
+     le garde-fou ci-dessus remettent tout à plat sans rien effacer. */
+  let dernierGeste = Date.now();
+  ['click','keydown','touchstart'].forEach(ev =>
+    document.addEventListener(ev, () => { dernierGeste = Date.now(); }, true));
+
+  function debloquerTout(silencieux) {
+    try { const o = document.getElementById('overlay'); if (o) o.classList.remove('show'); } catch(e) {}
+    try { foxyPopHide(); } catch(e) {}
+    ['modalCheck','modalFix','modalDue','modalChange','modalPose'].forEach(id => {
+      const e = document.getElementById(id); if (e) e.style.display = 'none';
+    });
+    try { talkForce(); } catch(e) {}
+    try { if (typeof activeSlotKey !== 'undefined') activeSlotKey = null; } catch(e) {}
+    try { changeModel = null; } catch(e) {}
+    try { bibEnCours = false; } catch(e) {}
+    try { releveEnCours = false; } catch(e) {}
+    try { tagEnAttente = null; scanEnAttente = null; } catch(e) {}
+    try { if (window.HabitrainNFC && window.HabitrainNFC.isScanning()) window.HabitrainNFC.stopScan(); } catch(e) {}
+    document.body.classList.remove('panneau');
+    try { refresh(); } catch(e) {}
+    if (!silencieux) {
+      talk(TALK.CADRE, 'debloque:' + Date.now(), async () => {
+        await imSay(bro('Voilà, j\'ai tout refermé. On repart d\'ici. 🦊', 'Tout est refermé. On repart.'), 800, 'calm');
+      }, { coupe: true });
+    }
+    return true;
+  }
 
   // exécute réellement la discussion et rend la parole à la fin.
   // Le vérificateur, quand il y en a un, décide juste avant : une discussion
@@ -4752,6 +4794,7 @@
     talk(TALK.CHECK,    'bib:rappel',  () => rappelBiberon(),
       { verifier: async () => !!(await biberonDu()) });
     talk(TALK.PROGRES,  'milestone',   () => foxyMilestones());
+    talk(TALK.PROGRES,  'hautsfaits',  () => verifierHautsFaits());
     // l'agent de transformation parle une fois par jour, en soirée, quand la
     // journée de la veille est complète et comparable
     if (new Date().getHours() >= 19 && !paused) {
@@ -9413,6 +9456,11 @@
 
   async function rituelReveil() {
     if (paused || new Date().getHours() < 6) return false;
+    /* Jamais derrière une fenêtre. Un rappel de créneau ouvert par-dessus, et
+       Foxy posait sa question dans le vide : tu voyais le change, pas la
+       question, et la conversation restait suspendue à une réponse que tu ne
+       pouvais pas donner. On repassera au tick suivant. */
+    if (fenetreOuverte()) return false;
     // pas avant la fin de l'installation : c'est elle qui passe la main au réveil
     try { const se = await lireStock('setup:etat', null); if (!se || !se.termine || document.body.classList.contains('onboarding')) return false; } catch(e) {}
     const cle = 'reveil:rituel:' + todayStr();
@@ -9433,23 +9481,15 @@
     let sup = dejaType;
 
     if (!sup) {
-      if (chat) {
-        await imSay(bro(
-          'Bonjour, ' + nomOu('toi') + '. 🦊 Ta tenue du jour est tirée — je te la donne dans une seconde. Juste une question avant.',
-          'Debout. Ta tenue est tirée. Une question avant.'), 850, 'wave');
-        const k = await imDemander(bro('Un superviseur sera présent aujourd\'hui ?', 'Superviseur présent aujourd\'hui ?'), [
-          { k:'supervise', label:'👥 Oui, il sera là', dit:'Oui, il sera là.' },
-          { k:'solo',      label:'🧍 Non, je suis seul', dit:'Non, je suis seul.' }
-        ], 'curious');
-        sup = k;
-      } else {
-        sup = await new Promise(res => {
-          foxyPopShow('Bonjour' + (nomOu(null) ? ', ' + nomOu(null) : '') + ' ! 🦊 Ta tenue du jour est tirée. Avant que je te la donne : un superviseur sera présent aujourd\'hui ?', 'wave', [
-            { label:'👥 Oui, il sera là', onClick: () => res('supervise') },
-            { label:'🧍 Non, je suis seul', onClick: () => res('solo') }
-          ]);
-        });
-      }
+      /* La question part en FENÊTRE, même en mode Foxy. Posée dans la
+         conversation, ses boutons pouvaient être remplacés par n'importe
+         quelle autre séquence — et la réponse n'arrivait jamais. */
+      sup = await new Promise(res => {
+        foxyPopShow('Bonjour' + (nomOu(null) ? ', ' + nomOu(null) : '') + ' ! 🦊\n\nTa tenue du jour est tirée. Avant que je te la donne : un superviseur sera présent aujourd\'hui ?', 'wave', [
+          { label:'👥 Oui, il sera là', onClick: () => { foxyPopHide(); res('supervise'); } },
+          { label:'🧍 Non, je suis seul', onClick: () => { foxyPopHide(); res('solo'); } }
+        ]);
+      });
       await ecrireStock('daytype:' + todayStr(), sup);
     }
 
@@ -10038,6 +10078,7 @@
 
       // le mot de la fin, lui, revient dans la conversation
       talk(TALK.CADRE, 'releve:fait:' + date, async () => {
+        try { await verifierHautsFaits(true); } catch(e) {}
         if (voiceMode === 'foxy' && !paused) {
           await imSay(skin === 'verte'
             ? bro('Peau verte et relevé complet. Tu tiens ton cadre sans même y penser maintenant. 💛',
@@ -11725,15 +11766,18 @@
     await saveCheck(ok ? 'tet_ok' : 'tet_miss', 'tetine');
     if (!ok) try { await marquerEntorse('b_tetine'); } catch(e) {}
 
-    talk(TALK.CADRE, 'tetine:' + Date.now(), async () => {
-      if (ok) {
-        await imSay(bro('Elle était là, à portée. 🦊 C\'est exactement ce que je voulais voir : clipsée sur toi, pas rangée quelque part.',
-                        'Elle était sur toi. Bien.'), 900, 'proud');
-      } else {
-        await imSay(bro('Elle n\'était pas à portée. Ta tétine reste attachée à ta tenue, en bouche ou non — c\'est comme ça qu\'elle fait partie de toi et pas de ton matériel. Va la reclipser. 🍭',
-                        'Pas à portée. Elle reste attachée à ta tenue, point. Va la reclipser.'), 1000, 'concern');
-      }
-    }, { coupe: true });
+    /* Le verdict se dit DANS la fenêtre : dans la conversation, il pouvait
+       être coupé par n'importe quelle autre phrase, et le contrôle se
+       terminait sans que tu saches ce qu'il t'a coûté. */
+    await new Promise(res => {
+      foxyPopShow(ok
+        ? bro('Elle était là, à portée. 🦊 C\'est exactement ce que je voulais voir : clipsée sur toi, pas rangée quelque part.',
+              'Elle était sur toi. Bien.')
+        : bro('Elle n\'était pas à portée. Ta tétine reste attachée à ta tenue, en bouche ou non — c\'est comme ça qu\'elle fait partie de toi et pas de ton matériel. Va la reclipser. 🍭',
+              'Pas à portée. Elle reste attachée à ta tenue, point. Va la reclipser.'),
+        ok ? 'proud' : 'concern',
+        [{ label: ok ? 'Merci 🦊' : 'J\'y vais', onClick: () => { foxyPopHide(); res(true); } }]);
+    });
     return ok;
   }
 
@@ -13484,6 +13528,25 @@
      ============================================================ */
   const BG = window.HabitrainBadges;
 
+  /* Les jours qui comptent. Avant, tout se calculait sur les journées
+     RENSEIGNÉES le soir : une journée vécue à fond mais sans relevé valait
+     zéro — pas de piliers comptés, pas de changes, pas de tenues. D'où des
+     hauts faits qui semblaient morts. On prend maintenant tout ce qui porte
+     une trace : relevé, checks, créneaux faits, tenues portées. */
+  async function joursVecus() {
+    const jours = new Set();
+    for (const pfx of ['day:', 'check:', 'slotdone:', 'worn:']) {
+      try {
+        const res = await window.storage.list(pfx);
+        (res && res.keys ? res.keys : []).forEach(k => {
+          const d = k.slice(pfx.length);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(d)) jours.add(d);
+        });
+      } catch(e) {}
+    }
+    return [...jours].sort().reverse();
+  }
+
   // Agrège toutes les statistiques nécessaires, une seule fois
   async function statsBadges() {
     const st = { days:0, streak:0, cleanStreak:0, pillars:0, skin:0, hydra:0,
@@ -13491,12 +13554,15 @@
                  counts:{}, maxDay:0, longNight:0, earlyChange:false, lateChange:false,
                  score:0, weekend:false, perfectDay:false };
     try {
-      const entries = await getAll();
-      st.days = entries.filter(e => e && e.date).length;
-      st.skin = entries.filter(e => e && e.skin === 'verte').length;
-      st.hydra = entries.filter(e => e && (e.bib||0) >= 3).length;
+      const renseignes = await getAll();
+      const dates = await joursVecus();
+      // pour tout ce qui parcourt les journées, une trace suffit
+      const entries = dates.map(d => ({ date: d }));
+      st.days = dates.length;
+      st.skin = renseignes.filter(e => e && e.skin === 'verte').length;
+      st.hydra = renseignes.filter(e => e && (e.bib||0) >= 3).length;
 
-      const byDate = {}; entries.forEach(e => { if (e && e.date) byDate[e.date] = e; });
+      const byDate = {}; dates.forEach(d => { byDate[d] = true; });
       // séries
       for (let i = 0; ; i++) {
         const d = new Date(); d.setDate(d.getDate()-i);
@@ -13636,6 +13702,22 @@
       if (currentM) await imOfferHelp(currentM);
     }
     return nouveaux;
+  }
+
+  /* Personne n'appelait checkBadges, sauf l'ouverture du tiroir — et en mode
+     silencieux. Autrement dit : les hauts faits se débloquaient seulement si
+     tu allais les regarder, et Foxy ne te disait jamais rien. Il les vérifie
+     maintenant de lui-même, après ce qui fait bouger tes compteurs, et au fil
+     de la journée — sans repasser dessus plus d'une fois par quart d'heure. */
+  let badgesDernier = 0;
+  async function verifierHautsFaits(force) {
+    if (paused) return false;
+    if (!force && Date.now() - badgesDernier < 15 * 60000) return false;
+    badgesDernier = Date.now();
+    try {
+      const n = await checkBadges(false);
+      return n.length > 0;
+    } catch(e) { return false; }
   }
 
   // Marque un événement ponctuel pour les badges intemporels
@@ -15173,6 +15255,24 @@
       t.scrollIntoView({ behavior:'smooth', block:'start' });
     });
   });
+  (function(){
+    const b = document.getElementById('debloquer');
+    const info = document.getElementById('debloqueInfo');
+    if (b) b.addEventListener('click', () => {
+      debloquerTout(false);
+      if (info) { info.textContent = '✅ Tout est refermé, la conversation est libre.'; setTimeout(()=>{ if (info) info.textContent=''; }, 4000); }
+    });
+    const r = document.getElementById('retirer');
+    if (r) r.addEventListener('click', async () => {
+      // un tirage raté ne doit pas t'immobiliser la journée
+      try { await window.storage.delete('outfit:' + todayStr()); } catch(e) {}
+      try { await ecrireStock('reveil:rituel:' + todayStr(), false); } catch(e) {}
+      const { o } = await tirerTenue();
+      try { await renderOutfitCard(); } catch(e) {}
+      if (info) { info.textContent = '🎲 Nouvelle tenue : ' + (o.jour || '—') + ' / ' + (o.nuit || '—'); }
+    });
+  })();
+
   document.querySelectorAll('#debugCard [data-vm]').forEach(btn => {
     btn.addEventListener('click', () => setVoiceMode(btn.dataset.vm));
   });
