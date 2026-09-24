@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '23.0';
+  const APP_VERSION = '23.1';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -4765,6 +4765,8 @@
     if (!paused && new Date().getHours() >= 6)
       talk(TALK.PILIER, 'reveil:rituel', () => rituelReveil(),
         { verifier: async () => !(await lireStock('reveil:rituel:' + todayStr(), false)) });
+    // filet : passé 8h, aucune tenue tirée ne doit rester sans tirage
+    if (!paused) { try { filetTirage(); } catch(e) {} }
     talk(TALK.GUIDE,    'tip:'+new Date().getHours()+':'+new Date().getMinutes(), () => pushMomentTip());
     talk(TALK.AMBIANCE, 'ping',        () => foxyPing());
   }, 60000);
@@ -9392,13 +9394,39 @@
      réponse décide si l'équipement du jour est tiré — et donc si un
      élément verrouillé peut sortir.
      ============================================================ */
+  /* Filet de sécurité du tirage. Quel qu'ait été le chemin — rituel jamais
+     joué, journée marquée « faite » par une ancienne version, conversation
+     interrompue — tu ne dois jamais te retrouver sans tenue tirée. Ça se fait
+     en silence : ce n'est pas une annonce, c'est une réparation. */
+  async function filetTirage() {
+    if (paused || new Date().getHours() < 8) return false;
+    try {
+      const o = await getOutfit(todayStr());
+      if (o && (o.jour || o.nuit)) return false;
+      const w = window.HabitrainWardrobe ? await window.HabitrainWardrobe.getWardrobe() : null;
+      if (!w || (!(w.jour || []).length && !(w.nuit || []).length)) return false;  // garde-robe vide : rien à tirer
+      await tirerTenue();
+      try { await renderOutfitCard(); } catch(e) {}
+      return true;
+    } catch(e) { return false; }
+  }
+
   async function rituelReveil() {
     if (paused || new Date().getHours() < 6) return false;
     // pas avant la fin de l'installation : c'est elle qui passe la main au réveil
     try { const se = await lireStock('setup:etat', null); if (!se || !se.termine || document.body.classList.contains('onboarding')) return false; } catch(e) {}
     const cle = 'reveil:rituel:' + todayStr();
     if (await lireStock(cle, false)) return false;
-    await ecrireStock(cle, true);
+
+    /* LE TIRAGE D'ABORD, LA QUESTION ENSUITE.
+       Le rituel se marquait « fait » dès son premier mot, avant même d'avoir
+       tiré quoi que ce soit. Si tu ne répondais pas à la question du
+       superviseur — appli fermée, conversation coupée par un rappel de
+       créneau —, la journée était grillée : pas de tenue tirée, et Foxy ne
+       revenait plus. Le tirage ne dépend pas de ta réponse : il part en
+       premier, et il est enregistré même si la suite n'aboutit pas. */
+    const { o, deja } = await tirerTenue();
+    try { await renderOutfitCard(); } catch(e) {}
 
     const dejaType = await lireStock('daytype:' + todayStr(), null);
     const chat = voiceMode === 'foxy';
@@ -9407,8 +9435,8 @@
     if (!sup) {
       if (chat) {
         await imSay(bro(
-          'Bonjour, ' + nomOu('toi') + '. 🦊 Avant que je tire ta journée, une seule question.',
-          'Debout. Une question, et je tire ta journée.'), 850, 'wave');
+          'Bonjour, ' + nomOu('toi') + '. 🦊 Ta tenue du jour est tirée — je te la donne dans une seconde. Juste une question avant.',
+          'Debout. Ta tenue est tirée. Une question avant.'), 850, 'wave');
         const k = await imDemander(bro('Un superviseur sera présent aujourd\'hui ?', 'Superviseur présent aujourd\'hui ?'), [
           { k:'supervise', label:'👥 Oui, il sera là', dit:'Oui, il sera là.' },
           { k:'solo',      label:'🧍 Non, je suis seul', dit:'Non, je suis seul.' }
@@ -9416,7 +9444,7 @@
         sup = k;
       } else {
         sup = await new Promise(res => {
-          foxyPopShow('Bonjour' + (nomOu(null) ? ', ' + nomOu(null) : '') + ' ! 🦊 Avant que je tire ta journée : un superviseur sera présent aujourd\'hui ?', 'wave', [
+          foxyPopShow('Bonjour' + (nomOu(null) ? ', ' + nomOu(null) : '') + ' ! 🦊 Ta tenue du jour est tirée. Avant que je te la donne : un superviseur sera présent aujourd\'hui ?', 'wave', [
             { label:'👥 Oui, il sera là', onClick: () => res('supervise') },
             { label:'🧍 Non, je suis seul', onClick: () => res('solo') }
           ]);
@@ -9425,7 +9453,8 @@
       await ecrireStock('daytype:' + todayStr(), sup);
     }
 
-    const { o, deja } = await tirerTenue();
+    // à partir d'ici, le rituel est allé au bout de sa partie utile
+    await ecrireStock(cle, true);
     const equip = sup === 'supervise' ? await tirerEquipement() : [];
     try { await renderOutfitCard(); } catch(e) {}
     try { await renderSupMode(); } catch(e) {}
