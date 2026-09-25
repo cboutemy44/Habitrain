@@ -649,7 +649,7 @@
     position:absolute; top:-13px; left:14px; background:#d9743a; color:#fff;
     font-family:'Fraunces',serif; font-weight:600; font-size:13px; padding:2px 12px; border-radius:20px;
   }
-  .rpg-text { font-size:15px; font-weight:600; line-height:1.5; color:#5a3418; margin-top:6px; flex:1; }
+  .rpg-text { font-size:15px; font-weight:600; line-height:1.5; color:#5a3418; margin-top:6px; flex:1; white-space:pre-line; }
   .rpg-next { align-self:flex-end; font-size:16px; color:#d9743a; animation:imBlink 1s infinite; margin-top:4px; }
   body.foxy #imActions { border-top:none; background:transparent; padding:6px 16px 16px; }
   body.foxy #imActions button { border-color:#e6c0a0; }

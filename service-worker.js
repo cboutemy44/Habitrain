@@ -1,5 +1,5 @@
 // Service worker Habitrain — cache app-shell pour fonctionnement hors-ligne.
-const CACHE = 'habitrain-v23.3';
+const CACHE = 'habitrain-v23.9';
 const ASSETS = [
   './',
   './index.html',
@@ -81,11 +81,31 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-  // Cache d'abord pour le reste (polices, icônes, etc.).
+  /* Le CODE passe par le réseau d'abord, le cache seulement en secours.
+     En cache d'abord, on pouvait se retrouver avec l'index.html NEUF (servi
+     par le réseau) et un app.js VIEUX (servi par le cache) : la page appelait
+     des éléments que l'ancien script ne connaissait pas, le script s'arrêtait
+     en cours de route, et des pans entiers de l'appli restaient morts —
+     typiquement les derniers menus câblés. HTML, JS et CSS doivent toujours
+     venir de la même version. */
+  const memeOrigine = req.url.startsWith(self.location.origin);
+  const estCode = memeOrigine && /\.(js|css|html|webmanifest)(\?|$)/.test(req.url);
+  if (estCode) {
+    event.respondWith(
+      fetch(req).then((res) => {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy));
+        }
+        return res;
+      }).catch(() => caches.match(req))
+    );
+    return;
+  }
+  // Cache d'abord pour le reste (images, polices, icônes).
   event.respondWith(
     caches.match(req).then((hit) => hit || fetch(req).then((res) => {
-      // met en cache les ressources same-origin récupérées
-      if (res && res.status === 200 && req.url.startsWith(self.location.origin)) {
+      if (res && res.status === 200 && memeOrigine) {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy));
       }
