@@ -1,5 +1,5 @@
 // Service worker Habitrain — cache app-shell pour fonctionnement hors-ligne.
-const CACHE = 'habitrain-v23.9';
+const CACHE = 'habitrain-v24.8';
 const ASSETS = [
   './',
   './index.html',
@@ -20,15 +20,8 @@ const ASSETS = [
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
+  './icon-512-maskable.png',
   './foxy-paw.png',
-  './foxy-diaper-v3.png',
-  './foxy-blue2-v3.png',
-  './foxy-blue-v3.png',
-  './foxy-paw-v3.png',
-  './foxy-diaper-v1.png',
-  './foxy-blue2-v1.png',
-  './foxy-blue-v1.png',
-  './foxy-paw-v1.png',
   './foxy-blue.png',
   './foxy-blue2.png',
   './foxy-diaper.png',

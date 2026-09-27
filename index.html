@@ -145,7 +145,7 @@
     <div id="rpgStage">
       <div class="rpg-portrait" id="rpgPortrait"></div>
       <div class="rpg-box">
-        <div class="rpg-name" id="rpgName">Foxy</div>
+        <div class="rpg-name">Foxy</div>
         <div class="rpg-text" id="rpgText"></div>
         <div class="rpg-next" id="rpgNext" style="visibility:hidden">▼</div>
       </div>
@@ -153,12 +153,21 @@
     <div class="im-thread" id="imThread"></div>
     <div class="im-safety" id="imSafety" style="display:none"></div>
     <div class="im-actions" id="imActions"></div>
-    <div class="im-talk" id="imTalk">
+    <div class="im-talk">
       <input type="text" id="imTalkInput" placeholder="Parler à Foxy…" autocomplete="off">
       <button id="imTalkSend">➤</button>
     </div>
   </div>
 
+<div class="card tabcard" id="sortieCard" data-tab="maintenant" style="display:none;border:2px solid #4a7a9a;background:#EAF1F6">
+    <div style="display:flex;align-items:flex-start;gap:12px">
+      <div style="font-size:30px">🚪</div>
+      <div style="flex:1">
+        <div style="font-family:'Fraunces',serif;font-weight:600;font-size:17px;color:#2f5b78">Tu es sorti</div>
+        <div id="sortieTxt" style="font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.45;margin-top:2px"></div>
+      </div>
+    </div>
+  </div>
 <div class="card tabcard" id="desCard" data-tab="maintenant" style="display:none;border:2px solid #7a5aa0;background:#F3EEF8">
     <div style="display:flex;align-items:flex-start;gap:12px">
       <div style="font-size:30px">🏠</div>
@@ -181,7 +190,7 @@
   <div class="card tabcard" data-tab="maintenant">
     <h2>Ta journée</h2>
     <div class="sub">Ce que Foxy suit pour toi en ce moment.</div>
-<div class="bloc" id="dayMoodCard" data-tab="maintenant">
+<div class="bloc" data-tab="maintenant">
     <div style="display:flex;align-items:center;gap:12px">
       <div id="dmEmoji" style="font-size:34px">🌱</div>
       <div style="flex:1">
@@ -191,7 +200,7 @@
       </div>
     </div>
   </div>
-<div class="bloc" id="sinceCard" data-tab="maintenant">
+<div class="bloc" data-tab="maintenant">
     <h2>Ta couche du moment</h2>
     <div class="since-card">
       <div class="since-portrait" id="sincePortrait"></div>
@@ -211,7 +220,7 @@
     <div class="outfit-note" id="outfitNote" style="display:none"></div>
     <div class="outfit-note" id="outfitOnce" style="display:none;font-style:italic">🔒 Un seul tirage par jour — la tenue est fixée.</div>
   </div>
-<div class="bloc moment" id="momentCard" data-tab="maintenant">
+<div class="bloc moment" data-tab="maintenant">
     <div class="eyebrow" id="momentEyebrow">Moment</div>
     <h2 id="momentTitle">Point du moment</h2>
     <div class="guide" id="guide"></div>
@@ -249,7 +258,7 @@
   <div class="card tabcard" data-tab="suivi">
     <h2>Mon suivi</h2>
     <div class="sub">Tes journées, ta peau, ton rythme de port.</div>
-<div class="bloc" id="dashCard" data-tab="suivi">
+<div class="bloc" data-tab="suivi">
     <h2>Habituation aux couches</h2>
     <div class="sub">Ta progression sur le mois : régularité et baisse des situations à corriger, à parts égales.</div>
     <div class="dash-status none" id="dashStatus">
@@ -262,7 +271,7 @@
     <div class="progwrap">
       <div class="progtop"><span id="progLabel">Progression</span><span id="progPct">—</span></div>
       <div class="progbar"><div class="progfill" id="progFill" style="width:0%"></div></div>
-      <div class="progmarks" id="progMarks">
+      <div class="progmarks">
         <span>Découverte</span><span>Ça s'installe</span><span>Automatisme</span><span>2ᵉ nature</span>
       </div>
     </div>
@@ -273,7 +282,7 @@
     </div>
     <div class="apprec" id="dashApprec">Le tableau de bord s'activera dès tes premières entrées.</div>
   </div>
-<div class="bloc" id="wearCard" data-tab="suivi">
+<div class="bloc" data-tab="suivi">
     <h2>Durée de port</h2>
     <div class="sub">Temps entre deux changes enregistrés. Fourchette saine en journée : 2h à 5h — ni trop fréquent (anomalie), ni trop long (risque peau).</div>
     <div class="wear-kpis">
@@ -284,7 +293,7 @@
     <div class="wear-list" id="wearList"></div>
     <div class="sup-note" id="wearNote"></div>
   </div>
-<div class="bloc" id="skinCard" data-tab="suivi">
+<div class="bloc" data-tab="suivi">
     <h2>Peau sur 30 jours</h2>
     <div class="sub">La ligne à surveiller. Une dérive se voit ici avant de faire mal.</div>
     <div class="strip" id="strip"></div>
@@ -295,7 +304,7 @@
       <span><i class="dot" style="background:var(--empty)"></i>Non rempli</span>
     </div>
   </div>
-<div class="bloc" id="checkCard" data-tab="cadre">
+<div class="bloc" data-tab="cadre">
     <h2>Vérif surprise</h2>
     <div class="sub">À l'ouverture du tracker, une vérif peut tomber au hasard : couche bien en place ? Comme tu ouvres l'appli chaque jour pour tes suivis, la surprise vient du « quand ».</div>
     <div class="checkrow">
@@ -366,7 +375,7 @@
     <div class="saved-flash" id="flash"></div>
     </div>
   </div>
-<div class="bloc" id="histCard" data-tab="suivi">
+<div class="bloc" data-tab="suivi">
     <h2>Historique</h2>
     <div class="sub" id="histSub">Rapports du soir et détail des checks, le plus récent en haut.</div>
     <div id="history"></div>
@@ -375,7 +384,7 @@
   <div class="card tabcard" data-tab="suivi">
     <h2>Le cadre</h2>
     <div class="sub">Les règles, ta journée type et les entorses relevées.</div>
-<div class="bloc" id="rulesCard" data-tab="cadre">
+<div class="bloc" data-tab="cadre">
     <h2>📋 Les règles du programme</h2>
     <div class="sub">Le cadre que tu suis. Chaque règle indique comment elle est vérifiée, et si elle tient.</div>
     <div id="rulesList"></div>
@@ -386,12 +395,12 @@
     <div class="sub">Ta journée en frise. Les moments passés sont grisés, les 🔑 piliers (changes obligatoires) ressortent.</div>
     <div class="timeline" id="timeline"></div>
   </div>
-<div class="bloc" id="autoBreachCard" data-tab="suivi" style="display:none">
+<div class="bloc" data-tab="suivi" style="display:none">
     <h2>🔍 Entorses détectées</h2>
     <div class="sub">Foxy a repéré ces écarts dans tes données. Confirme ceux qui sont justifiés, écarte les autres.</div>
-    <div id="autoBreachList"></div>
+    <div></div>
   </div>
-<div class="bloc breach-card" id="breachCard" data-tab="suivi">
+<div class="bloc breach-card" data-tab="suivi">
     <h2>Entorses du jour</h2>
     <div class="sub">Coche les écarts au cadre, puis enregistre. Valables pour la journée, ils pèsent sur ta note d'habituation.</div>
     <div id="breachList"></div>
@@ -404,9 +413,11 @@
 
 
   <div class="card" id="settingsCard" style="display:none">
-    <div id="settingsNav" style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px">
+    <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px">
       <button class="settings-toggle-btn set-nav" data-target="secNotif">🔔 Notifications &amp; rythme</button>
       <button class="settings-toggle-btn set-nav" data-target="wardrobeCard">👕 Garde-robe &amp; stock</button>
+      <button class="settings-toggle-btn set-nav" data-target="contCard">🎽 Période de contention</button>
+      <button class="settings-toggle-btn set-nav" data-target="amiCard">🦊 Ce que Foxy retient de toi</button>
       <button class="settings-toggle-btn set-nav" data-target="qrCard">📶 Tags NFC &amp; bracelet</button>
       <button class="settings-toggle-btn set-nav" data-target="sensorCard">📡 Capteur de couche</button>
       <button class="settings-toggle-btn set-nav" data-target="tenueSensorCard">🔒 Capteur de tenue</button>
@@ -467,7 +478,7 @@
       <div class="saved-flash" id="safewordFlash"></div>
     </div>
 
-    <div class="set-note" id="setNote">Rappel : une appli web ne garantit pas les notifications quand elle est complètement fermée. Pour les rappels critiques, garde tes alarmes système.</div>
+    <div class="set-note">Rappel : une appli web ne garantit pas les notifications quand elle est complètement fermée. Pour les rappels critiques, garde tes alarmes système.</div>
     </div>
   </div>
 
@@ -585,6 +596,33 @@
       <div id="sensorGuide" style="display:none;margin-top:12px;font-size:13px;line-height:1.6;color:var(--ink)"></div>
     </div>
     <div class="set-note">⚠️ Nécessite Android + Chrome (Web Bluetooth). L'automatisation retire le geste de constat manuel — à toi de voir si tu préfères garder ce rituel.</div>
+  </div>
+
+  <div class="card" id="contCard" style="display:none">
+    <h2>🎽 Période de contention</h2>
+    <div class="sub">Foxy vient t'équiper au début avec <b>le tirage d'équipement du jour</b>, et te libère à la fin en comptant ce que tu as tenu. Le tag du harnais encadre la période : un scan pour t'équiper, un pour tout retirer.</div>
+
+    <div class="set-row" style="margin-top:10px">
+      <div class="info"><div class="n">Début</div><div class="d">Tous les jours</div></div>
+      <input type="time" id="contDebut" class="field" style="width:120px">
+    </div>
+    <div class="set-row" style="margin-top:8px">
+      <div class="info"><div class="n">Fin</div><div class="d">La durée sert de cible</div></div>
+      <input type="time" id="contFin" class="field" style="width:120px">
+    </div>
+    <button class="settings-toggle-btn" id="contEnr" style="margin-top:10px">💾 Enregistrer ces heures</button>
+    <div class="set-note" id="contInfo"></div>
+
+    <div class="set-note">Les fenêtres de régression de midi (12h–13h) et du soir (20h–22h) portent aussi leur contention, mais seulement en mode intensif. Celle-ci vaut tous les jours et ne se négocie pas : un refus se note et Foxy repasse vingt minutes plus tard.<br><br>Les jours supervisés, c'est le tirage du matin qui sert. Les jours solo, Foxy tire lui-même — mais <b>jamais rien de verrouillé sans quelqu'un aux clés</b>.<br><br><b>Au lit.</b> Quand tes trois derniers jours ont laissé des entorses derrière eux <i>et</i> que ton superviseur est là, Foxy resserre : la période se fait allongé, attaché. Le tag de la porte de ta chambre prouve que tu y es monté, et c'est ton inactivité qui prouve que tu y es resté — si l'appli te voit agir pendant, il le dira. Jamais après 22h : le sommeil reste libre.</div>
+  </div>
+
+  <div class="card" id="amiCard" style="display:none">
+    <h2>🦊 Ce que Foxy retient de toi</h2>
+    <div class="sub">Il te pose une question par jour, et tu peux lui écrire quand tu veux. Il garde tout mot pour mot, pour y revenir plus tard. Rien ne sort de ton téléphone, et tout s'efface ici.</div>
+    <div id="amiListe" style="display:flex;flex-direction:column;gap:8px;margin-top:10px"></div>
+    <div class="set-note" id="amiInfo"></div>
+    <button class="settings-toggle-btn" id="amiTout" style="margin-top:12px;background:#c0603f;color:#fff;border-color:#c0603f">🗑 Tout effacer</button>
+    <div class="set-note">Rien de tout ceci ne sort de ton téléphone. Si tu effaces une réponse, il pourra te reposer la question un autre jour.</div>
   </div>
 
   <div class="card" id="qrCard" style="display:none">
@@ -761,16 +799,6 @@
     <div class="acts" id="checkActs"></div>
   </div>
 
-  <div class="modal" id="modalFix" style="display:none">
-    <div class="big foxy-portrait" id="fixIcon"></div>
-    <h3 id="fixTitle">À corriger tout de suite</h3>
-    <p id="fixIntro">Tu es hors cadre là&nbsp;: on te remet en couche maintenant, sans attendre.</p>
-    <ol class="fixsteps" id="fixSteps"></ol>
-    <div class="acts">
-      <button class="ok" id="fixDone">C'est fait</button>
-    </div>
-  </div>
-
   <div class="modal" id="modalDue" style="display:none">
     <div class="big foxy-portrait" id="dueIcon"></div>
     <h3 id="dueTitle">C'est l'heure de changer</h3>
@@ -780,7 +808,7 @@
 
   <div class="modal" id="modalChange" style="display:none">
     <div class="big" id="chIcon">💧</div>
-    <h3 id="chTitle">État de la couche</h3>
+    <h3>État de la couche</h3>
     <p id="chQ">Avant de la retirer, elle est comment ?</p>
     <div class="acts" id="chActs"></div>
   </div>
@@ -794,6 +822,8 @@
     <div class="acts" id="poseActs"></div>
   </div>
 </div>
+
+</div><!-- .wrap : il n'était jamais refermé, le navigateur le faisait en silence -->
 
 <script src="nfc.js"></script>
 <script src="qr.js"></script>

@@ -32,10 +32,13 @@
 
   let dernierPlan = '';
 
+  /* Le plan est asynchrone depuis qu'il lit ton état : Foxy regarde ce que
+     tu as déjà fait aujourd'hui avant de décider quoi te rappeler. */
   async function replanifier(forcer) {
     if (!Notifs || typeof window.__habitrainNotifPlan !== 'function') return;
     let plan;
-    try { plan = window.__habitrainNotifPlan(); } catch (e) { return; }
+    try { plan = await window.__habitrainNotifPlan(); } catch (e) { return; }
+    if (!plan || !plan.items) return;
 
     // rien n'a bougé : on ne touche pas au système pour rien
     const signature = JSON.stringify(plan);
@@ -43,7 +46,8 @@
     dernierPlan = signature;
 
     // on repart d'une ardoise propre : c'est le seul moyen fiable de
-    // refléter une case décochée dans les réglages
+    // refléter une case décochée dans les réglages, ou un rappel devenu
+    // inutile parce que tu viens de faire ce qu'il annonçait
     try {
       const enCours = await Notifs.getPending();
       if (enCours && enCours.notifications && enCours.notifications.length) {
@@ -54,11 +58,16 @@
     // en pause, Foxy se tait aussi côté système
     if (plan.pause || !plan.items.length) return;
 
+    /* Une date ponctuelle, pas un « on » quotidien : c'est ce qui fait
+       prendre au plugin le chemin setExactAndAllowWhileIdle(RTC_WAKEUP),
+       le seul qui réveille l'appareil en veille profonde. Le « on »
+       réarmait chaque jour suivant sans réveil, et les rappels arrivaient
+       à la fenêtre de maintenance — parfois une heure trop tard. */
     const aPlanifier = plan.items.map(it => ({
       id: idPour(it.cle),
       title: it.titre,
       body: it.corps,
-      schedule: { on: { hour: it.heure, minute: it.minute }, allowWhileIdle: true },
+      schedule: { at: new Date(it.at), allowWhileIdle: true },
       smallIcon: 'ic_stat_icon',
       iconColor: '#c86b3a'
     }));
@@ -66,12 +75,29 @@
     try { await Notifs.schedule({ notifications: aPlanifier }); } catch (e) {}
   }
 
+  /* Les quotas d'alarmes par « bucket » d'inactivité peuvent descendre à
+     une seule alarme par jour si Android range l'application en
+     « restricted ». Seule l'exemption d'optimisation de batterie les lève
+     vraiment. On la demande une fois, et on n'en reparle plus. */
+  async function demanderExemptionBatterie() {
+    try {
+      if (localStorage.getItem('habitrain:natif:batterie') === 'demande') return;
+      localStorage.setItem('habitrain:natif:batterie', 'demande');
+      if (typeof window.__habitrainExemptionBatterie === 'function') {
+        window.__habitrainExemptionBatterie();
+      }
+    } catch (e) {}
+  }
+
   async function demarrer() {
     if (Notifs) {
       try {
         let perm = await Notifs.checkPermissions();
         if (perm.display !== 'granted') perm = await Notifs.requestPermissions();
-        if (perm.display === 'granted') await replanifier(true);
+        if (perm.display === 'granted') {
+          await replanifier(true);
+          demanderExemptionBatterie();
+        }
       } catch (e) {}
     }
 
@@ -81,15 +107,6 @@
     if (App) {
       try {
         App.addListener('backButton', () => {
-          const scan = document.getElementById('qrScanOverlay');
-          if (scan && scan.style.display && scan.style.display !== 'none') {
-            try { window.HabitrainQR.stopScan(); } catch (e) {}
-            return;
-          }
-          if (document.body.classList.contains('qrsheet-on')) {
-            document.body.classList.remove('qrsheet-on');
-            return;
-          }
           const pop = document.getElementById('foxyPop');
           if (pop && pop.style.display && pop.style.display !== 'none') {
             pop.style.display = 'none';

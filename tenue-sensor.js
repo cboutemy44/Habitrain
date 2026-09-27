@@ -13,10 +13,10 @@
 (function () {
   'use strict';
 
-  const SERVICE_UUID   = 'habf0x10-c0de-4a11-b0b0-1abe100dc001';
-  const CHAR_ETAT_UUID = 'habf0x11-c0de-4a11-b0b0-1abe100dc001'; // 'O' ouvert / 'F' fermé
-  const CHAR_LOG_UUID  = 'habf0x12-c0de-4a11-b0b0-1abe100dc001'; // journal horodaté
-  const CHAR_CTRL_UUID = 'habf0x13-c0de-4a11-b0b0-1abe100dc001'; // 'ACK' / 'SYNC:<epoch>'
+  const SERVICE_UUID   = '4ab1e010-c0de-4a11-b0b0-1abe100dc001';
+  const CHAR_ETAT_UUID = '4ab1e011-c0de-4a11-b0b0-1abe100dc001'; // 'O' ouvert / 'F' fermé
+  const CHAR_LOG_UUID  = '4ab1e012-c0de-4a11-b0b0-1abe100dc001'; // journal horodaté
+  const CHAR_CTRL_UUID = '4ab1e013-c0de-4a11-b0b0-1abe100dc001'; // 'ACK' / 'SYNC:<epoch>'
 
   let device = null, server = null;
   let charEtat = null, charLog = null, charCtrl = null;

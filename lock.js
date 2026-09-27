@@ -7,9 +7,9 @@
    Expose window.HabitrainLock.
    ============================================================ */
 (function () {
-  const SERVICE_UUID  = 'hab10ck0-c0de-4a11-b0b0-1abe100dc001';
-  const CHAR_CMD_UUID = 'hab10ck1-c0de-4a11-b0b0-1abe100dc001';
-  const CHAR_ST_UUID  = 'hab10ck2-c0de-4a11-b0b0-1abe100dc001';
+  const SERVICE_UUID  = '4ab10c00-c0de-4a11-b0b0-1abe100dc001';
+  const CHAR_CMD_UUID = '4ab10c01-c0de-4a11-b0b0-1abe100dc001';
+  const CHAR_ST_UUID  = '4ab10c02-c0de-4a11-b0b0-1abe100dc001';
 
   const PILIERS = [9*60, 16*60, 22*60+30];
 
@@ -168,16 +168,10 @@
     return true;
   }
 
-  async function lockNow(lockId) {
-    const c = conns[lockId];
-    if (!c || !c.connected) return;
-    await c.charCmd.writeValue(new TextEncoder().encode('LOCK'));
-  }
-
   window.HabitrainLock = {
     supported, isConnected,
     getLocks, addLock, updateLock, removeLock,
-    connect, disconnect, open, emergencyOpen, lock: lockNow,
+    connect, disconnect, open, emergencyOpen,
     evaluate, getOpensToday,
     onStatus: (cb) => { onStatusCb = cb; }
   };

@@ -36,8 +36,8 @@
   // MAJUSCULES + CHIFFRES + tiret, on reste dans le jeu de caractères
   // « alphanumérique » du standard QR, encodé sur 5,5 bits au lieu de 8.
   // Même contenu, nettement moins de modules.
-  const KIND_CODE = { change_pilier:'P', change_tous:'T', biberon:'B', coucher:'C', unlock:'U', tetine:'S' };
-  const CODE_KIND = { P:'change_pilier', T:'change_tous', B:'biberon', C:'coucher', U:'unlock', S:'tetine' };
+  const KIND_CODE = { change_pilier:'P', change_tous:'T', biberon:'B', coucher:'C', unlock:'U', tetine:'S', contention:'K' };
+  const CODE_KIND = { P:'change_pilier', T:'change_tous', B:'biberon', C:'coucher', U:'unlock', S:'tetine', K:'contention' };
   function secretCourt(s) { return String(s).replace(/[^A-Za-z0-9]/g, '').slice(-8).toUpperCase(); }
   // les tenues et accessoires ont un identifiant libre (wb…) : il passe tel quel,
   // en majuscules, et redescend en minuscules à la lecture.
@@ -102,28 +102,12 @@
     return { enabled: {}, unlock: false };
   }
   async function saveQrPrefs(p) { try { await window.storage.set('qr:prefs', JSON.stringify(p)); } catch (e) {} }
-  // API publique : telle action requiert-elle un scan ?
-  async function actionRequiresScan(actionKind) {
-    const p = await getQrPrefs();
-    if (p.enabled[actionKind]) return true;
-    // 'change_tous' couvre aussi les piliers
-    if (actionKind === 'change_pilier' && p.enabled['change_tous']) return true;
-    return false;
-  }
-
-  // ---- Génération : dessine un QR dans un canvas ----
-  // ecc : 'M' par défaut, 'L' pour les tout petits supports (moins de modules)
-  // jeu de caractères du mode « alphanumérique » du standard QR
-  const ALNUM_QR = /^[0-9A-Z $%*+\-.\/:]+$/;
-  // mm : largeur d'impression souhaitée du code (hors marge), pour la feuille papier
   /* La caméra, le dessin des QR et leur lecture ont été retirés : tout passe
      désormais par les tags NFC. Ce module ne garde que ce qui fait l'identité
      d'un support — le secret, le format du payload et sa relecture. */
-
-
   window.HabitrainQR = {
-    QR_ACTIONS, getQrPrefs, saveQrPrefs, actionRequiresScan,
-    payloadFor, getSecret, parsePayloadPublic: parsePayload,
-    lienPour, payloadDuLien, rotateSecret
+    QR_ACTIONS, getQrPrefs, saveQrPrefs,
+    payloadFor, parsePayloadPublic: parsePayload,
+    lienPour, rotateSecret
   };
 })();
