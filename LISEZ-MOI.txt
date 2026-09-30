@@ -1,10 +1,16 @@
-Habitrain 24.8 — le code de la PWA, pour tes tests.
+Habitrain 24.9 — le code de la PWA, pour tes tests.
 
-Ces 15 fichiers se déposent par-dessus ton dossier existant : les images
+Les 15 fichiers se déposent par-dessus ton dossier existant. Les images
 (foxy-*.png, badges-*.png, icon-*.png, guide-steps.png) n'ont pas changé
-depuis la 24.1, garde celles que tu as.
+depuis la 24.1 : garde celles que tu as.
 
     python3 -m http.server 8080      # puis http://localhost:8080
 
-Rappel : en navigateur les notifications meurent avec l'onglet. Pour les
-essayer pour de vrai, il faut l'APK.
+Pour essayer la contention sans attendre 17h, l'appli accepte une heure
+simulée par l'URL en version de test uniquement (via le harnais). Sinon,
+change les heures dans Réglages → Période de contention.
+
+ATTENTION, en navigateur : les rappels sont des minuteurs de la page, ils
+MEURENT avec l'onglet. Onglet fermé à l'heure dite = aucune notification.
+Foxy te le dira en revenant (« la période est passée sans toi »), mais pour
+être prévenu à l'heure il faut l'APK Android.

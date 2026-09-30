@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '24.8';
+  const APP_VERSION = '24.9';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -1675,6 +1675,31 @@
                         dureeCourte(total) + ' en tout aujourd\'hui.'), 800, 'calm');
       });
     }
+    return true;
+  }
+
+  /* Une période entière a pu passer sans que l'application soit ouverte : ni
+     fenêtre, ni notification si tu n'es qu'en navigateur. Foxy ne fait pas
+     semblant de ne pas l'avoir vu — il le dit une fois, sans en faire un
+     drame, et il le note. Sinon le cadre se vide en silence. */
+  const CONT_RATEE = 'cont:ratee:';
+  async function contentionRatee() {
+    if (paused || voiceMode !== 'foxy') return false;
+    const per = await periodesContention();
+    const faites = await contFaites();
+    const dites = (await lireStock(CONT_RATEE + todayStr(), {})) || {};
+    const m = new Date().getHours() * 60 + new Date().getMinutes();
+    const oubliee = per.find(pc => (pc.toujours || serre()) && m >= pc.a && !faites[pc.id] && !dites[pc.id]);
+    if (!oubliee) return false;
+    dites[oubliee.id] = Date.now();
+    await ecrireStock(CONT_RATEE + todayStr(), dites);
+    try { await marquerEntorse('b_contention'); } catch(e) {}
+    await imSay(bro(oubliee.nom.charAt(0).toUpperCase() + oubliee.nom.slice(1)
+                      + ' est passée sans toi. Je n\'étais pas ouvert, je n\'ai rien pu te dire — mais elle comptait quand même, alors je la note. 🦊',
+                    oubliee.nom + ' est passée. Notée.'), 900, 'pensive');
+    await imSay(bro('Si tu veux être sûr de ne pas la manquer, laisse-moi t\'envoyer une notification : c\'est dans les réglages. Et sur ton téléphone, l\'application installée y arrive même fermée — le navigateur, non. 💛',
+                    'Active la notification. Le navigateur ne prévient pas appli fermée.'), 950, 'calm');
+    if (currentM) await imOfferHelp(currentM);
     return true;
   }
 
@@ -6651,6 +6676,7 @@
        note et se reporte, il n'enferme pas. */
     talk(TALK.PILIER,   'cont:rappel', () => rappelContention());
     talk(TALK.PILIER,   'cont:fin',    () => finirContention());
+    talk(TALK.CADRE,    'cont:ratee',  () => contentionRatee());
     talk(TALK.PROGRES,  'milestone',   () => foxyMilestones());
     talk(TALK.PROGRES,  'hautsfaits',  () => verifierHautsFaits());
     // l'agent de transformation parle une fois par jour, en soirée, quand la
@@ -17726,6 +17752,16 @@
       const prio = (dueSlot.ctx === 'pilier' || hardMode || discActive()) ? TALK.PILIER : TALK.CHECK;
       setTimeout(() => talk(prio, 'due:'+dueSlot.key, () => lancerRappelChange(dueSlot)), 500);
     }
+    /* La contention à l'OUVERTURE, et pas seulement au tick de la minute
+       suivante. Sans ça, ouvrir l'application en pleine période ne déclenchait
+       rien pendant soixante secondes — et si elle était fermée à l'heure
+       dite, il ne se passait jamais rien du tout. */
+    if (!paused) {
+      setTimeout(() => talk(TALK.PILIER, 'cont:rappel', () => rappelContention()), 900);
+      setTimeout(() => talk(TALK.PILIER, 'cont:fin',    () => finirContention()), 1100);
+      setTimeout(() => talk(TALK.CADRE,  'cont:ratee',  () => contentionRatee()), 2600);
+    }
+
     // vérif périodique du change dû (persiste tant que non fait, avec snooze)
     setInterval(checkDueChangePeriodic, 60000);
     setInterval(() => { verifierRegression().catch(() => {}); suivreTenueFoxy().catch(() => {}); }, 60000);
