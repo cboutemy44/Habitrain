@@ -63,13 +63,21 @@
        le seul qui réveille l'appareil en veille profonde. Le « on »
        réarmait chaque jour suivant sans réveil, et les rappels arrivaient
        à la fenêtre de maintenance — parfois une heure trop tard. */
+    /* Regroupées, et effacées au toucher. Quatorze rappels par jour, chacun
+       sur sa propre ligne et qu'il faut balayer un par un, finissent par
+       former un mur dans le volet de notifications — on ne voit plus celui
+       qui compte. Android sait les replier en une seule entrée dès qu'ils
+       portent le même groupe ; autoCancel fait disparaître celui qu'on a
+       ouvert, au lieu de le laisser traîner. */
     const aPlanifier = plan.items.map(it => ({
       id: idPour(it.cle),
       title: it.titre,
       body: it.corps,
       schedule: { at: new Date(it.at), allowWhileIdle: true },
       smallIcon: 'ic_stat_icon',
-      iconColor: '#c86b3a'
+      iconColor: '#c86b3a',
+      group: 'habitrain',
+      autoCancel: true
     }));
 
     try { await Notifs.schedule({ notifications: aPlanifier }); } catch (e) {}

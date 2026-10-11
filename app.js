@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '24.9';
+  const APP_VERSION = '25.2';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -935,6 +935,14 @@
       if (tagRebond(k)) return;
       onKind(k);
     };
+    /* Une écoute appartient à la fenêtre qui l'a ouverte. Avant, c'était une
+       simple case globale : une écoute oubliée (fenêtre fermée par un autre
+       chemin) continuait d'avaler TOUS les tags, et un scan du harnais ne
+       parvenait plus jamais à ce qu'il devait déclencher — en silence. Deux
+       garde-fous : l'écoute se date, et elle ne libère la case que si elle
+       la tient encore. */
+    servir.depuis = depart;
+    servir.vivante = () => vivant;
     tagEnAttente = servir;
     if (NFC && NFC.supported()) {
       try {
@@ -945,9 +953,22 @@
       } catch(e) { /* pas de Web NFC : le natif ou le QR prendront le relais */ }
     }
     return () => {
-      vivant = false; tagEnAttente = null;
+      vivant = false;
+      if (tagEnAttente === servir) tagEnAttente = null;   // et pas celle d'un autre
       try { if (NFC && NFC.isScanning()) NFC.stopScan(); } catch(e) {}
     };
+  }
+  /* Une écoute n'a de sens que tant que la fenêtre qui l'attend est là. Si
+     plus aucune fenêtre n'est ouverte, ou si elle traîne depuis plus d'un
+     quart d'heure, on la jette et le tag reprend son chemin normal. */
+  const TAG_ECOUTE_MAX = 15 * 60000;
+  function ecouteValide() {
+    const e = tagEnAttente;
+    if (!e) return false;
+    if (typeof e.vivante === 'function' && !e.vivante()) { tagEnAttente = null; return false; }
+    if (e.depuis && Date.now() - e.depuis > TAG_ECOUTE_MAX) { tagEnAttente = null; return false; }
+    if (!fenetreOuverte() && !scanEnAttente) { tagEnAttente = null; return false; }
+    return true;
   }
 
   /* Une étape de preuve. Renvoie 'ok' (scan valide) ou 'force' (validé sans
@@ -971,6 +992,7 @@
       const choix = await new Promise(res => {
         let rendu = false;
         const fin = (v) => { if (rendu) return; rendu = true; try { stop(); } catch(e) {} foxyPopHide(); res(v); };
+        popAttend(fin);   // refermée autrement : on rend la main au lieu de rester pris
         const boutons = [];
         if (n >= 2) boutons.push({ soft:true, label:'✓ Valider sans preuve', onClick: () => fin('sans') });
         else boutons.push({ soft:true, label:'Je ne peux pas', onClick: () => fin('sans') });
@@ -1178,6 +1200,7 @@
       const d = await new Promise(res => {
         let rendu = false;
         const fin = v => { if (rendu) return; rendu = true; try { stop(); } catch(e) {} foxyPopHide(); res(v); };
+        popAttend(fin);   // refermée autrement : on rend la main au lieu de rester pris
         foxyPopShow('📶 ' + bro('Ton biberon ! Approche ton tag pour qu\'on démarre, et installe-toi confortablement.\n\nJe vise ' + mmss(cible) + ' — on n\'est pas pressés.',
                                 'Biberon. Approche ton tag, on démarre. Objectif : ' + mmss(cible) + '.')
           + '\n📍 ' + def.ou, 'bottle',
@@ -1511,7 +1534,7 @@
     const nom = per ? per.nom : 'ta contention';
     const cible = per ? (per.a - per.de) * 60 : 60 * 60;
     const eq = await equipementContention();
-    const lit = per ? await litRequis(per) : null;
+    const lit = (per && !per.libre) ? await litRequis(per) : null;
 
     let ouverte = null;
     try { ouverte = await lireStock(CONT_ENCOURS, null); } catch(e) {}
@@ -1527,12 +1550,16 @@
     // ---- on s'équipe ----
     if (!debut && codeInitial && def.accepte(codeInitial)) {
       debut = Date.now();
-      try { await ecrireStock(CONT_ENCOURS, { t: debut, per: perId, equip: eq.ids }); } catch(e) {}
+      /* La cible et le nom voyagent avec la période : une période libre ne se
+         retrouve pas dans la table des horaires, et sans ça son verdict se
+         serait calculé sur une heure par défaut — c'est-à-dire sur rien. */
+      try { await ecrireStock(CONT_ENCOURS, { t: debut, per: perId, equip: eq.ids, cible, nom }); } catch(e) {}
     }
     if (!debut) {
       const d = await new Promise(res => {
         let rendu = false;
         const fin = v => { if (rendu) return; rendu = true; try { stop(); } catch(e) {} foxyPopHide(); res(v); };
+        popAttend(fin);   // refermée autrement : on rend la main au lieu de rester pris
         /* Il nomme le tirage du jour, pièce par pièce. C'est là que la
            période prend son sens : tu ne mets pas « ton harnais », tu mets ce
            qui a été tiré pour toi ce matin, et tu n'as rien choisi. */
@@ -1549,7 +1576,12 @@
           [ { soft:true, label:'Je ne peux pas là', onClick: () => fin('refus') } ]);
         var stop = ecouterTag(k => fin({ tag:k }));
       });
-      if (d === 'refus' || d === null) {
+      /* Fenêtre refermée par un autre chemin que toi : ce n'est pas un refus.
+         On s'arrête là, sans rien noter — te compter une entorse parce qu'un
+         garde-fou a fait le ménage serait injuste, et c'est exactement le
+         genre de reproche qu'on ne veut pas. */
+      if (d === null) return false;
+      if (d === 'refus') {
         /* « Ça ne se négocie pas » ne veut pas dire qu'il t'enferme : il
            insiste, il repasse, et il le note. Le cadre tient par la
            régularité, pas par la force. */
@@ -1574,11 +1606,13 @@
         const monte = await new Promise(res => {
           let rendu = false;
           const fin = v => { if (rendu) return; rendu = true; try { stop2(); } catch(e) {} foxyPopHide(); res(v); };
+          popAttend(fin);   // refermée autrement : on rend la main au lieu de rester pris
           foxyPopShow('🌙 ' + bro('Bien. Maintenant monte, allonge-toi, et approche le tag de la porte de ta chambre.\n\nTon superviseur t\'attache une fois que tu es en place.',
                                   'Monte, allonge-toi, tag de la porte. Ton superviseur t\'attache.'), 'calm',
             [ { soft:true, label:'Je n\'y arrive pas', onClick: () => fin('non') } ]);
           var stop2 = ecouterTag(k => { if (k === 'coucher') fin('oui'); });
         });
+        if (monte === null) return false;    // fenêtre refermée autrement : rien à noter
         if (monte !== 'oui') {
           try { await marquerEntorse('b_contention_lit'); } catch(e) {}
           talk(TALK.CADRE, 'cont:lit:refus:' + Date.now(), async () => {
@@ -1589,7 +1623,7 @@
         }
       }
       debut = Date.now();
-      try { await ecrireStock(CONT_ENCOURS, { t: debut, per: perId, equip: eq.ids, lit: !!lit }); } catch(e) {}
+      try { await ecrireStock(CONT_ENCOURS, { t: debut, per: perId, equip: eq.ids, lit: !!lit, cible, nom }); } catch(e) {}
       try { await ecrireStock(CONT_REFUS, null); } catch(e) {}
       if (lit) { litOuvert = { debut, per: perId }; litGestes = 0; }
     }
@@ -1614,8 +1648,12 @@
               ? (lit
                   ? bro('Te voilà. Pose ce téléphone maintenant, et ne le reprends plus.\n\nJe ne te dérangerai pas. À la fin, tu approches le tag de la porte puis celui du harnais. 💛',
                         'Pose ce téléphone. Tag de la porte puis du harnais à la fin.')
-                  : bro('Te voilà contenu — ' + eq.items.length + (eq.items.length > 1 ? ' pièces' : ' pièce') + ' en place. Je te laisse : va t\'installer, lâche prise, ne pense à rien.\n\nJe repasserai à la fin de la période. Si tu dois te libérer avant, tu approches ton tag.',
-                        'Contenu, ' + eq.items.length + ' en place. Va t\'installer. Je repasse à la fin. Tag pour te libérer.'))
+                  /* On nomme les pièces plutôt que de les compter. Quand c'est
+                     TOI qui scannes sans que Foxy ait rien annoncé, cette
+                     fenêtre est la seule qui te dise ce que le tirage du matin
+                     avait prévu — un nombre ne te l'apprend pas. */
+                  : bro('Te voilà contenu.\n\n' + listeEquip(eq) + '\n\nJe te laisse : va t\'installer, lâche prise, ne pense à rien.\n\nJe repasserai à la fin de la période. Si tu dois te libérer avant, tu approches ton tag.',
+                        'Contenu :\n' + listeEquip(eq) + '\nVa t\'installer. Je repasse à la fin. Tag pour te libérer.'))
               : bro('C\'est parti. Écarte ton tag du téléphone — je le réécouterai dans ' + (CONT_PLANCHER - ecoule()) + ' s.',
                     'Écarte ton tag. Réécoute dans ' + (CONT_PLANCHER - ecoule()) + ' s.'));
         foxyPopShow(texte(), 'teach', [{ label:'D\'accord, j\'y vais', onClick: () => fin('parti') }]);
@@ -1632,6 +1670,10 @@
         await marquerContFaite(perId);
         return true;
       }
+      /* Refermée par un autre chemin : la période ouverte RESTE ouverte. La
+         clore ici te créditerait de dix secondes de contention et te
+         donnerait un verdict sur rien du tout. */
+      if (fini === null) return true;
     }
 
     // ---- on se libère : le temps est compté ----
@@ -1650,8 +1692,8 @@
     try { await ecrireStock(CONT_ENCOURS, null); } catch(e) {}
     const l = await periodesContention();
     const per = l.find(p => p.id === ouverte.per) || null;
-    const nom = per ? per.nom : 'ta contention';
-    const cible = per ? (per.a - per.de) * 60 : 60 * 60;
+    const nom = per ? per.nom : (ouverte.nom || 'ta contention');
+    const cible = per ? (per.a - per.de) * 60 : (ouverte.cible || 60 * 60);
 
     const jour = todayStr();
     const liste = await sessionsContention(jour);
@@ -1741,6 +1783,7 @@
       const d = await new Promise(res => {
         let rendu = false;
         const fin = v => { if (rendu) return; rendu = true; try { stop(); } catch(e) {} foxyPopHide(); res(v); };
+        popAttend(fin);   // refermée autrement : on rend la main au lieu de rester pris
         const tenu = Math.floor((Date.now() - ouverte.t) / 1000);
         const n = (ouverte.equip || []).length;
         foxyPopShow((ouverte.lit ? '🌙 ' : '🎽 ') + bro(
@@ -1986,7 +2029,34 @@
   const TALK = { SECU:0, ACCES:1, PILIER:2, CHECK:3, CADRE:4, PROGRES:5, GUIDE:6, AMBIANCE:7 };
   // durée de validité en file : au-delà, la discussion n'a plus de sens et est jetée
   const TALK_TTL = [Infinity, Infinity, 45*60000, 30*60000, 60*60000, 6*3600000, 12*60000, 8*60000];
-  // au-delà de ce niveau, une seule discussion peut patienter en file
+
+  /* ============================================================
+     CE QUI EMPÊCHE LA RAFALE
+     Le carnet avait réglé l'ambiance — maintenant ou jamais, avec un
+     budget. Mais tout ce qui S'IMPOSE (pilier, contrôle, accès) et toutes
+     les RÉACTIONS continuaient de s'empiler sans limite : dix choses
+     pouvaient attendre derrière une fenêtre, et ressortaient ensuite à
+     trois secondes d'intervalle, chacune coupant la précédente. De
+     l'extérieur, ça ressemble à une machine qui se vide.
+     Trois règles, et elles tiennent toutes les trois au même principe :
+     une conversation, ça respire.
+     ============================================================ */
+  /* Pas de petit plafond sur la file : essayé, et c'est un piège. À chaque
+     minute, le chef d'orchestre propose sept ou huit discussions ; la plupart
+     n'ont rien à dire et se retirent aussitôt. Un plafond serré jetait
+     toujours la MÊME, celle du bas de l'échelle — les premiers pas de Foxy
+     n'arrivaient jamais, et rien ne le signalait. Ce qui empêche la rafale,
+     ce n'est pas la longueur de la file : c'est le silence entre deux prises
+     de parole, et le fait qu'une discussion qui n'a rien dit ne consomme pas
+     ce silence. Les deux bornes ci-dessous ne sont donc que des garde-fous de
+     mémoire, larges exprès. */
+  const TALK_FILE_MAX   = 12;
+  const TALK_REACT_MAX  = 8;
+  const TALK_ESPACE     = 50000;      // du silence entre deux prises de parole
+  const TALK_COUPE_REPOS = 4 * 60000; // on ne coupe pas deux fois coup sur coup
+  const TALK_COUPE_JEUNE = 3000;      // et jamais une phrase qui vient de commencer
+  let talkDerniereFin = 0;
+  let talkDerniereCoupe = 0;
 
   let talkActive = null;   // ticket de la discussion qui parle en ce moment
   let talkQueue  = [];     // discussions en attente
@@ -2100,26 +2170,73 @@
   // diagnostic
   function etatParole() { return JSON.parse(JSON.stringify(parole)); }
 
+  /* Mettre en file, mais avec de la tenue.
+     Un seul représentant par famille — si le même sujet revient, c'est le
+     plus récent qui compte, pas les deux — et jamais plus de trois en
+     attente. Ce qui saute est toujours le moins important : la file est
+     triée, on coupe par la queue. */
+  function talkRange(item) {
+    /* Surtout PAS de dédoublonnage par famille ici. La tentation est grande —
+       « cont », « bib », « nuit » — mais deux clés d'une même famille sont deux
+       choses différentes : « cont:rappel » ouvre la période, « cont:fin » la
+       referme. Les fondre faisait disparaître l'une des deux, et la fenêtre de
+       contention ne s'ouvrait plus toute seule. Les clés exactes, elles, sont
+       déjà écartées à l'entrée de talk(). La notion de famille ne sert qu'au
+       budget de parole, pas à la file. */
+    talkQueue.push(item);
+    /* À niveau égal, ce qui RÉPOND à un geste que tu viens de faire passe
+       devant ce que Foxy avait prévu de lui-même. C'est ce qui manquait :
+       un tag scanné se retrouvait derrière le rituel du réveil et la fin de
+       contention, et de ton côté « il ne se passe rien ». */
+    talkQueue.sort((a,b) => (a.prio - b.prio)
+                         || ((b.reaction ? 1 : 0) - (a.reaction ? 1 : 0))
+                         || (a.at - b.at));
+    /* Le plafond ne tombe QUE sur les initiatives de Foxy. Une réaction t'est
+       due : la jeter parce que trois choses plus importantes attendaient, ce
+       serait refaire la faute déjà payée une fois — le verdict d'un contrôle
+       qui disparaît sans laisser de trace. Les réactions ont leur propre date
+       de péremption, elles finiront par partir d'elles-mêmes. */
+    const reactions = talkQueue.filter(t => t.reaction).slice(0, TALK_REACT_MAX);
+    const initiatives = talkQueue.filter(t => !t.reaction).slice(0, TALK_FILE_MAX);
+    talkQueue = reactions.concat(initiatives)
+      .sort((a,b) => (a.prio - b.prio)
+                  || ((b.reaction ? 1 : 0) - (a.reaction ? 1 : 0))
+                  || (a.at - b.at));
+  }
+
+  /* Ce qu'il fallait limiter, ce n'est pas la coupure : c'est l'EXCUSE.
+     Trois tags scannés coup sur coup donnaient trois « je te coupe, désolé »
+     enchaînés — voilà ce qui donne l'impression d'une machine qui déraille.
+     Mais interdire la coupure elle-même bloquait des enchaînements
+     parfaitement légitimes : le change de nuit qui appelle le relevé du soir
+     n'est pas une interruption, c'est la suite. On coupe donc toujours quand
+     il le faut, et on ne s'excuse qu'une fois. La seule chose qu'on refuse
+     encore, c'est de couper une phrase qui vient à peine de commencer. */
+  function peutCouper(prio) {
+    if (prio <= TALK.ACCES) return true;                       // sécurité et accès passent toujours
+    if (talkActive && Date.now() - (talkActive.debut || 0) < TALK_COUPE_JEUNE) return false;
+    return true;
+  }
+
   // déclare une discussion. run = fonction async qui parle.
   function talk(prio, key, run, opt) {
     opt = opt || {};
     const k = key || ('t'+prio+':'+Math.random());
     if ((talkActive && talkActive.key === k) || talkQueue.some(t => t.key === k)) return Promise.resolve(false);
-    const item = { prio, key:k, run, at: Date.now(), dead:false, verifier: opt.verifier };
     const ambiance = prio >= AMBIANCE_DES;
     const reaction = estReaction(k, opt);
+    const item = { prio, key:k, run, at: Date.now(), dead:false, verifier: opt.verifier,
+                   reaction, coupe: !!opt.coupe };
 
     // --- ce qui s'impose : ça attend son tour, comme avant ---
     if (!ambiance) {
       if (ecranVerrouille() || (!talkActive && fenetreOuverte() && prio > TALK.CHECK)) {
-        talkQueue.push(item);
-        talkQueue.sort((a,b) => (a.prio - b.prio) || (a.at - b.at));
+        talkRange(item);
         return Promise.resolve(true);
       }
       if (!talkActive) { talkDemarre(item); return Promise.resolve(true); }
-      if (opt.coupe && prio <= talkActive.prio) { talkCoupe(item); return Promise.resolve(true); }
-      talkQueue.push(item);
-      talkQueue.sort((a,b) => (a.prio - b.prio) || (a.at - b.at));
+      if (opt.coupe && prio <= talkActive.prio && peutCouper(prio)) { talkCoupe(item); return Promise.resolve(true); }
+      talkRange(item);
       return Promise.resolve(true);
     }
 
@@ -2129,11 +2246,10 @@
        jetée. Sans ça, le verdict d'un contrôle pouvait disparaître. */
     if (reaction) {
       if (ecranVerrouille() || fenetreOuverte() || talkActive) {
-        if (opt.coupe && talkActive && prio <= talkActive.prio && !fenetreOuverte()) {
+        if (opt.coupe && talkActive && prio <= talkActive.prio && !fenetreOuverte() && peutCouper(prio)) {
           talkCoupe(item); return Promise.resolve(true);
         }
-        talkQueue.push(item);
-        talkQueue.sort((a,b) => (a.prio - b.prio) || (a.at - b.at));
+        talkRange(item);
         return Promise.resolve(true);
       }
       talkDemarre(item);
@@ -2145,7 +2261,7 @@
     if (!peutParler(k)) return Promise.resolve(false);   // budget ou sujet trop récent
     if (fenetreOuverte()) return Promise.resolve(false); // tu es occupé ailleurs
     if (talkActive) {
-      if (opt.coupe && prio <= talkActive.prio) { talkCoupe(item); return Promise.resolve(true); }
+      if (opt.coupe && prio <= talkActive.prio && peutCouper(prio)) { talkCoupe(item); return Promise.resolve(true); }
       return Promise.resolve(false);                     // on ne fait pas la queue
     }
     noterParole(k);
@@ -2158,11 +2274,15 @@
   function talkCoupe(entrant) {
     const mort = talkActive;
     if (mort) mort.dead = true;
+    const recente = Date.now() - talkDerniereCoupe < TALK_COUPE_REPOS;
+    talkDerniereCoupe = Date.now();
     talkActive = entrant;
+    const go = () => { if (talkActive === entrant) talkLance(entrant); };
+    // il vient de s'excuser de couper : il ne va pas le refaire trois fois
+    if (recente && entrant.prio !== TALK.SECU) { go(); return; }
     const phrase = (entrant.prio === TALK.SECU)
       ? talkPhraseSecu
       : talkPhrasesCoupe[Math.floor(Math.random()*talkPhrasesCoupe.length)];
-    const go = () => { if (talkActive === entrant) talkLance(entrant); };
     try {
       const p = rpgSay(phrase, entrant.prio === TALK.SECU ? 'alarmed' : 'concern', false);
       if (p && p.then) p.then(go, go); else setTimeout(go, 600);
@@ -2212,6 +2332,10 @@
     try { changeModel = null; } catch(e) {}
     try { bibEnCours = false; } catch(e) {}
     try { releveEnCours = false; } catch(e) {}
+    /* Celui-ci manquait, et c'est lui qui faisait le plus de dégâts : le
+       verrou de la contention restait pris pour toute la vie de l'appli, et
+       le tag du harnais ne déclenchait plus rien — sans le moindre message. */
+    try { contEnCours = false; } catch(e) {}
     try { tagEnAttente = null; scanEnAttente = null; } catch(e) {}
     try { if (window.HabitrainNFC && window.HabitrainNFC.isScanning()) window.HabitrainNFC.stopScan(); } catch(e) {}
     document.body.classList.remove('panneau');
@@ -2228,19 +2352,37 @@
   // Le vérificateur, quand il y en a un, décide juste avant : une discussion
   // qui n'a finalement rien à dire rend la parole sans l'avoir prise.
   function talkLance(item) {
-    const fin = () => {
+    /* Le silence ne compte pas comme une parole, et c'est le point le plus
+       important de tout ce réglage. La plupart de ces discussions n'ont rien
+       à dire la plupart du temps : elles sont proposées à chaque minute et
+       répondent « non, pas maintenant » — par leur vérificateur, ou en
+       renvoyant false. Les compter comme des prises de parole faisait tenir
+       le délai de silence à des choses qui n'avaient pas parlé, la file se
+       vidait au compte-gouttes, et ce qui avait vraiment quelque chose à dire
+       n'arrivait jamais à son tour. */
+    const fin = (aParle) => {
       item.fini = true;
+      if (aParle) talkDerniereFin = Date.now();
       if (talkActive === item) { talkActive = null; talkSuivante(); }
     };
     const go = () => {
       let p;
       try { p = item.run(); } catch(e) { p = null; }
-      if (p && p.then) p.then(fin, fin); else fin();
+      // la convention de la maison : false = « je n'avais rien à dire »
+      /* Une erreur dans une discussion la faisait mourir sans un bruit :
+         l'application semblait simplement muette, et on cherchait un défaut
+         de chef d'orchestre là où il y avait une faute de frappe. On la
+         laisse remonter dans la console avant de rendre la parole. */
+      if (p && p.then) p.then(v => fin(v !== false), (e) => {
+        try { console.warn('[Habitrain] ' + item.key + ' a échoué :', e && (e.message || e)); } catch(x) {}
+        fin(false);
+      });
+      else fin(p !== false);
     };
     if (typeof item.verifier === 'function') {
       let v;
       try { v = item.verifier(); } catch(e) { v = false; }
-      Promise.resolve(v).then(ok => { if (ok) go(); else fin(); }, () => fin());
+      Promise.resolve(v).then(ok => { if (ok) go(); else fin(false); }, () => fin(false));
       return;
     }
     go();
@@ -2248,13 +2390,43 @@
 
   // passe à la discussion suivante, en jetant celles qui ont trop attendu
   function talkSuivante() {
-    if (talkActive) return;
+    /* Une réaction qui attend derrière une discussion qui ne finit jamais —
+       un accueil resté sur une phrase, une question sans réponse — doit
+       pouvoir s'imposer. Elle laisse d'abord à Foxy le temps de finir sa
+       phrase, puis elle prend la main. La décision de couper était jusqu'ici
+       prise une seule fois, à l'arrivée : si le moment ne s'y prêtait pas,
+       elle n'était jamais reconsidérée. */
+    if (talkActive) {
+      /* On cherche la première RÉACTION en attente, pas simplement la tête de
+         file : une initiative de Foxy plus prioritaire peut très bien patienter
+         derrière, elle, alors que ton geste n'attend pas. */
+      const t = talkQueue.find(x => x.reaction && x.coupe);
+      if (t && t.prio <= talkActive.prio && !fenetreOuverte()
+          && !ecranVerrouille() && peutCouper(t.prio)) {
+        talkQueue.splice(talkQueue.indexOf(t), 1);   // celle-là, pas la tête de file
+        talkCoupe(t);
+      }
+      return;
+    }
     if (ecranVerrouille()) return;  // pas un mot avant d'être entré
     if (fenetreOuverte()) return;   // l'écran est occupé : on laisse finir
     const now = Date.now();
     talkQueue = talkQueue.filter(t => (now - t.at) < TALK_TTL[t.prio]);
-    const next = talkQueue.shift();
-    if (next) talkDemarre(next);
+    if (!talkQueue.length) return;
+    /* On cherche la première qui a le DROIT de parler maintenant, et pas
+       simplement la première de la file. Sinon une initiative en train de
+       respecter son délai de silence bloquait tout ce qui attendait derrière
+       elle — y compris une réaction qui t'était due. */
+    /* Le silence entre deux. Une file qui se vide d'un coup, c'est une
+       machine ; quelqu'un qui te parle laisse un blanc. Mais ce qui S'IMPOSE
+       ne patiente pas — sécurité, accès, piliers : une fenêtre de contention
+       annoncée avec une minute de retard, ce n'est plus la même chose. Et ce
+       qui répond à un geste que tu viens de faire ne patiente jamais. */
+    const next = talkQueue.find(t => t.reaction || t.prio < TALK.CHECK
+                                  || now - talkDerniereFin >= TALK_ESPACE);
+    if (!next) return;      // tout le monde respecte son silence : on repassera
+    talkQueue.splice(talkQueue.indexOf(next), 1);
+    talkDemarre(next);
   }
 
   // la file se vide d'elle-même dès que l'écran se libère
@@ -11864,6 +12036,26 @@
 
 
   // ==== Popup Foxy réutilisable (pause / reprise) ====
+  /* ============================================================
+     UNE FENÊTRE QUI ATTEND, ET DE QUOI LA REFERMER
+     Beaucoup de fenêtres attendent une réponse : un bouton, ou un tag.
+     Tant qu'elle n'arrive pas, la promesse reste en attente — et c'est
+     normal. Ce qui ne l'était pas : refermer la fenêtre PAR UN AUTRE
+     CHEMIN (le garde-fou anti-blocage au bout de dix minutes sans geste,
+     le bouton Debug) la faisait disparaître de l'écran sans jamais tenir
+     la promesse. Le verrou de la session restait pris, les minuteurs
+     continuaient de tourner, et plus rien ne pouvait se relancer : on
+     approchait le tag du harnais, il ne se passait plus rien du tout.
+     Désormais toute fermeture rend la main à ce qui attendait.
+     ============================================================ */
+  let popSortie = null;
+  function popAttend(fin) { popSortie = fin; }
+  function popLibere(v) {
+    const f = popSortie;
+    popSortie = null;                       // d'abord, pour que fin() ne reboucle pas
+    if (typeof f === 'function') { try { f(v === undefined ? null : v); } catch(e) {} }
+  }
+
   function foxyPopShow(text, expr, buttons, opts) {
     opts = opts || {};
     const ov = document.getElementById('foxyPop');
@@ -11916,6 +12108,7 @@
   function foxyPopHide() {
     const ov = document.getElementById('foxyPop'); if (ov) ov.style.display = 'none';
     const vieux = document.getElementById('foxyPopInput'); if (vieux) vieux.remove();
+    popLibere(null);
     setTimeout(() => allerAuChat(), 120);
   }
 
@@ -17077,6 +17270,13 @@
        · rien de tout ça             → on enchaîne sur ce que le code désigne
      ============================================================ */
   let dernierJeton = null;
+  let tagAgitDernier = { k:null, t:0 };
+  function tagAgitRebond(k) {
+    const n = Date.now();
+    if (tagAgitDernier.k === k && n - tagAgitDernier.t < TAG_REBOND) { tagAgitDernier.t = n; return true; }
+    tagAgitDernier = { k, t:n };
+    return false;
+  }
   window.__habitrainTag = async function (code, jeton) {
     if (jeton && jeton === dernierJeton) return;   // même passage de tag, relancé
     dernierJeton = jeton || null;
@@ -17084,13 +17284,28 @@
     if (!QR || !code) return;
     let kind = null;
     try { kind = await QR.parsePayloadPublic(code); } catch(e) {}
-    if (!kind) return;                              // un tag qui n'est pas le nôtre
+    if (!kind) {
+      /* Un tag qui n'est pas le nôtre. Il ne doit plus disparaître en
+         silence : c'est ce vide qui donnait l'impression que le scan
+         n'avait servi à rien — et, côté Android, qui laissait le système
+         ouvrir sa propre fiche technique hors de l'application.
+         Deux réserves : pas devant l'écran de verrouillage, et pas quand
+         une fenêtre attend déjà un tag précis (elle a son propre refus). */
+      if (ecranVerrouille() || paused) return;
+      if (ecouteValide() || scanEnAttente) return;
+      if (tagAgitRebond('?' + code)) return;
+      /* Par le chef d'orchestre, comme tout le reste. Ouvrir la fenêtre
+         directement la faisait refermer aussitôt par la discussion en cours :
+         deux fenêtres qui se marchent dessus, et le scan semblait perdu. */
+      talk(TALK.CADRE, 'tag:inconnu:' + Date.now(), () => tagInconnu(code), { coupe: true });
+      return;
+    }
     /* Un tag lu pendant une contention au lit compte comme un geste — sauf
        ceux qui servent justement à en sortir. */
     if (kind !== 'contention' && kind !== 'coucher') { try { litNoterGeste(); } catch(e) {} }
 
     // 1) une écoute de tag est ouverte (preuve, session biberon, installation)
-    if (tagEnAttente) { try { tagEnAttente(kind); } catch(e) {} return; }
+    if (ecouteValide()) { try { tagEnAttente(kind); } catch(e) {} return; }
     // 2) une lecture caméra est en cours : le tag la remplace
     if (scanEnAttente) { try { scanEnAttente(kind); } catch(e) {} return; }
 
@@ -17101,6 +17316,12 @@
     if (kind === 'unlock' && paused) { try { await exitPause(); } catch(e) {} return; }
 
     // 5) application déjà ouverte : le tag lance ce qu'il désigne
+    /* Un anti-rebond à part. Le mode lecteur d'Android relit un tag resté
+       contre le téléphone toutes les secondes ; sans ça, une seule approche
+       posait trois fois la même question. On ne peut pas réutiliser celui
+       des écoutes de preuve : il partage son état avec elles, et le
+       consommer ici les rendrait sourdes. */
+    if (tagAgitRebond(kind)) return;
     await tagAgit(kind);
   };
 
@@ -17112,6 +17333,65 @@
       const done = (r && r.value) ? JSON.parse(r.value) : {};
       return !!done[key];
     } catch(e) { return false; }
+  }
+
+  /* Une question posée en fenêtre, et refermable de l'extérieur comme toutes
+     les autres. Elle sert aux tags qui PROPOSENT au lieu d'imposer. */
+  function popQuestion(texte, expr, boutons, delai) {
+    return new Promise(res => {
+      let rendu = false, minuteur = null;
+      const fin = (v) => {
+        if (rendu) return; rendu = true;
+        if (minuteur) clearTimeout(minuteur);
+        foxyPopHide(); res(v);
+      };
+      popAttend(fin);
+      foxyPopShow(texte, expr, (boutons || []).map(b =>
+        ({ label: b.label, soft: b.soft, onClick: () => fin(b.cle) })));
+      if (delai) minuteur = setTimeout(() => fin(null), delai);
+    });
+  }
+
+  /* Un tag qui n'est pas des nôtres — ou un tag vierge, dont on ne connaît
+     que le numéro de série. Avant, l'application ne disait rien du tout et
+     Android finissait par montrer sa propre fiche technique, HORS de
+     l'application. Maintenant Foxy le dit lui-même, et propose de
+     l'enregistrer tant qu'on l'a sous la main. */
+  async function tagInconnu(brut) {
+    const court = String(brut || '').replace(/^https?:\/\/[^/]*\//, '').slice(0, 28);
+    const n = nomOu(null);
+    const k = await popQuestion(
+      '🏷 ' + bro('Tu m\'as approché quelque chose' + (n ? ', ' + esc(n) : '') + ', et je l\'ai bien senti — mais je ne le reconnais pas.',
+                  'Tag approché. Je ne le reconnais pas.')
+      + (court ? '\n\n<i>' + esc(court) + '</i>' : '')
+      + '\n\n' + bro('Ce n\'est pas un des miens, ou alors il est encore vierge. Je peux l\'adopter, si tu veux : tu me dis à quoi il sert et tu le colles où tu veux. 🦊',
+                     'Pas un des miens, ou vierge. Je peux l\'enregistrer.'),
+      'curious',
+      [ { cle:'ecrire', label:'🏷 Apprends-le' },
+        { cle:'non',    label:'Laisse tomber', soft:true } ], 45000);
+    if (k === 'ecrire') { try { await ouvrirEcritureTag(); } catch(e) {} }
+    else if (k === 'non') {
+      talk(TALK.CADRE, 'tag:oubli:' + Date.now(), async () => {
+        await imSay(bro('D\'accord, je l\'oublie. Mais je l\'aurai reconnu, lui, tu as vu ? 🦊',
+                        'Oublié.'), 800, 'calm');
+      }, { coupe: true });
+    }
+  }
+
+  /* Ouvre la section « Tags » des réglages, dépliée, et déroule jusqu'à elle.
+     C'est le même chemin que le bouton des réglages, en raccourci. */
+  async function ouvrirEcritureTag() {
+    const card = document.getElementById('settingsCard');
+    if (card) { card.style.display = ''; majPanneau(); try { renderSettings(); } catch(e) {} }
+    const sec = document.getElementById('qrCard');
+    if (sec) {
+      sec.style.display = '';
+      document.querySelectorAll('.set-nav').forEach(b => {
+        b.classList.toggle('on', b.dataset.target === 'qrCard');
+      });
+      try { await renderQrConfig(); await renderNfcWriter(); } catch(e) {}
+      sec.scrollIntoView({ behavior:'smooth', block:'start' });
+    }
   }
 
   async function tagAgit(kind) {
@@ -17126,20 +17406,93 @@
       }, { coupe: true });
       return;
     }
-    // le tag du biberon ouvre la session chronométrée — ou la referme
+    /* Le biberon. Une session ouverte, le tag la referme — c'est la preuve
+       de fin. Sinon il PROPOSE : approcher le tag de son biberon n'engage
+       à rien, et démarrer un chronomètre sans prévenir est désagréable. */
     if (kind === 'biberon') {
       talk(TALK.CHECK, 'tag:biberon:' + Date.now(), async () => {
-        try { await sessionBiberon(kind); } catch(e) {}
+        let ouverte = null;
+        try { ouverte = await lireStock(BIB_ENCOURS, null); } catch(e) {}
+        if (ouverte && ouverte.t && (Date.now() - ouverte.t) <= 4 * 3600000) {
+          try { await sessionBiberon(kind); } catch(e) {}   // il la referme
+          return;
+        }
+        const du = await biberonDu();
+        const cible = await cibleBiberonSec();
+        const n = nomOu(null);
+        const k = await popQuestion(
+          '🍼 ' + (du
+            ? bro('Tiens, justement : ' + du.n + ' t\'attend' + (n ? ', ' + esc(n) : '') + '.',
+                  du.n.charAt(0).toUpperCase() + du.n.slice(1) + ' t\'attend.')
+            : bro('Tu as ton biberon en main, et rien ne te le demandait. Ça me fait plaisir, ça. 🦊',
+                  'Biberon en main, hors créneau.'))
+          + '\n\n' + bro('On s\'y met ? Je compte ' + dureeCourte(cible) + ', et je ne te dérange pas pendant.',
+                          'On y va ? ' + dureeCourte(cible) + ' comptées.'),
+          'teach',
+          [ { cle:'oui', label:'🍼 Oui, j\'y vais' },
+            { cle:'non', label:'Pas maintenant', soft:true } ], 60000);
+        if (k === 'oui') { try { await sessionBiberon(kind); } catch(e) {} return; }
+        if (k === 'non') {
+          await imSay(bro('D\'accord. Il t\'attendra — je ne note rien. 🦊',
+                          'D\'accord. Rien de noté.'), 800, 'calm');
+        }
       }, { coupe: true });
       return;
     }
-    // le harnais ouvre la période — ou te libère
+
+    /* Le harnais. Dans sa fenêtre, le tag EST la preuve : il ouvre tout de
+       suite, c'est la règle des deux scans. En dehors, rien ne t'attendait —
+       il demande, parce qu'une période qui démarre toute seule à 11h du
+       matin n'a aucun sens. */
     if (kind === 'contention') {
       talk(TALK.PILIER, 'tag:contention:' + Date.now(), async () => {
-        try { await sessionContention(kind); } catch(e) {}
+        let ouverte = null;
+        try { ouverte = await lireStock(CONT_ENCOURS, null); } catch(e) {}
+        const dedans = await periodeContention() || await periodeFinie();
+        if ((ouverte && ouverte.t) || dedans) {
+          try { await sessionContention(kind); } catch(e) {}
+          return;
+        }
+        /* Hors fenêtre, il ne lance pas un chronomètre : il PROPOSE une vraie
+           période. Avec ce que le tirage du jour avait prévu, et une durée —
+           sans durée, il n'y a pas de cible, donc pas de verdict, et ça
+           n'aurait plus rien d'une période. Celle-ci, tu l'as demandée toi-
+           même : c'est le seul endroit où sa longueur se choisit. */
+        const hc = await heuresContention();
+        const hDeb = Math.floor(hc.debut / 60) + 'h' + (hc.debut % 60 ? String(hc.debut % 60).padStart(2,'0') : '');
+        const eq = await equipementContention();
+        const n = nomOu(null);
+        const k = await popQuestion(
+          '🎽 ' + bro('Tiens, ton harnais' + (n ? ', ' + esc(n) : '') + '. Aucune période ne t\'attend à cette heure-ci — la tienne est à ' + hDeb + '.',
+                      'Harnais vu. Hors période — la tienne est à ' + hDeb + '.')
+          + '\n\n' + bro('Mais tu l\'as en main, et ça veut sans doute dire quelque chose. Je t\'en ouvre une maintenant, si tu veux.',
+                          'Je t\'en ouvre une maintenant, si tu veux.')
+          + '\n\n' + bro('Voilà ce que tu mets :', 'Tu mets :') + '\n' + listeEquip(eq)
+          + '\n\n' + bro('Tu la veux longue comment ?', 'Durée ?'),
+          'curious',
+          [ { cle:'30',  label:'⏱ 30 minutes' },
+            { cle:'60',  label:'⏱ Une heure' },
+            { cle:'90',  label:'⏱ Une heure et demie' },
+            { cle:'non', label:'Non, pas là', soft:true } ], 90000);
+        if (k === '30' || k === '60' || k === '90') {
+          const duree = parseInt(k, 10);
+          const m0 = new Date().getHours() * 60 + new Date().getMinutes();
+          /* Une période à part entière, avec un nom et une cible — mais pas
+             de contention au lit : celle-là se décide sur ton attitude et sur
+             la fenêtre dédiée, elle ne s'invite pas dans une période que tu
+             as demandée toi-même. */
+          const libre = { id:'libre', nom:'cette période', de:m0, a:m0 + duree, toujours:true, libre:true };
+          try { await sessionContention(kind, libre); } catch(e) {}
+          return;
+        }
+        if (k === 'non') {
+          await imSay(bro('Comme tu veux. Je te le rappellerai à ' + hDeb + ', comme prévu. 🦊',
+                          'Noté. Rappel à ' + hDeb + '.'), 800, 'calm');
+        }
       }, { coupe: true });
       return;
     }
+
     if (kind === 'coucher') {
       await saveCheck('coucher_fait', 'coucher');
       talk(TALK.CADRE, 'tag:coucher:' + Date.now(), async () => {
@@ -17147,14 +17500,105 @@
       }, { coupe: true });
       return;
     }
+
+    /* La tétine. Tu l'approches de toi-même : c'est exactement ce que le
+       contrôle surprise cherche à vérifier. On le prend pour tel, on le
+       note, et on repousse d'autant le prochain contrôle — tu viens de
+       montrer qu'elle est sur toi, il serait absurde de te le redemander
+       dans dix minutes. */
+    if (kind === 'tetine') {
+      talk(TALK.CHECK, 'tag:tetine:' + Date.now(), async () => {
+        try { await window.storage.set(TET_DERNIER, JSON.stringify(Date.now())); } catch(e) {}
+        try { await saveCheck('tet_ok', 'tetine'); } catch(e) {}
+        const n = nomOu(null);
+        await foxyPopInfo('🍭 ' + bro('Elle est là, clipsée sur toi' + (n ? ', ' + esc(n) : '') + '. Tu me l\'as montrée sans que je la demande — c\'est encore mieux que le contrôle. 🦊\n\nJe ne te la redemanderai pas de sitôt, promis.',
+                                      'Tétine en place, et montrée sans qu\'on la demande. Noté. Pas de contrôle avant un moment.'),
+          'proud', 'Merci 🦊', 20000);
+      }, { coupe: true });
+      return;
+    }
+
+    /* Une étiquette de tenue. C'est le cas le plus riche : il ne se contente
+       plus de dire « vu », il regarde LAQUELLE c'est et la compare à ce qui
+       a été tiré pour aujourd'hui. */
     if (/^wb/.test(String(kind))) {
       talk(TALK.CADRE, 'tag:tenue:' + Date.now(), async () => {
-        let nom = 'cette tenue';
-        try { const it = await window.HabitrainWardrobe.findByItemId(kind); if (it) nom = it.name; } catch(e) {}
-        await imSay(bro('« ' + nom + ' » — c\'est noté, tu l\'as sur toi. 🦊', 'Tenue vue : ' + nom + '.'), 800, 'calm');
+        const v = await tenueConforme(kind);
+        const nom = (v.item && v.item.name) || 'cette pièce';
+        if (v.raison === 'inconnue') {
+          await foxyPopInfo('🏷 ' + bro('Cette étiquette est bien à moi, mais la pièce qu\'elle désigne n\'est plus dans ta garde-robe. Tu l\'as peut-être retirée.\n\nTu peux réécrire ce tag dans Réglages → Tags.',
+                                        'Étiquette connue, pièce absente de la garde-robe.'),
+            'pensive', 'D\'accord', 25000);
+          return;
+        }
+        if (v.ok) {
+          try { if (window.HabitrainWardrobe && v.item) await window.HabitrainWardrobe.logWorn(todayStr(), v.item.cat, v.item.name); } catch(e) {}
+          const m = currentMoment(new Date());
+          await imSay(bro('« ' + nom + ' » — oui. C\'est exactement ce que j\'avais tiré pour toi ce matin, et c\'est bien l\'heure de la porter. '
+                          + 'Tu l\'as sur toi, je le note. 🦊',
+                          '« ' + nom + ' » : conforme au tirage, et au moment. Noté.'), 900, 'proud');
+          return;
+        }
+        // ce n'est pas celle du moment : il le dit, sans en faire une faute
+        await imSay(bro('« ' + nom + ' », d\'accord. Ce n\'est pas celle que j\'avais prévue pour ce moment-ci'
+                        + (v.attendue ? ' — j\'avais tiré <b>' + esc(v.attendue) + '</b>' : '') + '.',
+                        '« ' + nom + ' » — pas celle prévue'
+                        + (v.attendue ? ' (' + esc(v.attendue) + ')' : '') + '.'), 900, 'pensive');
+        await imSay(bro('Je ne note rien et je ne te demande rien : tu as peut-être une très bonne raison, et ce n\'est pas à moi d\'aller voir. Je te le dis pour que tu saches que je l\'ai vu, c\'est tout. 💛',
+                        'Rien de noté, rien à justifier. Je te dis juste que je l\'ai vu.'), 850, 'calm');
       }, { coupe: true });
+      return;
     }
+
+    /* Un type connu du format mais sans conduite propre : on ne reste pas
+       muet, c'est précisément ce qui donnait l'impression d'un scan perdu. */
+    talk(TALK.CADRE, 'tag:vu:' + Date.now(), async () => {
+      const m = currentMoment(new Date());
+      await imSay(bro('Je l\'ai reconnu, celui-là — mais je n\'ai rien à en faire à ce moment-ci de ta journée. '
+                      + 'On est dans « ' + m.title.toLowerCase() + ' », et il n\'y attend rien de toi. 🦊',
+                      'Reconnu. Rien de prévu pour lui maintenant.'), 850, 'calm');
+    }, { coupe: true });
   }
+
+  /* ============================================================
+     L'ÉCOUTE DE FOND — en navigateur, c'est elle qui garde la main
+     Dans l'application installée, Android nous confie tous les tags tant
+     que l'écran est devant (mode lecteur). En PWA il n'existe rien de tel :
+     tant qu'aucune lecture n'est ouverte, c'est le système qui attrape le
+     tag, ouvre son propre afficheur, et on SORT de l'application. La seule
+     parade est de ne jamais cesser d'écouter.
+     Web NFC demande une permission, et souvent un geste pour la première
+     fois : si le démarrage immédiat est refusé, on réessaie au premier
+     contact avec l'écran, sans rien demander à personne.
+     ============================================================ */
+  let fondArme = false;
+  async function armerEcouteDeFond() {
+    const NFC = window.HabitrainNFC;
+    if (fondArme || !NFC || !NFC.supported() || !NFC.ecouteDeFond) return false;
+    try {
+      const ok = await NFC.ecouteDeFond((payload) => {
+        try { window.__habitrainTag(payload, 'fond' + Date.now()); } catch(e) {}
+      });
+      if (ok) { fondArme = true; return true; }
+    } catch(e) {}
+    return false;
+  }
+  function veillerEcouteDeFond() {
+    if (window.HabitrainNatif && window.HabitrainNatif.actif) return;  // le natif s'en charge
+    armerEcouteDeFond().then(ok => {
+      if (ok) return;
+      const relance = () => { armerEcouteDeFond().then(o => { if (o) retirer(); }); };
+      const retirer = () => ['pointerdown','touchstart','click'].forEach(e =>
+        document.removeEventListener(e, relance, true));
+      ['pointerdown','touchstart','click'].forEach(e =>
+        document.addEventListener(e, relance, true));
+    });
+    // un onglet remis au premier plan peut avoir perdu son écoute
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && !fondArme) armerEcouteDeFond();
+    });
+  }
+  setTimeout(veillerEcouteDeFond, 2500);
 
   // ==== Verrouillage par bracelet ====
   async function checkQrLock() {

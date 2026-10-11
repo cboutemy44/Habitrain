@@ -5,9 +5,20 @@
    Android/Chrome uniquement. Expose window.HabitrainNFC.
    ============================================================ */
 (function () {
+  /* UNE seule écoute, et trois consommateurs par ordre de priorité.
+     Avant, l'écoute ne vivait que pendant une preuve : le reste du temps,
+     aucun scan n'était actif, et Android reprenait la main sur le tag —
+     il ouvrait son propre afficheur et on sortait de l'application. C'est
+     la version navigateur du même défaut que le « foreground dispatch »
+     côté natif. Maintenant l'écoute tourne en permanence :
+       1. une lecture exclusive (programmation d'un tag) ;
+       2. une écoute de preuve (une fenêtre attend un tag précis) ;
+       3. l'écoute de fond, qui remet tout le reste à l'application. */
   let reader = null;
   let scanning = false;
-  let onTagCb = null;
+  let onTagCb = null;        // la preuve en cours
+  let fondCb = null;         // l'écoute de fond
+  let exclusif = null;       // une lecture qui prend tout, le temps qu'elle dure
   let abortCtl = null;
 
   function supported() {
@@ -44,10 +55,9 @@
     return '';
   }
 
-  // Démarre l'écoute NFC. cb(payload) est appelé au scan d'un tag.
-  async function startScan(cb) {
+  // allume l'écoute si elle ne tourne pas déjà
+  async function allumer() {
     if (!supported()) throw new Error('Web NFC non supporté (Android/Chrome requis)');
-    onTagCb = cb;
     if (scanning) return true;
     reader = new NDEFReader();
     abortCtl = new AbortController();
@@ -55,15 +65,40 @@
     scanning = true;
     reader.onreading = (event) => {
       const payload = readRecords(event.message);
-      if (payload && onTagCb) onTagCb(payload);
+      const uid = event.serialNumber || null;
+      /* Un tag vierge n'a pas de contenu, seulement un numéro de série. Il
+         doit quand même arriver jusqu'à l'application : c'est elle qui dira
+         « tag inconnu », et pas Android. */
+      const quoi = payload || (uid ? 'uid:' + String(uid).replace(/:/g, '').toUpperCase() : '');
+      if (!quoi) return;
+      if (exclusif) { const f = exclusif; exclusif = null; try { f({ uid, payload }); } catch (e) {} return; }
+      if (onTagCb) { try { onTagCb(quoi); } catch (e) {} return; }
+      if (fondCb)  { try { fondCb(quoi); } catch (e) {} }
     };
     reader.onreadingerror = () => { /* tag illisible : on ignore, l'utilisateur réessaie */ };
     return true;
   }
 
+  // Démarre l'écoute NFC. cb(payload) est appelé au scan d'un tag.
+  async function startScan(cb) {
+    onTagCb = cb;
+    return allumer();
+  }
+
+  /* L'écoute de fond. Elle ne s'arrête jamais d'elle-même : c'est elle qui
+     empêche un tag de repartir au système. */
+  async function ecouteDeFond(cb) {
+    fondCb = cb;
+    try { return await allumer(); } catch (e) { return false; }
+  }
+
+  /* On ne coupe QUE la preuve. Couper l'écoute elle-même rendrait de
+     nouveau la main à Android dès la fin de la première fenêtre. */
   function stopScan() {
+    onTagCb = null;
+    if (fondCb) return;                       // l'écoute de fond prend le relais
     try { if (abortCtl) abortCtl.abort(); } catch (e) {}
-    scanning = false; reader = null; abortCtl = null; onTagCb = null;
+    scanning = false; reader = null; abortCtl = null;
   }
 
   /* Écrit un identifiant Habitrain sur un tag.
@@ -94,21 +129,19 @@
      Renvoie {uid, payload} ou null si rien n'est venu dans le délai. */
   function readTag(timeoutMs) {
     if (!supported()) return Promise.reject(new Error('Web NFC non supporté (Android/Chrome requis)'));
+    /* Elle passe par l'écoute commune, en exclusivité. Ouvrir un SECOND
+       lecteur en parallèle de celui de fond faisait arriver le même tag
+       deux fois : une fois ici, une fois dans « tag inconnu ». */
     return new Promise((res, rej) => {
-      let fini = false, lecteur = null, ctl = null, minuteur = null;
-      const stop = () => { try { if (ctl) ctl.abort(); } catch(e) {} if (minuteur) clearTimeout(minuteur); };
-      try {
-        lecteur = new NDEFReader();
-        ctl = new AbortController();
-        lecteur.scan({ signal: ctl.signal }).then(() => {
-          lecteur.onreading = (ev) => {
-            if (fini) return; fini = true; stop();
-            res({ uid: ev.serialNumber || null, payload: readRecords(ev.message) || '' });
-          };
-          lecteur.onreadingerror = () => { /* tag illisible : on laisse réessayer */ };
-        }).catch(e => { if (!fini) { fini = true; stop(); rej(e); } });
-      } catch(e) { rej(e); return; }
-      minuteur = setTimeout(() => { if (!fini) { fini = true; stop(); res(null); } }, timeoutMs || 20000);
+      let fini = false, minuteur = null;
+      const fin = (v) => { if (fini) return; fini = true;
+        if (minuteur) clearTimeout(minuteur);
+        if (exclusif === pris) exclusif = null;
+        res(v); };
+      const pris = (r) => fin({ uid: r.uid, payload: r.payload || '' });
+      exclusif = pris;
+      allumer().catch(e => { if (!fini) { fini = true; if (exclusif === pris) exclusif = null; rej(e); } });
+      minuteur = setTimeout(() => fin(null), timeoutMs || 20000);
     });
   }
 
@@ -116,6 +149,7 @@
     supported,
     isScanning: () => scanning,
     startScan,
+    ecouteDeFond,
     stopScan,
     writeTag,
     readTag
