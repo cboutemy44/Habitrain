@@ -77,7 +77,7 @@
   }
   try { if (window.localStorage.getItem(BAC_CLE) && window.sessionStorage.getItem(BAC_ACTIF) !== '1') restaurerBacASable(); } catch(e) {}
 
-  const APP_VERSION = '25.2';
+  const APP_VERSION = '26.0';
   // La version s'affiche aussi sur les deux écrans de connexion : c'est là
   // qu'on arrive après une mise à jour, et c'est le seul endroit où on peut
   // vérifier d'un coup d'œil que le service worker a bien servi la nouvelle.
@@ -463,12 +463,23 @@
      liste. Avant, la validation ne connaissait que les trois piliers : un
      change fait pendant un check n'était donc jamais marqué comme fait, et
      le rappel revenait toutes les minutes. */
+  /* Trois piliers, et UN seul check à mi-parcours.
+     Il y en avait trois, et à l'usage ça faisait un contrôle toutes les deux
+     heures : le cadre finissait par ressembler à une surveillance. La règle
+     qui reste est celle qui donnait son sens aux checks — s'assurer à
+     mi-chemin que le protocole tient — appliquée là où elle sert vraiment :
+     dans le LONG trou entre deux piliers, et nulle part ailleurs.
+       · 9h → 16h : sept heures. Un check au milieu, adossé au déjeuner.
+       · 16h → 22h30 : la bascule de nuit de 19h le coupe en deux, et tout
+         change demandé après 19h devient le change de nuit avancé. Un check
+         à 19h30 ne contrôlait donc plus rien : il doublait le change du soir.
+       · 11h30 gardait un check collé au premier biberon, à la même minute,
+         pour la même chose. Le biberon suffit — et le change reste à un
+         geste si tu en as besoin. */
   const CRENEAUX = [
     { key:'c0900', m:9*60,     ctx:'pilier', label:'Change du matin' },
-    { key:'c1130', m:11*60+30, ctx:'check',  label:'Check + 1er biberon' },
     { key:'c1330', m:13*60+30, ctx:'check',  label:'Check du déjeuner' },
     { key:'c1600', m:16*60,    ctx:'pilier', label:'Change de sortie de sieste' },
-    { key:'c1930', m:19*60+30, ctx:'check',  label:'Check du dîner' },
     { key:'c2230', m:22*60+30, ctx:'pilier', label:'Change de nuit' }
   ];
   // le créneau dont la fenêtre couvre l'heure donnée (pilier : 2 h, check : 45 min)
@@ -770,10 +781,39 @@
     // rappel du créneau revenait en boucle alors que le change venait d'être fait
     if (!slotKey) { const c = creneauCourant(); if (c) slotKey = c.key; }
     if (!slotKey) { const p = pillarSlotForNow(); if (p) slotKey = p.key; }
-    // change de nuit avancé : c'est bien le pilier de 22h30 qu'on valide
+
+    /* Le change de nuit AVANCÉ — et c'est là que ça coinçait.
+       Passé 19h30, Foxy annonce qu'on ne remet pas une couche de jour pour
+       trois heures et qu'on fait le change de nuit tout de suite. Il pose
+       bien la couche et la tenue de nuit... mais il créditait le créneau en
+       cours, c'est-à-dire le check du dîner de 19h30, qui s'étend encore une
+       heure. Le pilier de 22h30, lui, restait dû : Foxy revenait le réclamer
+       le soir même, après t'avoir dit qu'il était déjà fait.
+       Le repli vers c2230 existait, mais il ne servait qu'à partir de ~20h30,
+       une fois le créneau du dîner expiré — autrement dit jamais au moment où
+       tu fais ce change. Ici, l'anticipation passe DEVANT : le change est le
+       pilier de nuit, et le créneau qu'il traverse est couvert par le même
+       geste — il n'y a qu'un seul change, il ne va pas valoir pour un seul
+       des deux. */
+    let aussi = null;
+    const nuitAnticipee = couchageNuit(new Date()) && !estNuit(new Date());
+    if (nuitAnticipee && !(await nuitDejaFaite())) {
+      /* Le créneau couvert par le même geste doit être un créneau RÉELLEMENT
+         en cours. Reprendre « activeSlotKey » aurait validé le check du
+         déjeuner parce qu'on avait ouvert sa carte le matin — un change du
+         soir ne rattrape pas une fenêtre fermée depuis six heures.
+         Depuis qu'il n'y a plus de check après 19h, ce filet ne sert plus :
+         on le garde parce que c'est exactement le défaut qu'on vient de
+         corriger, et qu'un horaire se redéplace un jour. */
+      const c = creneauCourant();
+      if (c && c.key !== 'c2230') aussi = c.key;
+      slotKey = 'c2230';
+    }
     if (!slotKey && couchageNuit(new Date())) slotKey = 'c2230';
     await markSlotDoneKey(slotKey);
+    if (aussi) await markSlotDoneKey(aussi);
     if (slotKey) dueSnooze[slotKey] = Date.now() + 3*3600000;
+    if (aussi) dueSnooze[aussi] = Date.now() + 3*3600000;
 
     // Le stock se décompte ICI, et nulle part ailleurs. Jusqu'à présent le
     // modèle était réservé à l'étape 1 du change guidé... et jamais consommé :
@@ -8198,7 +8238,8 @@
      check ne coûtait rien. Et « mictions dans la couche » reposait sur une
      case que tu cochais toi-même, alors que ton capteur peut trancher. */
 
-  const CHECKS_MIN = [11*60+30, 13*60+30, 19*60+30];
+  // un seul check, donc une seule entorse de check possible par jour
+  const CHECKS_MIN = [13*60+30];
 
   // Un check dont la fenêtre est passée sans rien faire est une entorse.
   // On vérifie a posteriori, une fois la fenêtre de 45 min refermée.
@@ -8215,7 +8256,7 @@
       const r = await window.storage.get('slotdone:'+todayStr());
       if (r && r.value) done = JSON.parse(r.value);
     } catch(e) {}
-    const CLES = { [11*60+30]:'c1130', [13*60+30]:'c1330', [19*60+30]:'c1930' };
+    const CLES = { [13*60+30]:'c1330' };
 
     let rate = null;
     for (const m of CHECKS_MIN) {
@@ -10041,6 +10082,13 @@
             ? 'Il est passé 19h30 : on ne met pas une couche de jour pour trois heures. C\'est le change de nuit, on l\'avance. Couche de nuit et tenue de nuit.'
             : 'Il est déjà tard — te remettre une couche de jour pour trois heures, ça n\'a pas de sens. On fait directement ton change de nuit : couche de nuit et tenue de nuit. 🦊',
             1000, 'explain');
+          /* On annonce ce que ça emporte. Sans cette phrase, tu voyais Foxy
+             revenir réclamer le pilier de 22h30 après t'avoir dit qu'on le
+             faisait maintenant — et tu avais raison de trouver ça incohérent. */
+          await imSay(broOn()
+            ? 'Celui-ci vaut pour le pilier de 22h30 : il sera fait, je ne repasserai pas. Tu restes en tenue de nuit jusqu\'au matin.'
+            : 'Du coup, ton pilier de 22h30 est fait d\'avance — je ne reviendrai pas te déranger ce soir. Et tu gardes ta tenue de nuit jusqu\'au matin, c\'est elle que j\'attendrai si je contrôle. 💛',
+            1000, 'calm');
         }
       } catch(e) {}
     })();
@@ -10923,13 +10971,14 @@
     { m: 8*60,      ic:'🥣', act:'Petit-déjeuner',                 det:'En grenouillère de nuit. Fibres + eau. Tu gardes la couche de nuit.' },
     { m: 9*60,      ic:'🔑', act:'Change du matin',                det:'Fenêtre selles, toilette, vérif peau, crème, couche du jour, tenue de jour.', kind:'pilier' },
     { m: 9*60+30,   ic:'🚶', act:'Bloc activité',                  det:'Le pic d\'énergie : sortie, marche, tâches, sport léger.' },
-    { m: 11*60+30,  ic:'✅', act:'Check + 1er biberon',            det:'Change si mouillé. Premier biberon de la journée.', kind:'check' },
+    { m: 11*60+30,  ic:'🍼', act:'1er biberon',                   det:'Premier biberon de la journée. Pas de contrôle ici — si tu es mouillé, tu changes, c\'est tout.' },
     { m: 12*60,     ic:'🧸', act:'Fenêtre régression douce',       det:'Harnais fleece, moment calme : lecture, musique douce.' },
     { m: 13*60+30,  ic:'🍽️', act:'Déjeuner + 2e biberon',         det:'Repas fibres, check, deuxième biberon.', kind:'check' },
     { m: 14*60+30,  ic:'😴', act:'Sieste',                        det:'Emmaillotage doux : grenouillère + couverture. Cocon.' },
     { m: 16*60,     ic:'🔑', act:'Change de sortie de sieste + 3e biberon', det:'Change OBLIGATOIRE au réveil de sieste. Troisième biberon.', kind:'pilier' },
     { m: 16*60+30,  ic:'🚶', act:'Bloc activité',                  det:'Hobby, sortie, ménage — ce que tu veux.' },
-    { m: 19*60+30,  ic:'🍽️', act:'Dîner',                        det:'Check si mouillé.', kind:'check' },
+    { m: 19*60,     ic:'🌙', act:'Bascule de nuit',               det:'À partir d\'ici, tout change demandé est le change de nuit : couche et tenue de nuit, et le pilier de 22h30 est fait d\'avance.' },
+    { m: 19*60+30,  ic:'🍽️', act:'Dîner',                        det:'Repas du soir. Rien à prouver.' },
     { m: 20*60,     ic:'🧸', act:'Grande fenêtre régression',      det:'Le cocon du soir. Allège l\'hydratation à partir de maintenant.' },
     { m: 22*60+30,  ic:'🔑', act:'Change de nuit + bilan',         det:'Fenêtre selles, toilette, vérif peau complète, crème, couche de nuit. Fais ton bilan du soir.', kind:'pilier' },
     { m: 23*60,     ic:'🌙', act:'Coucher',                       det:'Sommeil toujours libre. Bonne nuit.' }
@@ -11176,7 +11225,7 @@
      de sens — elle ne servirait que trois heures avant le change de nuit.
      Toute remise en couche passée cette heure EST le pilier de 22h30, avancé.
      Ça ne déplace pas la journée : seule la couche et la tenue basculent. */
-  const BASCULE_NUIT = 19*60 + 30; // 19h30
+  const BASCULE_NUIT = 19*60;      // 19h00
   const SIESTE = [14*60, 16*60];   // fenêtre où la tenue de repos est tolérée
 
   function estNuit(now) {
@@ -11581,13 +11630,13 @@
       { id:'reg_soir',  n:'Régression du soir', d:'20h00 · grande fenêtre', m:20*60, body:'🧸 Grande fenêtre régression — allège l\'hydratation.' }
     ]},
     { cat:'Rythme', items:[
-      { id:'check1', n:'Check + 1er biberon', d:'11h30', m:11*60+30, body:'✅ Check + 1er biberon.' },
+      { id:'check1', n:'1er biberon', d:'11h30', m:11*60+30, body:'🍼 Premier biberon de la journée.' },
       { id:'check3', n:'Change de sortie de sieste + 3e biberon', d:'16h00', m:16*60, body:'🔑 Change de sortie de sieste + 3e biberon.' }
     ]},
     { cat:'Repas', items:[
       { id:'petitdej', n:'Petit-déjeuner', d:'8h00', m:8*60, body:'🥣 Petit-déjeuner en tenue de nuit.' },
       { id:'dejeuner', n:'Déjeuner + 2e biberon', d:'13h30', m:13*60+30, body:'🍽️ Déjeuner + 2e biberon.' },
-      { id:'diner', n:'Dîner', d:'19h30', m:19*60+30, body:'🍽️ Dîner — check si mouillé.' }
+      { id:'diner', n:'Dîner', d:'19h30', m:19*60+30, body:'🍽️ Dîner. Depuis 19h, un change serait déjà le change de nuit.' }
     ]},
     { cat:'Contention', items:[
       { id:'contention', n:'Périodes de contention', d:'début et fin', m:null, body:null }
